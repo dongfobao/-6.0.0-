@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(4, 0, 1, 0),
-    prodvers=(4, 0, 1, 0),
+    filevers=(6, 0, 0, 0),
+    prodvers=(6, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -15,13 +15,13 @@ VSVersionInfo(
       StringTable(
         u'040904b0',
         [StringStruct(u'CompanyName', u'YLDQ'),
-         StringStruct(u'FileDescription', u'YLDQ Data Analysis System'),
-         StringStruct(u'FileVersion', u'4.0.1.0'),
-         StringStruct(u'InternalName', u'YLDQ数据分析'),
-         StringStruct(u'LegalCopyright', u'Copyright (C) 2024 YLDQ'),
-         StringStruct(u'OriginalFilename', u'YLDQ数据分析.exe'),
-         StringStruct(u'ProductName', u'YLDQ数据分析系统'),
-         StringStruct(u'ProductVersion', u'4.0.1.0')])
+         StringStruct(u'FileDescription', u'YLDQ 6.0 Remote Monitoring System'),
+         StringStruct(u'FileVersion', u'6.0.0.0'),
+         StringStruct(u'InternalName', u'YLDQ6.0远程监控'),
+         StringStruct(u'LegalCopyright', u'Copyright (C) 2026 YLDQ'),
+         StringStruct(u'OriginalFilename', u'YLDQ6.0远程监控系统.exe'),
+         StringStruct(u'ProductName', u'YLDQ6.0远程监控系统'),
+         StringStruct(u'ProductVersion', u'6.0.0.0')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
   ]

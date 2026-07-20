@@ -1,66 +1,46 @@
-# AGENTS.md
+# YLDQ 6.0 上位机开发约束
 
-## Project summary
+## 目标
 
-YLDQ local data analysis system. Python 3 backend (`dashboard_server.py`) + vanilla HTML/CSS/JS frontend (`web/`). Reads device CSV logs from a `实时数据/` directory and generates an interactive dashboard or a static customer report.
+本项目是 YLDQ 6.0 下位机的远程监控、控制、配置和数据记录上位机，不再承担旧版离线数据分析、参数预测、推荐或模拟工作。
 
-## Two operating modes
+## 协议约束
 
-| Mode | Entrypoint | Output |
-|------|-----------|--------|
-| Dev / interactive dashboard | `启动分析系统.bat` | Live HTTP server at `127.0.0.1:8765` |
-| Customer delivery | `python customer_delivery_entry.py` | Static `output/分析报告.html` + `.txt` + `.json` |
+- 唯一协议为 Modbus V7，协议字 `0x0700`。
+- 串口使用标准裸 Modbus RTU ADU，不使用 SLIP。
+- 支持 FC02、FC03、FC04、FC06、FC16；禁止 FC01、FC05、FC15。
+- 不兼容旧版寄存器地址，不添加旧点 ID、地址别名或迁移分支。
+- 寄存器地址只能定义在 `app/live_register_catalog.py`。
+- F32、U32、U64 均为高字在前。
+- 配置区写入必须暂存、回读，再通过 HR3 写 `0xC6A6` 提交或 `0xD15C` 放弃。
+- 即时控制只能写 HR800–807。
 
-## Key commands
+## 核心模块
 
-```bat
-:: Start dev server + open browser
-启动分析系统.bat
+- `app/dashboard_server.py`：HTTP API 和 Web 静态服务。
+- `app/live_acquisition_service.py`：串口采集、控制、配置事务和记录。
+- `app/live_modbus_client.py`：标准 Modbus RTU 主站客户端。
+- `app/live_register_catalog.py`：V7 唯一点表。
+- `app/live_polling_commands.py`：固定合法轮询块。
+- `app/modbus_v7_codec.py`：类型编解码。
+- `app/modbus_v7_config.py`：配置事务。
+- `app/monitoring_projection.py`：监控视图模型。
+- `app/web/`：无框架 HTML/CSS/JavaScript 前端。
 
-:: Generate customer report (dev machine)
-生成客户版报告.bat
+## 验证
 
-:: Package standalone EXE with PyInstaller
-打包客户交付版EXE.bat
+```powershell
+python -m compileall -q app scripts
+python -m unittest discover -s tests -v
+node --check app/web/app.js
 ```
 
-Run tests: `python -m unittest tests.test_parameter_recommendation`
+修改界面后必须实际启动 `app/dashboard_server.py`，检查 `/api/health`、`/api/bootstrap` 和浏览器控制台。
 
-No linter or typechecker is configured for this project.
+## 代码规范
 
-## Architecture
-
-- `dashboard_server.py` — core module: HTTP server, CSV parsing, analysis, config management, static report generation. Also provides `set_runtime_base()` to redirect data/web directories at runtime.
-- `customer_delivery_entry.py` — thin CLI wrapper. Calls `dashboard_server.set_runtime_base()` then `load_analysis()` + `write_customer_outputs()`.
-- `parameter_recommendation.py` — stateless recommendation engine. Takes config + history dicts, returns parameter suggestions grouped by confidence (high/medium/low).
-- `web/` — static frontend. Contains duplicate CSV parsing regex in `app.js` that **must stay in sync** with `dashboard_server.py` regexes.
-
-## Data directory contract
-
-The `实时数据/` directory (gitignored) must contain:
-- `config.json`
-- `data_0/log_YYYY_MM_DD.csv` (minute-level environment logs)
-- `breath_data/breath_YYYY_MM_DD.csv` (second-level breath logs)
-- `run/*.csv` (operational run logs)
-
-The Python backend reads these with hardcoded regexes (`ENV_ROW_RE`, `RUN_ROW_RE`). The frontend `app.js` duplicates these regexes for local import. If you change the CSV format or regex in one place, you must change both.
-
-## Dependencies
-
-Zero third-party Python packages at runtime (stdlib only). PyInstaller is only needed for EXE packaging (`customer_delivery.spec`).
-
-## Analysis caching
-
-`load_analysis()` caches results by file signature (path + size + mtime). Pass `force_refresh=True` to bypass. The cache is also invalidated when config is saved via `POST /api/config`.
-
-## EXE packaging
-
-`customer_delivery.spec` bundles `web/` as PyInstaller data. The frozen executable looks for `实时数据/` next to the EXE. When running frozen (`sys.frozen`), `_MEIPASS` is used as the asset base for `web/`.
-
-## Frontend: static vs. live report
-
-`web/app.js` checks `window.__STATIC_REPORT__`. If truthy, it uses `window.__ANALYSIS__` (embedded JSON). Otherwise it fetches `/api/analysis` from the dev server. The static report HTML is assembled by `build_standalone_report_html()` which inlines CSS + JS + payload into a single file.
-
-## Config write behavior
-
-`POST /api/config` validates and merges the incoming partial config against the current `config.json` on disk (not the in-memory analysis). It writes the merged result back to `config.json` and clears the analysis cache. The schema is defined in `CONFIG_SCHEMA` in `dashboard_server.py`.
+- 对话、说明、文档和注释使用中文。
+- Python 使用类型标注，公共数据返回 JSON 可序列化对象。
+- 设备写操作必须校验点表权限和地址区域，不开放任意自动 Raw Hex 写入。
+- 多设备共享串口时保持顺序访问，不并发抢占同一串口。
+- 不恢复预测推荐、参数模拟、客户静态报告或旧 CSV 分析代码。

@@ -34,7 +34,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="YLDQ分析系统",
+    name="YLDQ6.0远程监控系统",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -49,5 +49,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name="YLDQ分析系统工作台",
+    name="YLDQ6.0远程监控系统",
 )

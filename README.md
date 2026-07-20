@@ -1,45 +1,57 @@
-# YLDQ 本地数据分析系统
+# YLDQ 6.0 远程监控系统
 
-这是本地运行的数据分析系统，用于读取设备导出的环境日志、呼吸日志、运行日志和配置文件，生成可交互的趋势图、诊断结果、参数建议和参数模拟结果。
+面向 YLDQ 6.0 下位机的实时监控、可视化、控制和配置软件。通信协议固定为 Modbus V7（协议字 `0x0700`），串口直接传输标准 Modbus RTU ADU，不使用 SLIP，也不兼容旧版寄存器地址。
 
-## 快速使用
+## 功能
 
-双击根目录脚本：
+- 三路温湿度、主显示温湿度、压力、流量与呼吸状态
+- HTC1、HTC2、防冻加热、告警输出状态和累计动作次数
+- 上阀、左阀、右阀的位置、执行状态、故障、电流和控制来源
+- 多通道实时曲线、告警事件、Modbus 请求与异常诊断
+- 运行区安全控制（HR800–807）
+- 配置暂存、回读、提交和放弃事务
+- 多设备串口配置、采集会话记录和数据导出
 
-- `启动分析系统.bat`：启动本地网页系统，默认地址 `http://127.0.0.1:8765`
-- `打包分析系统EXE.bat`：打包完整分析系统工作台
-- `生成客户版报告.bat`：生成客户交付静态报告
-- `打包客户交付版EXE.bat`：打包客户交付版程序
+预测推荐、参数模拟、旧版离线客户报告和旧 Modbus 线圈模型均已删除。
 
-## 目录结构
+## 启动测试
 
-- `app/`：主程序源码，包含 Python 后端和 `web/` 前端资源。
-- `scripts/`：启动、打包、生成报告等辅助脚本。
-- `packaging/`：PyInstaller 打包配置。
-- `tests/`：单元测试。
-- `docs/`：设计文档和客户说明。
-- `release/`：已打包的可执行程序和压缩包。
-- `实时采集会话/`：现场采集会话数据。
+双击：
 
-## 数据目录约定
-
-运行源码版本时，程序默认读取根目录下的 `实时数据/`：
-
-- `实时数据/config.json`
-- `实时数据/data_0/log_*.csv`
-- `实时数据/breath_data/breath_*.csv`
-- `实时数据/run/*.csv`
-
-打包后的 EXE 会读取 EXE 同级目录下的 `实时数据/`。
-
-## 开发验证
-
-```bat
-python -m py_compile app\*.py
-python -m unittest discover tests
-node --check app\web\app.js
+```text
+启动源码调试.bat
 ```
 
-`build/` 和 `dist/` 是 PyInstaller 中间目录，可以删除；`release/` 是交付输出，应保留。
+或在 PowerShell 中运行：
 
-# -6.0.0-
+```powershell
+cd "E:\project\5.0.0\xishiqi5.0.0\docs\新程序运行数据分析系统"
+& "C:\Users\MyPC\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" app\dashboard_server.py
+```
+
+浏览器访问：`http://127.0.0.1:8765`
+
+进入“设备管理”配置串口和从站地址，选择设备后点击“启动监控”。首次收到数据时会校验 FC04 地址 0 必须等于 `0x0700`。
+
+## 自动测试
+
+```powershell
+& "C:\Users\MyPC\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -m unittest discover -s tests -v
+& "C:\Users\MyPC\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" --check app\web\app.js
+```
+
+## 打包
+
+运行 `scripts\打包分析系统EXE.bat`。输出位于 `release\YLDQ6.0远程监控系统`。
+
+## 结构
+
+- `app/dashboard_server.py`：监控 HTTP API 和静态资源服务
+- `app/live_acquisition_service.py`：多设备采集、控制、配置与记录
+- `app/live_register_catalog.py`：Modbus V7 唯一点表
+- `app/modbus_v7_codec.py`：寄存器类型编解码
+- `app/modbus_v7_config.py`：配置事务
+- `app/monitoring_projection.py`：界面监控模型
+- `app/web/`：最终监控界面
+- `tests/`：协议、采集、投影和记录测试
+- `docs/design/`：架构设计

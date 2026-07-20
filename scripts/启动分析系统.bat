@@ -13,7 +13,7 @@ if %errorlevel%==0 (
 )
 
 set "APP_URL=http://127.0.0.1:8765"
-set "API_URL=http://127.0.0.1:8765/api/analysis"
+set "API_URL=http://127.0.0.1:8765/api/health"
 set "PROJECT_DIR=%~dp0"
 
 rem 1) Stop old project-related processes so every launch starts clean.
@@ -29,7 +29,7 @@ if %errorlevel%==0 (
 if %errorlevel%==3 goto port_conflict
 
 rem 3) Start current source service in its own process.
-start "YLDQ Analytics Service" /min %PYTHON_EXE% %PYTHON_ARGS% app\dashboard_server.py
+start "YLDQ 6.0 Monitor Service" /min %PYTHON_EXE% %PYTHON_ARGS% app\dashboard_server.py
 
 set "READY="
 for /l %%i in (1,1,20) do (

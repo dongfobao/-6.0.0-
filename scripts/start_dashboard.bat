@@ -26,7 +26,7 @@ if not defined PYTHON_EXE (
 )
 
 set "APP_URL=http://127.0.0.1:8765"
-set "API_URL=http://127.0.0.1:8765/api/analysis"
+set "API_URL=http://127.0.0.1:8765/api/health"
 set "PROJECT_DIR=%cd%"
 
 rem Stop old YLDQ/source processes from this project.
@@ -41,7 +41,7 @@ if %errorlevel%==0 (
 )
 if %errorlevel%==3 goto port_conflict
 
-start "YLDQ Analytics Source Service" /min "%PYTHON_EXE%" %PYTHON_ARGS% app\dashboard_server.py
+start "YLDQ 6.0 Monitor Source Service" /min "%PYTHON_EXE%" %PYTHON_ARGS% app\dashboard_server.py
 
 set "READY="
 for /l %%i in (1,1,20) do (

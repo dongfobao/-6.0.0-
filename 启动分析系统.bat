@@ -2,10 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$release=Join-Path (Get-Location) 'release'; $exe=Get-ChildItem -LiteralPath $release -Recurse -Filter 'YLDQ*.exe' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($exe) { Start-Process -FilePath $exe.FullName; exit 0 } else { exit 2 }"
-if %errorlevel%==0 exit /b 0
+set "MONITOR_EXE=release\YLDQ6.0远程监控系统\YLDQ6.0远程监控系统.exe"
+if exist "%MONITOR_EXE%" (
+  start "" "%MONITOR_EXE%"
+  exit /b 0
+)
 
-echo Packaged EXE was not found under release.
-echo Please package the analysis system first, or run start source debug.
-pause
-exit /b 1
+call "%~dp0启动源码调试.bat"

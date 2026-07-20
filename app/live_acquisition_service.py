@@ -4,6 +4,7 @@ import threading
 import time
 from collections import deque
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 import re
@@ -14,6 +15,21 @@ from live_polling_commands import build_default_polling_commands, normalize_poll
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog
 from live_session_recorder import LiveSessionRecorder
 from modbus_v7_codec import decode_words, encode_words
+from modbus_v7_config import V7ConfigTransaction
+
+
+HISTORY_POINT_IDS = (
+    "input_register.temperature",
+    "input_register.humidity",
+    "input_register.sensor_1.temperature",
+    "input_register.sensor_1.humidity",
+    "input_register.sensor_2.temperature",
+    "input_register.sensor_2.humidity",
+    "input_register.sensor_3.temperature",
+    "input_register.sensor_3.humidity",
+    "input_register.pressure",
+    "input_register.flow",
+)
 
 
 def _now() -> datetime:
@@ -41,10 +57,7 @@ def _parse_iso(value: Any) -> datetime | None:
 
 
 def _device_port_key(device: dict[str, Any]) -> str:
-    transport = str(device.get("transport") or "rtu").lower()
     address = str(device.get("address") or "").strip()
-    if transport == "tcp":
-        return f"tcp://{address}"
     return address.upper()
 
 
@@ -66,7 +79,10 @@ class LiveAcquisitionService:
         return {
             "config": deepcopy(device),
             "values": {},
-            "history": {key: deque(maxlen=3600) for key in ("temperature", "humidity", "pressure", "flow")},
+            "history": {
+                point_id.removeprefix("input_register."): deque(maxlen=7200)
+                for point_id in HISTORY_POINT_IDS
+            },
             "events": deque(maxlen=240),
             "traffic": deque(maxlen=1000),
             "recorder": None,
@@ -399,10 +415,83 @@ class LiveAcquisitionService:
         with self._lock:
             builder = (lambda item: self._catalog_item_with_value(item, values)) if include_cached else self._catalog_item_without_value
             return {
-                "control": [builder(item) for item in self._catalog if item.get("group") == "control"],
-                "config": [builder(item) for item in self._catalog if item.get("group") == "config"],
-                "task": [builder(item) for item in self._catalog if item.get("group") == "task"],
+                "config": [
+                    builder(item) for item in self._catalog
+                    if item.get("area") == "holding_register" and 100 <= int(item.get("address") or 0) < 800
+                ],
+                "runtime": [builder(item) for item in self._catalog if item.get("group") == "runtime_control"],
+                "diagnostic": [builder(item) for item in self._catalog if item.get("group") == "diagnostic"],
+                "transaction": [builder(item) for item in self._catalog if item.get("group") == "config_transaction"],
             }
+
+    def write_runtime_control(self, device_id: str, item_id: str, value: Any) -> dict[str, Any]:
+        item = self._catalog_by_id.get(item_id)
+        if item is None or item.get("group") != "runtime_control":
+            raise ValueError(f"不是即时运行控制点: {item_id}")
+        return self.write_value(device_id, item_id, value)
+
+    def stage_config_value(self, device_id: str, item_id: str, value: Any) -> dict[str, Any]:
+        with self._lock:
+            item = dict(self._catalog_by_id.get(item_id) or {})
+            slot = self._get_device_slot(device_id)
+        if not item:
+            raise KeyError(f"未知配置点: {item_id}")
+        address = int(item.get("address") or 0)
+        if item.get("area") != "holding_register" or not 100 <= address < 800 or not item.get("writable"):
+            raise ValueError(f"不是可暂存配置点: {item_id}")
+        if slot is None or not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        with self._io_lock:
+            self._close_runner_client_for_port(port_key)
+            client = self._open_manual_client(device, device_id)
+            try:
+                words = V7ConfigTransaction(client).stage_value(item, value)
+                decoded = decode_words(words, str(item["dataType"]))
+            finally:
+                client.close()
+
+        timestamp = _iso(_now())
+        with self._lock:
+            slot["values"][item_id] = {"value": decoded, "ts": timestamp}
+            slot["event_seq"] += 1
+            slot["events"].append({
+                "id": slot["event_seq"], "ts": timestamp, "type": "config_staged",
+                "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
+            })
+        return {"ok": True, "itemId": item_id, "value": decoded, "words": words, "staged": True}
+
+    def execute_config_transaction(self, device_id: str, action: str) -> dict[str, Any]:
+        slot = self._get_device_slot_required(device_id)
+        if not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+        normalized_action = str(action or "").strip().lower()
+        if normalized_action not in {"commit", "discard"}:
+            raise ValueError(f"不支持的配置事务动作: {action}")
+
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        with self._io_lock:
+            self._close_runner_client_for_port(port_key)
+            client = self._open_manual_client(device, device_id)
+            try:
+                transaction = V7ConfigTransaction(client)
+                status = transaction.commit() if normalized_action == "commit" else transaction.discard()
+            finally:
+                client.close()
+
+        payload = asdict(status)
+        timestamp = _iso(_now())
+        with self._lock:
+            slot["event_seq"] += 1
+            slot["events"].append({
+                "id": slot["event_seq"], "ts": timestamp, "type": f"config_{normalized_action}",
+                "message": "配置已提交" if normalized_action == "commit" else "配置暂存已放弃",
+                "details": payload,
+            })
+        return {"ok": True, "action": normalized_action, "status": payload}
 
     def _close_runner_client_for_port(self, port_key: str) -> None:
         client = None
@@ -1024,19 +1113,6 @@ class LiveAcquisitionService:
         if isinstance(decoded, float):
             decoded = round(decoded, 4)
         return words, decoded
-
-    @staticmethod
-    def _parse_bool_value(value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        text = str(value).strip().lower()
-        if text in {"1", "true", "on", "yes"}:
-            return True
-        if text in {"0", "false", "off", "no"}:
-            return False
-        raise ValueError(f"invalid boolean value: {value}")
 
     @staticmethod
     def _decode_value(item: dict[str, Any], raw_values: list[Any]) -> Any:

@@ -111,9 +111,9 @@ REGISTER_CATALOG.extend([
     _point("input_register.output.htc2_state", "加热通道2状态", "input_register", 301, "enum16", group="output", poll_group="fast", enum_values={0: "关", 1: "开", 2: "闪烁", 3: "切换中"}),
     _point("input_register.output.antifreeze_state", "防冻加热状态", "input_register", 302, "enum16", group="output", poll_group="fast", enum_values={0: "关", 1: "开", 2: "闪烁", 3: "切换中"}),
     _point("input_register.output.alarm_state", "告警输出状态", "input_register", 303, "enum16", group="output", poll_group="fast", enum_values={0: "关", 1: "开", 2: "闪烁", 3: "切换中"}),
-    _point("input_register.output.htc1_mode", "加热通道1模式", "input_register", 304, "enum16", group="output", poll_group="fast"),
-    _point("input_register.output.htc2_mode", "加热通道2模式", "input_register", 305, "enum16", group="output", poll_group="fast"),
-    _point("input_register.output.antifreeze_mode", "防冻加热模式", "input_register", 306, "enum16", group="output", poll_group="fast"),
+    _point("input_register.output.htc1_mode", "加热通道1模式", "input_register", 304, "enum16", group="output", poll_group="fast", enum_values={0: "自动", 1: "强制关", 2: "强制开"}),
+    _point("input_register.output.htc2_mode", "加热通道2模式", "input_register", 305, "enum16", group="output", poll_group="fast", enum_values={0: "自动", 1: "强制关", 2: "强制开"}),
+    _point("input_register.output.antifreeze_mode", "防冻加热模式", "input_register", 306, "enum16", group="output", poll_group="fast", enum_values={0: "自动", 1: "强制关", 2: "强制开"}),
     _point("input_register.output.remote_heat", "远程加热使能", "input_register", 307, "bool", group="output", poll_group="fast"),
     _point("input_register.output.htc1_open_count", "加热通道1累计打开次数", "input_register", 308, "uint64", group="runtime", unit="次", poll_group="standard"),
     _point("input_register.output.htc2_open_count", "加热通道2累计打开次数", "input_register", 312, "uint64", group="runtime", unit="次", poll_group="standard"),
@@ -271,6 +271,29 @@ for channel_index, base_address in enumerate((808, 811, 814), start=1):
         _holding(f"holding.runtime.valve_{channel_index}_diagnostic_source", f"阀门{channel_index}生效控制源", base_address + 1, group="diagnostic", writable=False),
         _holding(f"holding.runtime.valve_{channel_index}_remote_seconds", f"阀门{channel_index}远程命令剩余时间", base_address + 2, group="diagnostic", unit="s", writable=False),
     ])
+
+
+_ENUM_MAPS: dict[str, dict[int, str]] = {
+    **{f"holding.sensor_{channel}.bus": {0: "UART", 1: "I2C"} for channel in range(1, 4)},
+    "holding.valve_route.mode": {0: "自动", 1: "固定", 2: "轮换"},
+    "holding.valve_route.initial_route": {0: "上阀", 1: "左阀", 2: "右阀"},
+    "holding.communication.parity": {0: "无校验", 1: "奇校验", 2: "偶校验"},
+}
+for point_id in (
+    "holding.control.temperature_humidity_fault_action",
+    "holding.control.pressure_fault_action",
+    "holding.control.flow_fault_action",
+):
+    _ENUM_MAPS[point_id] = {0: "保持", 1: "关闭相关输出", 2: "进入安全状态"}
+for point_id in (
+    "holding.output.htc1_power_on_state", "holding.output.htc2_power_on_state",
+    "holding.output.antifreeze_power_on_state", "holding.output.alarm_power_on_state",
+):
+    _ENUM_MAPS[point_id] = {0: "上电关闭", 1: "上电开启"}
+for item in REGISTER_CATALOG:
+    enum_values = _ENUM_MAPS.get(str(item["id"]))
+    if enum_values:
+        item["enumValues"] = enum_values
 
 
 def _validate_catalog() -> None:

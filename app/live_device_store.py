@@ -138,8 +138,7 @@ def _normalize_device_payload(
     device["name"] = str(device.get("name") or DEFAULT_DEVICE_PROFILE["name"]).strip() or DEFAULT_DEVICE_PROFILE["name"]
     device["deviceType"] = str(device.get("deviceType") or DEFAULT_DEVICE_PROFILE["deviceType"]).strip() or DEFAULT_DEVICE_PROFILE["deviceType"]
     device["protocolType"] = "modbus"
-    transport = str(device.get("transport") or "rtu").lower()
-    device["transport"] = "tcp" if transport == "tcp" else "rtu"
+    device["transport"] = "rtu"
     device["address"] = str(device.get("address") or DEFAULT_DEVICE_PROFILE["address"]).strip() or DEFAULT_DEVICE_PROFILE["address"]
     device["slaveId"] = max(1, min(247, int(device.get("slaveId") or 1)))
     device["baudrate"] = int(device.get("baudrate") or DEFAULT_DEVICE_PROFILE["baudrate"])

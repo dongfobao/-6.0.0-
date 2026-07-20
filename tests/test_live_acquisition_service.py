@@ -110,6 +110,59 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(calls[0][0], 103)
         self.assertEqual(calls[0][1], [0x4148, 0x0000])
 
+    def test_stage_config_value_uses_v7_transaction_and_readback(self):
+        class ConfigClient:
+            def __init__(self):
+                self.words = {}
+
+            def write_single_register(self, address, value):
+                self.words[address] = value
+
+            def write_multiple_registers(self, address, values):
+                for offset, value in enumerate(values):
+                    self.words[address + offset] = value
+
+            def read_holding_registers(self, address, count):
+                return [self.words.get(address + offset, 0) for offset in range(count)]
+
+            def close(self):
+                pass
+
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+        client = ConfigClient()
+
+        with patch.object(service, "_open_manual_client", return_value=client):
+            result = service.stage_config_value("dev-a", "holding.sensor_1.temperature_offset", 12.5)
+
+        self.assertTrue(result["staged"])
+        self.assertEqual(result["words"], [0x4148, 0x0000])
+        self.assertEqual(client.words[103], 0x4148)
+
+    def test_execute_config_commit_uses_firmware_magic(self):
+        calls = []
+
+        class ConfigClient:
+            def write_single_register(self, address, value):
+                calls.append((address, value))
+
+            def read_holding_registers(self, address, count):
+                return [0x0700, 0, 11, 0xC6A6, 0]
+
+            def close(self):
+                pass
+
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+
+        with patch.object(service, "_open_manual_client", return_value=ConfigClient()):
+            result = service.execute_config_transaction("dev-a", "commit")
+
+        self.assertEqual(calls, [(3, 0xC6A6)])
+        self.assertEqual(result["status"]["generation"], 11)
+
     def test_write_value_opens_target_device_client_instead_of_reusing_port_runner(self):
         calls = []
 
@@ -182,10 +235,6 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             def close(self):
                 self._serial = None
                 calls.append(("target-close", self.device["id"]))
-
-            def read_coils(self, address, count):
-                calls.append(("target-read-coils", self.device["id"], self.device["slaveId"], address, count))
-                return [False] * count
 
             def read_holding_registers(self, address, count):
                 calls.append(("target-read-holding", self.device["id"], self.device["slaveId"], address, count))
@@ -483,9 +532,15 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             "value": 25.5,
             "epoch": time.time(),
         })
+        service._device_slots["dev-a"]["history"]["sensor_3.humidity"].append({
+            "ts": "2025-01-01 12:00:00",
+            "value": 63.5,
+            "epoch": time.time(),
+        })
 
         series = service.get_series(device_id="dev-a", window_ms=60000)
         self.assertGreater(len(series["rows"]), 0)
+        self.assertEqual(series["byMetric"]["sensor_3.humidity"][0]["value"], 63.5)
 
         series_none = service.get_series(device_id="dev-b")
         self.assertEqual(series_none["rows"], [])

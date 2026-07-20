@@ -65,6 +65,7 @@ class LiveDeviceStoreTests(unittest.TestCase):
             self.assertEqual(imported["selectedDeviceId"], "dev-2")
             self.assertEqual(imported["devices"][0]["slaveId"], 6)
             self.assertEqual(imported["devices"][0]["pollingSettings"]["fast"]["intervalMs"], 100)
+            self.assertEqual(imported["devices"][0]["transport"], "rtu")
             saved = json.loads(store_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["selectedDeviceId"], "dev-2")
 
