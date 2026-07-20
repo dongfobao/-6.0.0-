@@ -40,6 +40,34 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         with self.assertRaises(ModbusError):
             service._apply_block_values("dev-a", slot, block, [0x0600] + [0] * 9)
 
+    def test_invalid_sensor_frame_keeps_last_valid_value_out_of_history(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        command = next(
+            item for item in service._default_polling_commands
+            if item["address"] == 100 and item["functionCode"] == 4
+        )
+        block = service._command_to_block(command)
+        valid_words = [
+            0x41CF, 0x3333, 0x4226, 0xCCCD, 0x0000, 0x0001,
+            0x41CD, 0x999A, 0x422A, 0xCCCD, 0x0000, 0x0001,
+            0x41E3, 0x446D, 0x4208, 0x79E0, 0x0000, 0x0001,
+        ]
+        transient_failure_words = [
+            0x0000, 0x0000, 0x0000, 0x0000, 0x0001, 0x0001,
+            0x41CD, 0x999A, 0x422A, 0xCCCD, 0x0000, 0x0001,
+            0x41E3, 0x469D, 0x4208, 0x5BCC, 0x0000, 0x0001,
+        ]
+
+        service._apply_block_values("dev-a", slot, block, valid_words)
+        service._apply_block_values("dev-a", slot, block, transient_failure_words)
+
+        history = slot["history"]["sensor_1.humidity"]
+        self.assertEqual(len(history), 1)
+        self.assertAlmostEqual(history[0]["value"], 41.7, places=1)
+        self.assertAlmostEqual(slot["values"]["input_register.sensor_1.humidity"]["value"], 41.7, places=1)
+        self.assertEqual(slot["values"]["input_register.sensor_1.status"]["value"], 1)
+
     def test_restarting_waits_for_old_poller_before_new_session(self):
         service = SlowStopService()
         service.start_all([{"id": "old", "name": "old", "address": "COM1", "enabled": True}])

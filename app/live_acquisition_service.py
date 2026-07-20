@@ -1142,8 +1142,18 @@ class LiveAcquisitionService:
                         f"Modbus 协议版本不匹配: 期望 0x{PROTOCOL_VERSION_WORD:04X}, 实际 0x{int(decoded or 0):04X}"
                     )
             updates.append((item["id"], decoded))
+        update_values = dict(updates)
+        invalid_measurements: set[str] = set()
+        for sensor_index in range(1, 4):
+            prefix = f"input_register.sensor_{sensor_index}"
+            status = update_values.get(f"{prefix}.status")
+            read_ok = update_values.get(f"{prefix}.read_ok")
+            if status is not None and (int(status) != 0 or not bool(read_ok)):
+                invalid_measurements.update({f"{prefix}.temperature", f"{prefix}.humidity"})
         with self._lock:
             for item_id, decoded in updates:
+                if item_id in invalid_measurements:
+                    continue
                 slot["values"][item_id] = {"value": decoded, "ts": timestamp}
                 if item_id.startswith("input_register."):
                     metric_key = item_id.split(".", 1)[1]
