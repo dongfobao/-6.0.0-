@@ -38,15 +38,13 @@
       <div id="notice" class="notice hidden"></div>
 
       <section class="page overview-page active" data-page-view="overview">
-        <div class="overview-heading"><div class="overview-heading-copy"><span>OPERATING OVERVIEW</span><h2>设备运行总览</h2><p>三路温湿度、输出和阀门状态，异常信息优先呈现。</p></div><div class="overview-heading-side"><div class="overview-heading-note"><i></i><span>实时采集</span></div><div class="overview-quick-metrics"><article class="quick-metric pressure"><span>压力</span><div><strong id="pressureValue">--</strong><em>kPa</em></div><small id="pressureStatus">状态 --</small></article><article class="quick-metric flow"><span>流量</span><div><strong id="flowValue">--</strong><em>L/min</em></div><small id="breathState">呼吸状态 --</small></article></div></div></div>
-
         <section class="overview-section environment-section">
           <div class="overview-section-head"><div><small>ENVIRONMENT</small><h3>三路温湿度</h3></div><p>每路独立显示测量值、通信质量和传感器状态</p></div>
           <div id="sensorCards" class="sensor-grid"></div>
         </section>
 
         <div class="overview-operations-grid">
-          <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div id="outputCards" class="output-grid"></div></section>
+          <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div class="overview-quick-metrics"><article class="quick-metric pressure"><span>压力</span><div><strong id="pressureValue">--</strong><em>kPa</em></div><small id="pressureStatus">状态 --</small></article><article class="quick-metric flow"><span>流量</span><div><strong id="flowValue">--</strong><em>L/min</em></div><small id="breathState">呼吸状态 --</small></article></div><div id="outputCards" class="output-grid"></div></section>
           <section class="overview-section valve-section"><div class="overview-section-head"><div><small>VALVES</small><h3>阀门工作状态</h3></div><p>位置、执行状态、故障和控制来源</p></div><div id="valveCards" class="valve-list"></div></section>
         </div>
       </section>
