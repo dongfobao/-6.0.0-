@@ -81,7 +81,8 @@
           <div><h3>V7 配置事务</h3><p>修改先暂存并回读；确认后提交，或放弃全部暂存。</p></div>
           <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="discardConfigBtn" class="button secondary">放弃暂存</button><button id="commitConfigBtn" class="button primary">提交配置</button></div>
         </div>
-        <div class="filter-row"><input id="configSearch" type="search" placeholder="搜索参数名称或点 ID"><select id="configGroup"></select></div>
+        <div class="filter-row"><input id="configSearch" type="search" placeholder="搜索参数名称或点 ID"></div>
+        <div id="configModules" class="config-modules" aria-label="参数模块"></div>
         <div class="panel table-panel"><table><thead><tr><th>参数</th><th>地址</th><th>当前值</th><th>单位</th><th>操作</th></tr></thead><tbody id="configTableBody"></tbody></table></div>
       </section>
 

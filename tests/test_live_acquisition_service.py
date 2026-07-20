@@ -172,6 +172,22 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(result["words"], [0x4148, 0x0000])
         self.assertEqual(client.words[103], 0x4148)
 
+    def test_legacy_seconds_time_registers_are_presented_and_written_in_declared_units(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["values"]["holding.flow.no_change_alarm_days"] = {"value": 86400, "ts": "2026-07-20 12:00:00"}
+        slot["values"]["holding.control.close_delay_hours"] = {"value": 28800, "ts": "2026-07-20 12:00:00"}
+        item = service._catalog_by_id["holding.flow.no_change_alarm_days"]
+
+        row = service._catalog_item_with_value(item, slot["values"])
+        wire_item, wire_value = service._config_value_to_wire(item, 2, slot["values"])
+
+        self.assertEqual(row["currentValue"], 1)
+        self.assertEqual(row["wireValue"], 86400)
+        self.assertTrue(row["legacySecondsWireFormat"])
+        self.assertEqual(wire_value, 172800)
+        self.assertNotIn("maximum", wire_item)
+
     def test_execute_config_commit_uses_firmware_magic(self):
         calls = []
 

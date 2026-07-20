@@ -29,6 +29,14 @@ HISTORY_POINT_IDS = (
     "input_register.flow",
 )
 
+_TIME_CONFIG_UNIT_SECONDS = {
+    "holding.flow.no_change_alarm_days": 86400,
+    "holding.valve_route.restart_protection_days": 86400,
+    "holding.valve_route.force_close_days": 86400,
+    "holding.valve_route.cooling_delay_hours": 3600,
+    "holding.control.close_delay_hours": 3600,
+}
+
 
 def _now() -> datetime:
     return datetime.now()
@@ -457,13 +465,14 @@ class LiveAcquisitionService:
             raise ValueError("设备采集会话尚未运行")
 
         device = deepcopy(slot["config"])
+        V7ConfigTransaction._validate_value_range(item, value)
+        wire_item, wire_value = self._config_value_to_wire(item, value, slot["values"])
         port_key = _device_port_key(device)
-        runtime_feedback: dict[str, Any] = {}
         with self._io_lock:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                words = V7ConfigTransaction(client).stage_value(item, value)
+                words = V7ConfigTransaction(client).stage_value(wire_item, wire_value)
                 decoded = decode_words(words, str(item["dataType"]))
             finally:
                 client.close()
@@ -476,7 +485,7 @@ class LiveAcquisitionService:
                 "id": slot["event_seq"], "ts": timestamp, "type": "config_staged",
                 "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
             })
-        return {"ok": True, "itemId": item_id, "value": decoded, "words": words, "staged": True}
+        return {"ok": True, "itemId": item_id, "value": self._config_value_from_wire(item, decoded, slot["values"]), "wireValue": decoded, "words": words, "staged": True}
 
     def execute_config_transaction(self, device_id: str, action: str) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
@@ -671,10 +680,47 @@ class LiveAcquisitionService:
     def _catalog_item_with_value(self, item: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         row = dict(item)
         cached = values.get(item["id"]) or {}
-        row["currentValue"] = cached.get("value")
-        row["value"] = cached.get("value")
+        wire_value = cached.get("value")
+        row["currentValue"] = self._config_value_from_wire(item, wire_value, values)
+        row["value"] = row["currentValue"]
+        if item.get("id") in _TIME_CONFIG_UNIT_SECONDS:
+            row["wireValue"] = wire_value
+            row["legacySecondsWireFormat"] = self._uses_legacy_seconds_wire_format(values)
         row["updatedAt"] = cached.get("ts")
         return row
+
+    def _uses_legacy_seconds_wire_format(self, values: dict[str, Any]) -> bool:
+        """旧下位机虽标记为 V7，但仍以秒传输天/小时配置；以量程外原始值识别。"""
+        for point_id in _TIME_CONFIG_UNIT_SECONDS:
+            raw_value = (values.get(point_id) or {}).get("value")
+            maximum = (self._catalog_by_id.get(point_id) or {}).get("maximum")
+            if raw_value is None or maximum is None:
+                continue
+            try:
+                if int(raw_value) > int(maximum):
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
+    def _config_value_from_wire(self, item: dict[str, Any], wire_value: Any, values: dict[str, Any]) -> Any:
+        scale = _TIME_CONFIG_UNIT_SECONDS.get(str(item.get("id") or ""))
+        if wire_value is None or scale is None or not self._uses_legacy_seconds_wire_format(values):
+            return wire_value
+        converted = int(wire_value) / scale
+        return int(converted) if converted.is_integer() else converted
+
+    def _config_value_to_wire(self, item: dict[str, Any], value: Any, values: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+        scale = _TIME_CONFIG_UNIT_SECONDS.get(str(item.get("id") or ""))
+        if scale is None or not self._uses_legacy_seconds_wire_format(values):
+            return item, value
+        number = float(value)
+        if not number.is_integer():
+            raise ValueError(f"{item.get('name', item.get('id'))} 只能填写整数{item.get('unit', '')}")
+        wire_item = dict(item)
+        wire_item.pop("minimum", None)
+        wire_item.pop("maximum", None)
+        return wire_item, int(number) * scale
 
     @staticmethod
     def _catalog_item_without_value(item: dict[str, Any]) -> dict[str, Any]:
@@ -1282,3 +1328,10 @@ _SERVICE_SINGLETON = LiveAcquisitionService()
 
 def get_live_acquisition_service() -> LiveAcquisitionService:
     return _SERVICE_SINGLETON
+_TIME_CONFIG_UNIT_SECONDS = {
+    "holding.flow.no_change_alarm_days": 86400,
+    "holding.valve_route.restart_protection_days": 86400,
+    "holding.valve_route.force_close_days": 86400,
+    "holding.valve_route.cooling_delay_hours": 3600,
+    "holding.control.close_delay_hours": 3600,
+}

@@ -6,6 +6,7 @@ const state = {
   series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [],
   activePage: "overview", refreshTimer: null, trendTimer: null,
   trendQuery: {windowMs: 900000, start: null, end: null}, trendViewport: null, trendDrag: null,
+  configModule: "sensor_1",
 };
 
 const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
@@ -128,10 +129,21 @@ async function writeControl(itemId,value){
 }
 
 async function refreshParameters(){if(!state.selectedDeviceId){state.parameters=[];return renderConfigTable();}try{const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(state.selectedDeviceId)}`);state.parameters=payload.config||[];renderConfigGroups();renderConfigTable();}catch(error){showNotice(error.message,"error");}}
-function configSection(item){const parts=String(item.id||"").split(".");return parts[1]||"other";}
-function renderConfigGroups(){const current=$("configGroup").value;const groups=[...new Set(state.parameters.map(configSection))];$("configGroup").innerHTML='<option value="">全部分组</option>'+groups.map(g=>`<option value="${esc(g)}" ${g===current?"selected":""}>${esc(g)}</option>`).join("");}
+const CONFIG_MODULES=[
+  ["sensor_1","温湿度 1"],["sensor_2","温湿度 2"],["sensor_3","温湿度 3"],
+  ["pressure","压力传感器"],["flow","流量与呼吸"],["valve","阀门与路由"],
+  ["control","控制策略"],["output","输出设置"],["alarm","告警设置"],
+  ["logging","数据记录"],["communication","通信设置"],
+];
+function configSection(item){const section=String(item.id||"").split(".")[1]||"other";return section.startsWith("valve_")?"valve":section;}
+function renderConfigGroups(){
+  const available=new Set(state.parameters.map(configSection));
+  if(state.configModule&& !available.has(state.configModule))state.configModule="";
+  $("configModules").innerHTML=`<button class="config-module ${state.configModule===""?"selected":""}" data-config-module="">全部</button>`+CONFIG_MODULES.filter(([key])=>available.has(key)).map(([key,label])=>`<button class="config-module ${state.configModule===key?"selected":""}" data-config-module="${key}">${label}</button>`).join("");
+  document.querySelectorAll("[data-config-module]").forEach(button=>button.addEventListener("click",()=>{state.configModule=button.dataset.configModule;renderConfigGroups();renderConfigTable();}));
+}
 function renderConfigTable(){
-  const search=$("configSearch")?.value.trim().toLowerCase()||"", group=$("configGroup")?.value||"";const rows=state.parameters.filter(item=>(!group||configSection(item)===group)&&(!search||`${item.name} ${item.id}`.toLowerCase().includes(search)));
+  const search=$("configSearch")?.value.trim().toLowerCase()||"", group=state.configModule;const rows=state.parameters.filter(item=>(!group||configSection(item)===group)&&(!search||`${item.name} ${item.id}`.toLowerCase().includes(search)));
   $("configTableBody").innerHTML=rows.length?rows.map(item=>`<tr><td><strong>${esc(item.name)}</strong><br><code>${esc(item.id)}</code>${configRange(item)}</td><td>HR ${item.address}${item.addressEnd!==item.address?`–${item.addressEnd}`:""}</td><td>${configEditor(item)}</td><td>${esc(item.unit||"")}</td><td><button class="button small secondary" data-stage-item="${esc(item.id)}">暂存</button></td></tr>`).join(""):'<tr><td colspan="5" class="empty-state">没有匹配参数</td></tr>';
   document.querySelectorAll("[data-stage-item]").forEach(btn=>btn.addEventListener("click",()=>stageConfig(btn.dataset.stageItem)));
 }
@@ -169,7 +181,7 @@ function bind(){
   $("refreshTrendBtn").addEventListener("click",refreshSeries);$("trendWindow").addEventListener("change",()=>applyTrendWindow(Number($("trendWindow").value)));document.querySelectorAll("[data-trend-window]").forEach(button=>button.addEventListener("click",()=>applyTrendWindow(Number(button.dataset.trendWindow))));$("applyTrendRangeBtn").addEventListener("click",()=>{const start=$("trendStart").value,end=$("trendEnd").value;if(!start||!end)return showNotice("请选择完整的开始和结束时间","error");if(new Date(end)<new Date(start))return showNotice("结束时间不能早于开始时间","error");state.trendQuery={windowMs:state.trendQuery.windowMs,start:start.replace("T"," "),end:end.replace("T"," ")};state.trendViewport=null;refreshSeries();});$("zoomInTrendBtn").addEventListener("click",()=>zoomTrend(.65));$("zoomOutTrendBtn").addEventListener("click",()=>zoomTrend(1.55));$("resetTrendZoomBtn").addEventListener("click",()=>{state.trendViewport=null;drawTrendChart();});$("exportTrendBtn").addEventListener("click",exportTrendCsv);setupTrendInteractions();window.addEventListener("resize",()=>state.activePage==="trends"&&drawTrendChart());
   $("resetAllValvesBtn").addEventListener("click",()=>writeControl("holding.runtime.reset",7));
   $("refreshConfigBtn").addEventListener("click",async()=>{try{await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});await refreshParameters();showNotice("参数读取完成");}catch(e){showNotice(e.message,"error");}});
-  $("commitConfigBtn").addEventListener("click",()=>configAction("commit"));$("discardConfigBtn").addEventListener("click",()=>configAction("discard"));$("configSearch").addEventListener("input",renderConfigTable);$("configGroup").addEventListener("change",renderConfigTable);
+  $("commitConfigBtn").addEventListener("click",()=>configAction("commit"));$("discardConfigBtn").addEventListener("click",()=>configAction("discard"));$("configSearch").addEventListener("input",renderConfigTable);
   $("refreshEventsBtn").addEventListener("click",refreshEvents);$("refreshTrafficBtn").addEventListener("click",refreshTraffic);$("clearTrafficBtn").addEventListener("click",async()=>{await api("/api/traffic/clear",{method:"POST",body:"{}"});await refreshTraffic();});
   $("addDeviceBtn").addEventListener("click",()=>openDeviceDialog());$("closeDeviceDialog").addEventListener("click",()=>$("deviceDialog").close());$("cancelDeviceBtn").addEventListener("click",()=>$("deviceDialog").close());$("deviceForm").addEventListener("submit",saveDevice);
   setInterval(()=>$("clockText").textContent=new Date().toLocaleString("zh-CN",{hour12:false}),1000);

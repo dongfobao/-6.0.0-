@@ -77,6 +77,13 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.assertNotIn("holding.valve_route.force_close_seconds", self.by_id)
         self.assertEqual(self.by_id["holding.communication.baudrate"]["addressEnd"], 702)
 
+    def test_v7_configuration_time_units_follow_firmware_register_contract(self) -> None:
+        self.assertEqual(self.by_id["holding.flow.no_change_alarm_days"]["unit"], "\u5929")
+        self.assertEqual(self.by_id["holding.control.close_delay_hours"]["unit"], "\u5c0f\u65f6")
+        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["unit"], "\u5c0f\u65f6")
+        self.assertEqual(self.by_id["holding.logging.sensor_interval"]["unit"], "\u79d2")
+        self.assertEqual(self.by_id["holding.logging.retention_days"]["unit"], "\u5929")
+
 
 if __name__ == "__main__":
     unittest.main()

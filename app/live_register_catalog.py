@@ -224,8 +224,8 @@ _CONFIG_BLOCKS: tuple[tuple[int, str, str, tuple[tuple[int, str, str, str, str],
         (6, "fault_output_enabled", "故障输出", "bool", ""),
     )),
     (600, "logging", "记录", (
-        (0, "sensor_enabled", "传感器日志使能", "bool", ""), (1, "sensor_interval", "传感器记录周期", "uint32", "s"),
-        (3, "breath_enabled", "呼吸记录使能", "bool", ""), (4, "retention_days", "保留天数", "uint16", "d"),
+        (0, "sensor_enabled", "传感器日志使能", "bool", ""), (1, "sensor_interval", "传感器记录周期", "uint32", "秒"),
+        (3, "breath_enabled", "呼吸记录使能", "bool", ""), (4, "retention_days", "保留天数", "uint16", "天"),
     )),
     (700, "communication", "通信", (
         (0, "slave_id", "从站地址", "uint16", ""), (1, "baudrate", "波特率", "uint32", "bit/s"),
