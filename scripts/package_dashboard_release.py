@@ -53,9 +53,13 @@ def copy_release_tree() -> Path:
 def main() -> int:
     run_packaging()
     release_dir = copy_release_tree()
+    archive_path = Path(shutil.make_archive(
+        str(release_dir), "zip", root_dir=release_dir.parent, base_dir=release_dir.name
+    ))
     print()
     print("Package completed:")
     print(release_dir)
+    print(archive_path)
     return 0
 
 
