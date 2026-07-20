@@ -17,6 +17,11 @@ const TREND_META = {
 };
 const activeTrends = new Set(["sensor_1.temperature","sensor_2.temperature","sensor_3.temperature","sensor_1.humidity","sensor_2.humidity","sensor_3.humidity"]);
 const pendingControls = new Set();
+const HEAT_MODE_CONTROLS = [
+  {itemId:"holding.runtime.htc1_mode",outputKey:"htc1"},
+  {itemId:"holding.runtime.htc2_mode",outputKey:"htc2"},
+  {itemId:"holding.runtime.antifreeze_mode",outputKey:"antifreeze"},
+];
 
 async function api(path, options={}) {
   const response = await fetch(path, {headers:{"Content-Type":"application/json",...(options.headers||{})},...options});
@@ -67,7 +72,7 @@ function renderSnapshot(){
   $("sensorCards").innerHTML=s.environmentChannels.map(ch=>`<article class="sensor-card ${ch.readOk.value?"is-online":"is-offline"}"><div class="sensor-card-head"><div><span class="sensor-index">0${ch.channel}</span><h3>温湿度 ${ch.channel}</h3></div><span class="quality-dot ${ch.readOk.value?"ok":""}">${ch.readOk.value?"通信正常":"无有效数据"}</span></div><div class="sensor-values"><div class="sensor-value temperature"><span>温度</span><div><strong>${fmt(ch.temperature.value)}</strong><small>°C</small></div></div><div class="sensor-value humidity"><span>湿度</span><div><strong>${fmt(ch.humidity.value)}</strong><small>%RH</small></div></div></div><div class="sensor-card-foot"><span>传感器状态</span><strong>${esc(fmt(ch.status.displayValue))}</strong></div></article>`).join("");
   $("outputCards").innerHTML=s.outputs.map(out=>`<article class="output-card ${Number(out.state.value)===1?"is-active":""}"><div class="output-card-head"><div class="output-icon">${out.key==="alarm"?"A":"H"}</div><strong>${esc(out.name)}</strong><span class="state-pill ${Number(out.state.value)===1?"on":""}">${esc(fmt(out.state.displayValue))}</span></div><div class="output-details"><div><span>控制模式</span><strong>${esc(fmt(out.mode?.displayValue))}</strong></div><div><span>累计动作</span><strong>${out.count?`${esc(fmt(out.count.value,0))} 次`:"—"}</strong></div></div></article>`).join("");
   $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card ${Number(v.faultReason.value)?"has-fault":""}"><div class="valve-card-head"><div><span class="valve-index">V${v.channel}</span><strong>${esc(v.name)}</strong></div><span class="state-pill ${Number(v.faultReason.value)?"fault":"ok"}">${Number(v.faultReason.value)?`故障 ${fmt(v.faultReason.value,0)}`:"正常"}</span></div><div class="valve-metrics"><div><span>显示状态</span><strong>${esc(fmt(v.displayState.displayValue))}</strong></div><div><span>执行状态</span><strong>${esc(fmt(v.actuatorState.displayValue))}</strong></div><div><span>位置</span><strong>${fmt(v.position.value,0)}%</strong></div><div><span>电流</span><strong>${fmt(v.currentAdc.value,0)}</strong></div></div><div class="valve-card-foot"><span>控制来源</span><strong>${esc(fmt(v.controlSource.displayValue))}</strong></div></article>`).join("");
-  renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();
+  renderHeatModeControls(s.outputs || []);renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();
 }
 
 const TREND_PRESETS={environment:["sensor_1.temperature","sensor_1.humidity","sensor_2.temperature","sensor_2.humidity","sensor_3.temperature","sensor_3.humidity"],process:["pressure","flow"],all:Object.keys(TREND_META)};
@@ -123,9 +128,18 @@ function bindTrendWorkbench(){
   document.addEventListener("keydown",event=>{if(state.activePage!=="trends"||["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName))return;if(event.key==="r"||event.key==="R")resetTrendViewport();else if(event.key==="+")zoomTrend(.75);else if(event.key==="-")zoomTrend(1.3);else if(event.key==="ArrowLeft")panTrend(-.15);else if(event.key==="ArrowRight")panTrend(.15);else if((event.key==="f"||event.key==="F"))toggleTrendFullscreen();else if(event.key==="Escape"&&$("trendChartPanel").classList.contains("chart-fullscreen"))toggleTrendFullscreen();});
 }
 
+function renderHeatModeControls(outputs=[]){
+  const byKey=new Map(outputs.map(output=>[output.key,output]));
+  HEAT_MODE_CONTROLS.forEach(({itemId,outputKey})=>{
+    const host=document.querySelector(`[data-mode-control="${itemId}"]`);if(!host)return;
+    const current=Number(byKey.get(outputKey)?.mode?.value),pending=pendingControls.has(itemId);
+    host.innerHTML=[[0,"自动"],[1,"强制关"],[2,"强制开"]].map(([value,label])=>`<button type="button" data-heat-mode data-control="${itemId}" data-value="${value}" class="${current===value?"selected":""}" aria-pressed="${current===value}" ${pending?"disabled":""}>${label}</button>`).join("");
+    host.querySelectorAll("[data-control]").forEach(button=>button.addEventListener("click",()=>writeControl(itemId,Number(button.dataset.value))));
+  });
+}
 function buildControlButtons(){
-  document.querySelectorAll("[data-mode-control]").forEach(host=>{host.innerHTML=[[0,"自动"],[1,"强制关"],[2,"强制开"]].map(([v,t])=>`<button data-control="${host.dataset.modeControl}" data-value="${v}">${t}</button>`).join("");});
-  document.querySelectorAll("[data-control]").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
+  renderHeatModeControls();
+  document.querySelectorAll("[data-control]:not([data-heat-mode])").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
   renderValveControls();
 }
 function renderValveControls(runtimeValves=[]){
@@ -141,14 +155,15 @@ function renderValveControls(runtimeValves=[]){
 async function writeControl(itemId,value){
   if(!state.selectedDeviceId)return showNotice("请先选择设备","error");
   if(pendingControls.has(itemId))return;
-  pendingControls.add(itemId);renderValveControls(state.snapshot?.runtimeValves||[]);
+  pendingControls.add(itemId);renderHeatModeControls(state.snapshot?.outputs||[]);renderValveControls(state.snapshot?.runtimeValves||[]);
   try{
     const result=await api("/api/control/write",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value})});
     const confirmed=result.runtimeFeedback?.[itemId];
-    showNotice(confirmed===undefined?"命令已发送":`命令已确认：${result.item?.displayValue||value}`);
+    const confirmedLabel=result.item?.enumValues?.[confirmed] ?? result.item?.enumValues?.[String(confirmed)] ?? confirmed;
+    showNotice(confirmed===undefined?"命令已发送":`命令已确认：${confirmedLabel}`);
     await refreshLive();
   }catch(error){showNotice(error.message,"error");}
-  finally{pendingControls.delete(itemId);renderValveControls(state.snapshot?.runtimeValves||[]);}
+  finally{pendingControls.delete(itemId);renderHeatModeControls(state.snapshot?.outputs||[]);renderValveControls(state.snapshot?.runtimeValves||[]);}
 }
 
 async function refreshParameters(){if(!state.selectedDeviceId){state.parameters=[];return renderConfigTable();}try{const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(state.selectedDeviceId)}`);state.parameters=payload.config||[];renderConfigGroups();renderConfigTable();}catch(error){showNotice(error.message,"error");}}

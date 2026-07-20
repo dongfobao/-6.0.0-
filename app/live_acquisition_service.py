@@ -611,7 +611,18 @@ class LiveAcquisitionService:
                         client.write_multiple_registers(address, encoded_words)
                 else:
                     raise ValueError(f"unsupported writable area: {area}")
-                if re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
+                if item_id in {
+                    "holding.runtime.htc1_mode",
+                    "holding.runtime.htc2_mode",
+                    "holding.runtime.antifreeze_mode",
+                }:
+                    runtime_feedback = self._read_runtime_heat_feedback(client)
+                    confirmed = runtime_feedback.get(item_id)
+                    if confirmed is None or int(confirmed) != int(decoded_value):
+                        raise ModbusError(
+                            f"加热模式回读不一致：写入 {decoded_value}，回读 {confirmed}"
+                        )
+                elif re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
                     runtime_feedback = self._read_runtime_valve_feedback(client)
                     confirmed = runtime_feedback.get(item_id)
                     if confirmed is None or int(confirmed) != int(decoded_value):
@@ -642,6 +653,18 @@ class LiveAcquisitionService:
                 "runtimeFeedback": runtime_feedback,
                 "session": deepcopy(slot["state"]),
             }
+
+    @staticmethod
+    def _read_runtime_heat_feedback(client: LiveModbusClient) -> dict[str, Any]:
+        words = client.read_input_registers(304, 3)
+        return {
+            "holding.runtime.htc1_mode": words[0],
+            "holding.runtime.htc2_mode": words[1],
+            "holding.runtime.antifreeze_mode": words[2],
+            "input_register.output.htc1_mode": words[0],
+            "input_register.output.htc2_mode": words[1],
+            "input_register.output.antifreeze_mode": words[2],
+        }
 
     def _read_runtime_valve_feedback(self, client: LiveModbusClient) -> dict[str, Any]:
         start_address = 804

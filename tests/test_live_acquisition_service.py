@@ -142,6 +142,64 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertIn(("write", 804, 2), calls)
         self.assertIn(("read", 804, 13), calls)
 
+    def test_heat_mode_is_read_back_before_success(self):
+        calls = []
+
+        class FakeClient:
+            def __init__(self, device):
+                self.device = device
+
+            def open(self):
+                pass
+
+            def close(self):
+                pass
+
+            def write_single_register(self, address, value):
+                calls.append(("write", address, value))
+
+            def read_input_registers(self, address, count):
+                calls.append(("read", address, count))
+                return [2, 0, 1]
+
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        service._device_slots["dev-a"]["state"]["running"] = True
+
+        with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
+            payload = service.write_value("dev-a", "holding.runtime.htc1_mode", 2)
+
+        self.assertEqual(payload["runtimeFeedback"]["holding.runtime.htc1_mode"], 2)
+        self.assertEqual(payload["runtimeFeedback"]["input_register.output.htc1_mode"], 2)
+        self.assertEqual(payload["item"]["enumValues"][2], "强制开")
+        self.assertIn(("write", 801, 2), calls)
+        self.assertIn(("read", 304, 3), calls)
+
+    def test_heat_mode_rejects_mismatched_readback(self):
+        class FakeClient:
+            def __init__(self, device):
+                self.device = device
+
+            def open(self):
+                pass
+
+            def close(self):
+                pass
+
+            def write_single_register(self, address, value):
+                pass
+
+            def read_input_registers(self, address, count):
+                return [0, 0, 0]
+
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        service._device_slots["dev-a"]["state"]["running"] = True
+
+        with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
+            with self.assertRaisesRegex(ModbusError, "加热模式回读不一致"):
+                service.write_value("dev-a", "holding.runtime.htc1_mode", 2)
+
     def test_write_value_uses_multi_register_write_for_float32(self):
         calls = []
 

@@ -273,6 +273,9 @@ for channel_index, base_address in enumerate((808, 811, 814), start=1):
 
 
 _ENUM_MAPS: dict[str, dict[int, str]] = {
+    "holding.runtime.htc1_mode": {0: "自动", 1: "强制关", 2: "强制开"},
+    "holding.runtime.htc2_mode": {0: "自动", 1: "强制关", 2: "强制开"},
+    "holding.runtime.antifreeze_mode": {0: "自动", 1: "强制关", 2: "强制开"},
     **{f"holding.sensor_{channel}.bus": {0: "UART", 1: "I2C"} for channel in range(1, 4)},
     "holding.valve_route.mode": {0: "自动", 1: "固定", 2: "轮换"},
     "holding.valve_route.initial_route": {0: "上阀", 1: "左阀", 2: "右阀"},
