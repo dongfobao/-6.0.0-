@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YLDQ Layout Options</title>
+  <style>
+    :root {
+      --bg: #f3eee6;
+      --paper: #fffaf4;
+      --line: rgba(25, 33, 38, 0.12);
+      --text: #1d252b;
+      --muted: #64717a;
+      --accent: #b45130;
+      --teal: #2a6d74;
+      --shadow: 0 16px 48px rgba(54, 35, 20, 0.12);
+      --radius: 20px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(42,109,116,0.10), transparent 28%),
+        radial-gradient(circle at top right, rgba(180,81,48,0.10), transparent 24%),
+        linear-gradient(135deg, #f8f3eb 0%, #ebdfcf 100%);
+    }
+    .shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .hero {
+      background: rgba(255,250,244,0.92);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin-bottom: 22px;
+    }
+    .hero h1 {
+      margin: 10px 0 12px;
+      font-size: 38px;
+      font-family: Georgia, "Songti SC", serif;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.8;
+      max-width: 900px;
+    }
+    .eyebrow {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: rgba(255,251,247,0.94);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-head {
+      padding: 18px 18px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .tag {
+      display: inline-flex;
+      min-width: 32px;
+      justify-content: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--text);
+      color: #fffaf4;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .card h2 {
+      margin: 12px 0 8px;
+      font-size: 24px;
+      font-family: Georgia, "Songti SC", serif;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .mock {
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(250,246,240,0.85), rgba(244,236,225,0.90));
+    }
+    .screen {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      background: #fffdf9;
+    }
+    .screen-top {
+      height: 44px;
+      display: grid;
+      align-items: center;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: #f6eee3;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .screen-body {
+      display: grid;
+      min-height: 390px;
+    }
+    .layout-a {
+      grid-template-columns: 86px 1fr;
+    }
+    .layout-b {
+      grid-template-columns: 220px 1fr;
+    }
+    .layout-c {
+      grid-template-rows: 64px 1fr;
+    }
+    .rail, .sidebar, .topmode {
+      background: #1f2a30;
+      color: rgba(255,250,244,0.9);
+      padding: 14px;
+      font-size: 12px;
+    }
+    .rail div, .sidebar div, .topmode span {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.08);
+    }
+    .content {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+      background: #fffdf9;
+    }
+    .mode-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .mode-bar span {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(42,109,116,0.12);
+      font-size: 12px;
+    }
+    .hero-panel {
+      padding: 18px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(180,81,48,0.10), rgba(42,109,116,0.10));
+      border: 1px solid var(--line);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .stat, .table, .chart {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.86);
+      padding: 12px;
+      min-height: 74px;
+    }
+    .chart {
+      min-height: 126px;
+      background:
+        linear-gradient(180deg, rgba(42,109,116,0.10), rgba(42,109,116,0.02)),
+        rgba(255,255,255,0.86);
+    }
+    .table {
+      min-height: 126px;
+    }
+    .pros {
+      padding: 16px 18px 18px;
+      border-top: 1px solid var(--line);
+      background: rgba(255,255,255,0.84);
+    }
+    .pros h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+    .pros ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    @media (max-width: 1180px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <p class="eyebrow">Mixed Mode Product Direction</p>
+      <h1>3 套混合型分析软件主结构草图</h1>
+      <p>你选的是“混合型”，所以核心问题不是功能够不够，而是客户、售后、工程三类人如何共用一套软件而不互相打架。下面三套方案重点对比：模式切换放哪、首页是什么、技术信息藏多深。</p>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-head">
+          <span class="tag">A</span>
+          <h2>左侧导航 + 顶部模式切换</h2>
+          <p>最像专业工业软件。主导航固定，角色模式放在顶部，全局生效。</p>
+        </div>
+        <div class="mock">
+          <div class="screen">
+            <div class="screen-top">客户模式 / 售后模式 / 工程模式</div>
+            <div class="screen-body layout-a">
+              <div class="rail">
+                <div>首页</div>
+                <div>曲线</div>
+                <div>环境</div>
+                <div>呼吸</div>
+                <div>日志</div>
+                <div>配置</div>
+              </div>
+              <div class="content">
+                <div class="hero-panel">首页只显示与当前模式相关的卡片、图和操作入口</div>
+                <div class="stats">
+                  <div class="stat">运行天数</div>
+                  <div class="stat">异常次数</div>
+                  <div class="stat">最新告警</div>
+                </div>
+                <div class="chart">主趋势图</div>
+                <div class="table">事件摘要 / 待处理事项</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pros">
+          <h3>特点</h3>
+          <ul>
+            <li>一套导航，结构最稳，专业感最强</li>
+            <li>切换模式后，首页和内容深度整体变化</li>
+            <li>适合长期作为正式交付软件</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="tag">B</span>
+          <h2>左侧直接按角色分区</h2>
+          <p>把“客户中心 / 售后中心 / 工程中心”直接做成三大入口，各自再进子页。</p>
+        </div>
+        <div class="mock">
+          <div class="screen">
+            <div class="screen-top">同一软件，不同角色直接进不同工作区</div>
+            <div class="screen-body layout-b">
+              <div class="sidebar">
+                <div>客户中心</div>
+                <div>售后中心</div>
+                <div>工程中心</div>
+                <div>数据导入</div>
+              </div>
+              <div class="content">
+                <div class="mode-bar">
+                  <span>客户摘要</span>
+                  <span>报告导出</span>
+                  <span>趋势查看</span>
+                </div>
+                <div class="hero-panel">进入不同中心后，整个工作区逻辑都是独立的</div>
+                <div class="chart">客户中心主图 / 售后中心事件图 / 工程中心原始图</div>
+                <div class="table">每个中心有自己的工具栏和表格</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pros">
+          <h3>特点</h3>
+          <ul>
+            <li>最容易让不同角色快速理解自己该点哪里</li>
+            <li>模块隔离最强，不容易互相干扰</li>
+            <li>但会让软件显得像三个子系统拼在一起</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="tag">C</span>
+          <h2>首页选工作模式 + 标签页工作区</h2>
+          <p>先在首页选当前任务，再进入上方标签页工作区。更现代，但偏平台化。</p>
+        </div>
+        <div class="mock">
+          <div class="screen">
+            <div class="screen-body layout-c">
+              <div class="topmode">
+                <span>查看报告</span>
+                <span>排查故障</span>
+                <span>工程调试</span>
+              </div>
+              <div class="content">
+                <div class="hero-panel">首页像任务入口，点完进入不同工作流</div>
+                <div class="mode-bar">
+                  <span>总览</span>
+                  <span>总体曲线</span>
+                  <span>环境图层</span>
+                  <span>日志中心</span>
+                </div>
+                <div class="stats">
+                  <div class="stat">模式概览</div>
+                  <div class="stat">推荐动作</div>
+                  <div class="stat">最近导入</div>
+                </div>
+                <div class="chart">标签页图表区</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pros">
+          <h3>特点</h3>
+          <ul>
+            <li>视觉上更轻，更像现代分析平台</li>
+            <li>首页可以做得很强，适合引导操作</li>
+            <li>但工业软件的“稳定控制台感”会弱一点</li>
+          </ul>
+        </div>
+      </article>
+    </section>
+  </div>
+</body>
+</html>

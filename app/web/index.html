@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>意联电气吸湿器数据分析系统</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="desktop-shell">
+    <aside class="sidebar" id="appSidebar" aria-hidden="true">
+
+      <div class="side-group">
+        <div class="side-title">数据入口</div>
+        <button class="nav-tab active" data-view-target="import">导入数据</button>
+        <button class="nav-tab" data-view-target="live">实时采集</button>
+      </div>
+
+      <div class="side-group">
+        <div class="side-title">总览</div>
+        <button class="nav-tab" data-view-target="overview">首页概览</button>
+        <button class="nav-tab" data-view-target="master">总体曲线</button>
+      </div>
+
+      <div class="side-group">
+        <div class="side-title">专题分析</div>
+        <button class="nav-tab" data-view-target="environment">环境数据</button>
+        <button class="nav-tab" data-view-target="breath">呼吸事件</button>
+        <button class="nav-tab" data-view-target="run">运行日志</button>
+        <button class="nav-tab" data-view-target="simulation">参数模拟</button>
+      </div>
+
+      <div class="side-group">
+        <div class="side-title">配置</div>
+        <button class="nav-tab" data-view-target="config-snapshot">配置快照</button>
+        <button class="nav-tab" data-view-target="config-editor">参数编辑</button>
+      </div>
+
+      <div class="side-group side-tools">
+        <div class="side-title">工具</div>
+        <button id="refreshBtn" class="side-btn">刷新当前数据</button>
+        <button id="exportJsonBtn" class="side-btn">导出 JSON</button>
+        <button id="exportSummaryBtn" class="side-btn">导出简报</button>
+        <button id="printBtn" class="side-btn">打印页面</button>
+      </div>
+    </aside>
+    <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="关闭导航"></button>
+
+    <div class="workspace">
+      <div class="workspace-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-controls="appSidebar" aria-expanded="false" title="打开导航">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <span class="topbar-title">意联电气吸湿器数据分析系统</span>
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText" class="topbar-status">初始化中...</span>
+        <span style="flex:1"></span>
+        <button id="appExitBtn" class="danger" title="停止所有服务并退出程序">退出程序</button>
+      </div>
+      <main class="workspace-main">
+
+        <!-- ── 导入数据 ── -->
+        <section class="page active" data-view="import">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Import Center</p>
+                <h3>导入数据</h3>
+              </div>
+            </div>
+            <div class="import-grid">
+              <div class="import-card">
+                <div class="button-row">
+                  <button id="importFolderBtn" class="primary">导入整个文件夹</button>
+                  <button id="importFilesBtn" class="secondary">导入单个或多个文件</button>
+                  <button id="loadRuntimeBtn" class="secondary">读取当前运行目录</button>
+                  <button id="clearCurrentDataBtn" class="secondary">清空当前数据</button>
+                </div>
+                <p class="muted">
+                  自动识别以下文件（不全也可以）：
+                </p>
+                <div class="format-hints">
+                  <code>config.json</code> 配置文件（可选）
+                  <code>data_0/log_*.csv</code> 环境日志（分钟级）
+                  <code>breath_data/breath_*.csv</code> 呼吸日志（秒级）
+                  <code>run/*.csv</code> 运行日志
+                </div>
+                <p class="muted">
+                  导入策略：每次新导入都会自动清空当前页面里的旧数据，再加载新数据，不会把不同批次混在一起。
+                </p>
+                <div id="importSummary" class="notice">尚未导入数据。</div>
+              </div>
+              <div class="import-card">
+                <h3>识别结果</h3>
+                <div id="importRecognition" class="recognition-list">
+                  <div class="empty-state">导入后将在这里列出识别到的文件类型和数量。</div>
+                </div>
+              </div>
+            </div>
+            <input id="folderInput" type="file" webkitdirectory directory multiple hidden>
+            <input id="filesInput" type="file" multiple hidden>
+          </section>
+        </section>
+
+        <!-- ── 首页概览 ── -->
+        <!-- ── 实时采集 ── -->
+        <section class="page" data-view="live">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Live Acquisition</p>
+                <h3>实时采集</h3>
+              </div>
+              <div class="button-row">
+                <button id="liveStartBtn" class="primary">开始全部采集</button>
+                <button id="liveStopBtn" class="secondary">停止全部采集</button>
+                <span id="liveDeviceCount" class="topbar-status" style="margin-left:12px"></span>
+              </div>
+            </div>
+            <div id="liveStatusNotice" class="notice">实时采集模块初始化中...</div>
+            <div class="live-layout top-gap">
+              <div class="live-sidebar">
+                <div class="chart-panel">
+                  <div class="card-title">设备列表</div>
+                  <div id="liveDeviceList" class="stack-list"></div>
+                  <div class="button-row top-gap">
+                    <button id="liveNewDeviceBtn" class="secondary">新增设备</button>
+                    <button id="liveDeleteDeviceBtn" class="secondary">删除设备</button>
+                  </div>
+                </div>
+              </div>
+              <div class="live-main">
+                <div class="view-tabs" id="liveTabs">
+                  <button class="view-tab active" data-view-tab="device-settings">设备设置</button>
+                  <button class="view-tab" data-view-tab="session-status">会话状态</button>
+                  <button class="view-tab" data-view-tab="catalog-preview">点表预览</button>
+                  <button class="view-tab" data-view-tab="live-overview">实时总览</button>
+                  <button class="view-tab" data-view-tab="live-curves">实时曲线</button>
+                  <button class="view-tab" data-view-tab="parameter-monitor">参数监视</button>
+                  <button class="view-tab" data-view-tab="realtime-debug">实时调试</button>
+                </div>
+                <div id="liveDeviceActions" class="live-device-actions">
+                  <span class="live-device-actions-label" id="liveActionsDeviceName">设备工具</span>
+                  <button id="liveRefreshDeviceBtn" class="secondary">刷新点表</button>
+                  <button id="liveExportDevicesConfigBtn" class="secondary">导出设备配置</button>
+                  <button id="liveImportDevicesConfigBtn" class="secondary">导入设备配置</button>
+                  <button id="liveExportDeviceBtn" class="secondary">导出数据</button>
+                  <button id="liveAnalyzeDeviceBtn" class="secondary">导出并分析</button>
+                  <input id="liveImportDevicesConfigInput" type="file" accept=".json,application/json" class="hidden" />
+                </div>
+                <div class="view-tab-panels" id="livePanels">
+                  <div class="view-tab-panel active" data-tab="device-settings">
+                    <div class="live-grid live-grid-single">
+                      <div class="chart-panel">
+                        <div class="card-title">设备配置</div>
+                        <div id="liveDeviceEditor"></div>
+                        <div class="button-row top-gap">
+                          <button id="liveSaveDeviceBtn" class="primary">保存设备</button>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                  <div class="view-tab-panel" data-tab="session-status">
+                    <div class="live-grid">
+                      <div class="chart-panel">
+                        <div class="card-title">会话状态</div>
+                        <div id="liveSessionSummary" class="summary-stack"></div>
+                      </div>
+                      <div class="chart-panel">
+                        <div class="card-title">首批实施范围</div>
+                        <div id="liveImplementationScope" class="summary-stack"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="view-tab-panel" data-tab="catalog-preview">
+                    <div class="live-grid live-grid-single">
+                      <div class="chart-panel">
+                        <div class="card-title">点表摘要</div>
+                        <div id="liveCatalogSummary" class="summary-stack"></div>
+                      </div>
+                    </div>
+                    <div class="chart-panel top-gap">
+                      <div class="card-title">点表预览</div>
+                      <div id="liveCatalogTable"></div>
+                    </div>
+                    <div class="chart-panel top-gap">
+                      <div class="card-title">自动轮询命令表</div>
+                      <div id="livePollingCommandEditor"></div>
+                    </div>
+                  </div>
+                  <div class="view-tab-panel" data-tab="live-overview">
+                    <div class="live-overview-head">
+                      <div class="chart-panel">
+                        <div class="card-title">采集状态</div>
+                        <div id="liveOverviewSession" class="summary-stack"></div>
+                      </div>
+                    </div>
+                    <div id="liveOverviewMetrics" class="live-metric-grid top-gap"></div>
+                    <div class="live-grid top-gap">
+                      <div class="chart-panel">
+                        <div class="card-title">状态项</div>
+                        <div id="liveStatusList" class="summary-stack"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="view-tab-panel" data-tab="live-curves">
+                    <div class="filter-toolbar live-curve-toolbar">
+                      <div class="filter-group">
+                        <label>时间窗</label>
+                        <div class="chip-row" id="liveWindowTabs">
+                          <button class="filter-chip active" data-live-window="1">1 分钟</button>
+                          <button class="filter-chip" data-live-window="5">5 分钟</button>
+                          <button class="filter-chip" data-live-window="30">30 分钟</button>
+                        </div>
+                      </div>
+                      <div class="filter-group">
+                        <label>曲线说明</label>
+                        <div id="liveCurveSummary" class="summary-stack"></div>
+                      </div>
+                    </div>
+                    <div class="chart-panel">
+                      <div id="liveCurveChartHost" class="chart-host curve-full"></div>
+                      <div id="liveCurveTooltip" class="chart-tooltip hidden"></div>
+                    </div>
+                  </div>
+                  <div class="view-tab-panel" data-tab="parameter-monitor">
+                    <div class="live-grid">
+                      <div class="chart-panel">
+                        <div class="card-title">参数分组概览</div>
+                        <div id="liveParameterSummary" class="summary-stack"></div>
+                      </div>
+                      <div class="chart-panel">
+                        <div class="card-title">参数说明</div>
+                        <div id="liveParameterMeta" class="summary-stack"></div>
+                      </div>
+                    </div>
+                    <div class="live-parameter-sections top-gap" id="liveParameterSections"></div>
+                  </div>
+                  <div class="view-tab-panel" data-tab="realtime-debug">
+                    <div class="live-debug-head">
+                      <div class="chart-panel">
+                        <div class="card-title">调试助手</div>
+                        <div id="liveDebugWorkbench"></div>
+                      </div>
+                      <div class="chart-panel">
+                        <div class="card-title">全局实时收发</div>
+                        <div class="button-row">
+                          <button id="liveDebugClearTrafficBtn" class="secondary">清空调试日志</button>
+                        </div>
+                        <div id="liveDebugTraffic" class="timeline-list live-traffic-log top-gap"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" data-view="overview">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Home Dashboard</p>
+                <h3>首页概览</h3>
+              </div>
+              <div id="overviewTabs" class="chip-row">
+                <button class="filter-chip active" data-overview-tab="summary">概览摘要</button>
+                <button class="filter-chip" data-overview-tab="metrics">关键指标</button>
+                <button class="filter-chip" data-overview-tab="risk">风险摘要</button>
+              </div>
+            </div>
+
+            <div class="overview-panel active" data-overview-panel="summary">
+              <section class="overview-grid" id="overviewCards"></section>
+              <div class="chart-panel top-gap">
+                <div class="card-title">系统摘要</div>
+                <div id="overviewSummaryBoard" class="summary-stack"></div>
+              </div>
+            </div>
+
+            <div class="overview-panel" data-overview-panel="metrics">
+              <div id="overviewMetricsGrid" class="overview-grid"></div>
+              <div class="chart-panel top-gap">
+                <div class="card-title">环境最新值</div>
+                <div id="overviewLatestEnv"></div>
+              </div>
+            </div>
+
+            <div class="overview-panel" data-overview-panel="risk">
+              <div class="chart-panel">
+                <div class="card-title">诊断与风险</div>
+                <div id="insightsList" class="insight-grid compact-insight-grid"></div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 总体曲线 ── -->
+        <section class="page" data-view="master">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Master Timeline</p>
+                <h3>总体曲线</h3>
+              </div>
+            </div>
+            <div class="filter-toolbar">
+              <div class="filter-group">
+                <label for="datePresetSelect">按日期</label>
+                <select id="datePresetSelect"></select>
+              </div>
+              <div class="filter-group">
+                <label for="rangeStartInput">开始时间</label>
+                <input id="rangeStartInput" type="datetime-local">
+              </div>
+              <div class="filter-group">
+                <label for="rangeEndInput">结束时间</label>
+                <input id="rangeEndInput" type="datetime-local">
+              </div>
+              <div class="filter-group quick-actions">
+                <label>快捷范围</label>
+                <div class="chip-row">
+                  <button class="mini-btn" data-quick-range="all">全部</button>
+                  <button class="mini-btn" data-quick-range="1d">近 1 天</button>
+                  <button class="mini-btn" data-quick-range="3d">近 3 天</button>
+                  <button class="mini-btn" data-quick-range="7d">近 7 天</button>
+                </div>
+              </div>
+              <div class="filter-group action-group">
+                <label>操作</label>
+                <div class="chip-row">
+                   <button id="applyMasterFilterBtn" class="primary">应用筛选</button>
+                   <button id="undoMasterFilterBtn" class="secondary">返回上一级</button>
+                   <button id="resetMasterFilterBtn" class="secondary">重置</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="master-options">
+              <div class="option-block">
+                <div class="option-title">显示曲线</div>
+                <div id="metricToggleHost" class="chip-row"></div>
+              </div>
+              <div class="option-block">
+                <div class="option-title">显示事件</div>
+                <div id="eventToggleHost" class="chip-row"></div>
+              </div>
+            </div>
+
+            <div class="view-tabs" id="masterTabs">
+              <button class="view-tab active" data-view-tab="overlay">叠加曲线</button>
+              <button class="view-tab" data-view-tab="accum">累计量</button>
+              <button class="view-tab" data-view-tab="events">事件清单</button>
+            </div>
+
+            <div class="view-tab-panels" id="masterPanels">
+              <div class="view-tab-panel active" data-tab="overlay">
+                <div class="chart-panel">
+                  <div id="overallChartHost" class="chart-host curve-full"></div>
+                  <div id="chartTooltip" class="chart-tooltip hidden"></div>
+                </div>
+                <div id="masterSummary" class="summary-stack"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="accum">
+                <div class="chart-panel">
+                  <div class="card-title">累计量曲线</div>
+                  <div id="accumulationChartHost" class="chart-host curve-full"></div>
+                </div>
+              </div>
+              <div class="view-tab-panel" data-tab="events">
+                <div class="chart-panel">
+                  <div class="card-title">事件明细</div>
+                  <div id="masterEventList" class="timeline-list"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 环境数据 ── -->
+        <section class="page" data-view="environment">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Environment</p>
+                <h3>环境数据</h3>
+              </div>
+            </div>
+
+            <div class="filter-toolbar env-toolbar">
+              <div class="filter-group">
+                <label for="envRangeStartInput">开始时间</label>
+                <input id="envRangeStartInput" type="datetime-local">
+              </div>
+              <div class="filter-group">
+                <label for="envRangeEndInput">结束时间</label>
+                <input id="envRangeEndInput" type="datetime-local">
+              </div>
+              <div class="filter-group action-group">
+                <label>操作</label>
+                <div class="chip-row">
+                  <button id="applyEnvFilterBtn" class="primary">应用</button>
+                  <button id="resetEnvFilterBtn" class="secondary">重置</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="view-tabs" id="envTabs">
+              <button class="view-tab active" data-view-tab="overlay">叠加曲线</button>
+              <button class="view-tab" data-view-tab="temperature">温度</button>
+              <button class="view-tab" data-view-tab="humidity">湿度</button>
+              <button class="view-tab" data-view-tab="pressure">压力</button>
+              <button class="view-tab" data-view-tab="flow">流速</button>
+              <button class="view-tab" data-view-tab="stats">统计</button>
+              <button class="view-tab" data-view-tab="daily">日报</button>
+            </div>
+
+            <div class="view-tab-panels" id="envPanels">
+              <div class="view-tab-panel active" data-tab="overlay">
+                <div id="envChart" class="chart-panel curve-full"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="temperature">
+                <div id="envTempChart" class="chart-panel curve-full"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="humidity">
+                <div id="envHumidityChart" class="chart-panel curve-full"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="pressure">
+                <div id="envPressureChart" class="chart-panel curve-full"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="flow">
+                <div id="envFlowChart" class="chart-panel curve-full"></div>
+              </div>
+              <div class="view-tab-panel" data-tab="stats">
+                <div class="grid-two">
+                  <div class="chart-panel">
+                    <div class="card-title">每日完整率</div>
+                    <div id="completenessChart" class="chart-host medium-chart"></div>
+                  </div>
+                  <div class="chart-panel">
+                    <div class="card-title">阈值越界统计</div>
+                    <div id="thresholdChart" class="chart-host medium-chart"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="view-tab-panel" data-tab="daily">
+                <div class="chart-panel">
+                  <div class="card-title">环境日报</div>
+                  <div id="envDailyTable"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 呼吸事件 ── -->
+        <section class="page" data-view="breath">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Breath Events</p>
+                <h3>呼吸事件</h3>
+              </div>
+            </div>
+
+            <div class="filter-toolbar breath-toolbar">
+              <div class="filter-group">
+                <label for="breathQuickFilter">快速筛选</label>
+                <select id="breathQuickFilter">
+                  <option value="all">全部事件</option>
+                  <option value="inhale">吸气</option>
+                  <option value="exhale">呼气</option>
+                  <option value="no_breath">无呼吸</option>
+                  <option value="low_alarm">低流速告警</option>
+                  <option value="high_alarm">高流速告警</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="breathRhythmFilter">节律</label>
+                <select id="breathRhythmFilter"></select>
+              </div>
+              <div class="filter-group">
+                <label for="breathRangeStartInput">开始时间</label>
+                <input id="breathRangeStartInput" type="datetime-local">
+              </div>
+              <div class="filter-group">
+                <label for="breathRangeEndInput">结束时间</label>
+                <input id="breathRangeEndInput" type="datetime-local">
+              </div>
+              <div class="filter-group action-group">
+                <label>操作</label>
+                <div class="chip-row">
+                  <button id="applyBreathFilterBtn" class="primary">应用</button>
+                  <button id="resetBreathFilterBtn" class="secondary">重置</button>
+                </div>
+              </div>
+              </div>
+
+            <div class="view-tabs" id="breathTabs">
+              <button class="view-tab active" data-view-tab="flow">流速曲线</button>
+              <button class="view-tab" data-view-tab="stats">分布统计</button>
+              <button class="view-tab" data-view-tab="events">事件列表</button>
+            </div>
+
+              <div class="view-tab-panels" id="breathPanels">
+                <div class="view-tab-panel active" data-tab="flow">
+                  <div id="breathFocusMeta" class="breath-focus-meta"></div>
+                  <div class="chart-panel breath-hero-panel">
+                    <div class="card-title">呼吸流速状态时间轴</div>
+                    <div id="breathLegendBoard" class="breath-legend-board"></div>
+                    <div id="breathFlowChart" class="breath-focus-chart chart-host"></div>
+                  </div>
+                </div>
+              <div class="view-tab-panel" data-tab="stats">
+                <div class="grid-two">
+                  <div class="chart-panel">
+                    <div class="card-title">状态分布</div>
+                    <div id="breathStateChart" class="chart-host medium-chart"></div>
+                  </div>
+                  <div class="chart-panel">
+                    <div class="card-title">节律标记</div>
+                    <div id="breathRhythmChart" class="chart-host medium-chart"></div>
+                  </div>
+                </div>
+                <div class="chart-panel top-gap">
+                  <div class="card-title">筛选统计</div>
+                  <div id="breathSummaryBoard" class="summary-stack"></div>
+                </div>
+              </div>
+              <div class="view-tab-panel" data-tab="events">
+                <div class="chart-panel">
+                  <div class="card-title">秒级呼吸事件</div>
+                  <div id="breathEventList" class="timeline-list"></div>
+                  <div class="pager-row">
+                    <button id="breathPrevPageBtn" class="secondary">上一页</button>
+                    <div id="breathPageInfo" class="pager-info">第 1 页</div>
+                    <button id="breathNextPageBtn" class="secondary">下一页</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 运行日志 ── -->
+        <section class="page" data-view="run">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Run Log</p>
+                <h3>运行日志</h3>
+              </div>
+            </div>
+
+            <div class="filter-toolbar run-toolbar">
+              <div class="filter-group">
+                <label for="runQuickFilter">快速筛选</label>
+                <select id="runQuickFilter">
+                  <option value="all">全部日志</option>
+                  <option value="watchdog">看门狗</option>
+                  <option value="alarm">报警输出</option>
+                  <option value="valve">阀门开关</option>
+                  <option value="i2c">I2C 通讯</option>
+                  <option value="flow">流速读取</option>
+                  <option value="online">在线检测</option>
+                  <option value="bus">总线恢复</option>
+                  <option value="error">异常/失败</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="runLevelFilter">级别</label>
+                <select id="runLevelFilter">
+                  <option value="all">全部</option>
+                  <option value="E">错误</option>
+                  <option value="W">告警</option>
+                  <option value="I">信息</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="runRangeStartInput">开始时间</label>
+                <input id="runRangeStartInput" type="datetime-local">
+              </div>
+              <div class="filter-group">
+                <label for="runRangeEndInput">结束时间</label>
+                <input id="runRangeEndInput" type="datetime-local">
+              </div>
+              <div class="filter-group action-group">
+                <label>操作</label>
+                <div class="chip-row">
+                  <button id="applyRunFilterBtn" class="primary">应用</button>
+                  <button id="resetRunFilterBtn" class="secondary">重置</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="view-tabs" id="runTabs">
+              <button class="view-tab active" data-view-tab="charts">统计图</button>
+              <button class="view-tab" data-view-tab="timeline">事件时间线</button>
+              <button class="view-tab" data-view-tab="table">日志列表</button>
+            </div>
+
+            <div class="view-tab-panels" id="runPanels">
+              <div class="view-tab-panel active" data-tab="charts">
+                <div class="grid-two">
+                  <div class="chart-panel">
+                    <div class="card-title">按日日志级别</div>
+                    <div id="runDailyChart" class="chart-host medium-chart"></div>
+                  </div>
+                  <div class="chart-panel">
+                    <div class="card-title">关键词热点</div>
+                    <div id="runKeywordChart" class="chart-host medium-chart"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="view-tab-panel" data-tab="timeline">
+                <div class="chart-panel">
+                  <div class="card-title">关键事件时间线</div>
+                  <div id="runFilters" class="chip-row bottom-gap"></div>
+                  <div id="runTimeline" class="timeline-list short-timeline"></div>
+                </div>
+              </div>
+              <div class="view-tab-panel" data-tab="table">
+                <div class="chart-panel">
+                  <div class="card-title">全量日志汉化列表</div>
+                  <div id="runLogTable"></div>
+                  <div class="pager-row">
+                    <button id="runPrevPageBtn" class="secondary">上一页</button>
+                    <div id="runPageInfo" class="pager-info">第 1 页</div>
+                    <button id="runNextPageBtn" class="secondary">下一页</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 配置快照 ── -->
+        <section class="page" data-view="config-snapshot">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Snapshot</p>
+                <h3>配置对比</h3>
+              </div>
+              <div class="button-row">
+                <button id="exportConfigDraftBtn" class="secondary">导出当前配置</button>
+              </div>
+            </div>
+            <div id="configSnapshotStatus" class="notice">正在整理配置快照...</div>
+            <div class="diff-container" id="configDiff"></div>
+            <div class="chart-panel top-gap">
+              <div class="card-title">数据质量</div>
+              <div id="qualityPanel"></div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 参数模拟 ── -->
+        <section class="page" data-view="simulation">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Simulation</p>
+                <h3>参数模拟</h3>
+              </div>
+              <div class="button-row">
+                <button id="simulationRunBtn" class="primary">运行模拟</button>
+                <button id="simulationResetBtn" class="secondary">恢复默认</button>
+              </div>
+            </div>
+            <div id="simulationStatus" class="notice">等待加载模拟参数。</div>
+            <div class="simulation-layout">
+              <div class="simulation-side">
+                <div class="chart-panel">
+                  <div class="card-title">参数方案</div>
+                  <div id="simulationPresetList" class="stack-list"></div>
+                </div>
+                <div class="chart-panel top-gap">
+                  <div class="card-title">联合控制参数</div>
+                  <div id="simulationParamEditor" class="simulation-param-grid"></div>
+                </div>
+              </div>
+              <div class="simulation-main">
+                <div id="simulationSummary" class="summary-grid"></div>
+                <div id="simulationCharts" class="simulation-charts top-gap"></div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── 参数编辑 ── -->
+        <section class="page" data-view="config-editor">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Config Editor</p>
+                <h3>参数编辑</h3>
+              </div>
+              <div class="button-row">
+                <button id="genRecBtn" class="secondary">生成推荐值</button>
+                <button id="reloadConfigBtn" class="secondary">重载配置</button>
+                <button id="saveConfigBtn" class="primary">保存 config.json</button>
+              </div>
+            </div>
+            <div id="configEditorStatus" class="notice">配置页初始化中...</div>
+            <div class="view-tabs" id="configTabs"></div>
+            <div id="configEditor"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <template id="tableTemplate">
+    <table class="data-table">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </template>
+
+  <div class="modal-backdrop hidden" id="liveExportModal" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="liveExportModalTitle">
+      <div class="modal-head">
+        <div>
+          <p class="panel-kicker">Export</p>
+          <h3 id="liveExportModalTitle">导出位置</h3>
+        </div>
+        <button id="liveExportModalCloseBtn" class="secondary icon-btn" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="summary-stack">
+        <div id="liveExportModalDevice" class="summary-item">设备：-</div>
+        <div class="summary-item">
+          <div class="card-title">导出到文件夹（输入完整路径）</div>
+          <input id="liveExportModalInput" class="path-block" value="" placeholder="例如：C:\Users\pc\Desktop\export">
+        </div>
+        <div id="liveExportModalResult" class="summary-item hidden"></div>
+      </div>
+      <div class="button-row top-gap">
+        <button id="liveExportModalExportBtn" class="primary" type="button">开始导出</button>
+        <button id="liveExportModalCancelBtn" class="secondary" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./trend_viewer.js"></script>
+  <script src="./chart_interactions.js"></script>
+  <script src="./vendor/echarts.min.js"></script>
+  <script src="./app.js"></script>
+  <script>
+    (function () {
+      var undoBtn = document.getElementById("undoMasterFilterBtn");
+      var resetBtn = document.getElementById("resetMasterFilterBtn");
+      if (undoBtn) {
+        undoBtn.onclick = function () {
+          if (window.__undoMasterFilter__) window.__undoMasterFilter__();
+        };
+      }
+      if (resetBtn) {
+        resetBtn.onclick = function () {
+          if (window.__forceFullReset__) window.__forceFullReset__();
+        };
+      }
+    })();
+  </script>
+</body>
+</html>

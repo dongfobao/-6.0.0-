@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+build/
+dist/
+output/
+release/
+实时采集会话_导出/
+*.log
+
+实时数据/
+实时采集会话/
+
+# test session outputs
+20*_*/
+
+# live session exports
+live_exports/
+
+.idea/
+live_devices.json
+*_old/
+*_new/
+
+.DS_Store
+Thumbs.db

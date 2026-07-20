@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YLDQ Final Direction</title>
+  <style>
+    :root {
+      --bg: #efe7da;
+      --paper: rgba(255, 250, 244, 0.96);
+      --panel: rgba(255, 252, 248, 0.98);
+      --line: rgba(24, 32, 36, 0.11);
+      --text: #1c252a;
+      --muted: #66727a;
+      --accent: #b04f30;
+      --teal: #2d6e76;
+      --gold: #a77a24;
+      --danger: #b73030;
+      --warn: #c67a17;
+      --ok: #2d6b4c;
+      --shadow: 0 20px 58px rgba(66, 40, 24, 0.12);
+      --radius: 22px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(45,110,118,0.10), transparent 28%),
+        radial-gradient(circle at 88% 10%, rgba(176,79,48,0.10), transparent 24%),
+        linear-gradient(135deg, #f7f2ea 0%, #e9dccb 100%);
+    }
+    .shell {
+      max-width: 1680px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      background: rgba(255,250,244,0.92);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    .hero h1 {
+      margin: 10px 0 12px;
+      font-size: 40px;
+      font-family: Georgia, "Songti SC", serif;
+      line-height: 1.1;
+    }
+    .hero p {
+      margin: 0;
+      max-width: 980px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    .desktop {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      gap: 18px;
+    }
+    .sidebar,
+    .main-header,
+    .panel,
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .sidebar {
+      border-radius: 28px;
+      padding: 16px;
+      min-height: 920px;
+    }
+    .brand {
+      padding: 18px;
+      border-radius: 20px;
+      background: linear-gradient(145deg, rgba(255,249,242,1), rgba(245,234,220,0.96));
+      border: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    .brand h2 {
+      margin: 10px 0 8px;
+      font-size: 28px;
+      font-family: Georgia, "Songti SC", serif;
+    }
+    .brand p,
+    .section-title,
+    .nav-sub,
+    .small {
+      color: var(--muted);
+    }
+    .section-title {
+      margin: 16px 0 10px;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .nav-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.8);
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .nav-item.active {
+      background: #1e282d;
+      color: #fff9f2;
+    }
+    .nav-sub {
+      margin: 0 0 8px 12px;
+      padding-left: 14px;
+      border-left: 2px solid rgba(45,110,118,0.16);
+      font-size: 13px;
+      line-height: 1.9;
+    }
+    .main-header {
+      border-radius: 28px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 18px;
+    }
+    .main-header h2 {
+      margin: 10px 0 10px;
+      font-size: 38px;
+      font-family: Georgia, "Songti SC", serif;
+    }
+    .mode-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .mode {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.78);
+      font-size: 13px;
+    }
+    .mode.active {
+      background: linear-gradient(135deg, var(--accent), #d26b3a);
+      color: #fffaf4;
+      border-color: transparent;
+    }
+    .header-side {
+      display: grid;
+      gap: 12px;
+    }
+    .status-box,
+    .session-box {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--line);
+    }
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 18px;
+    }
+    .panel {
+      border-radius: 24px;
+      padding: 18px;
+    }
+    .panel h3 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      font-family: Georgia, "Songti SC", serif;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .card {
+      padding: 16px;
+      border-radius: 18px;
+      background: var(--panel);
+    }
+    .value {
+      font-size: 28px;
+      font-weight: 700;
+      margin: 10px 0 6px;
+    }
+    .chart {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(45,110,118,0.08), rgba(45,110,118,0.02)),
+        rgba(255,255,255,0.9);
+      min-height: 260px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .chart::before {
+      content: "";
+      position: absolute;
+      inset: 22px 18px 22px 18px;
+      background-image:
+        linear-gradient(rgba(0,0,0,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px);
+      background-size: 100% 22%, 8% 100%;
+    }
+    .line {
+      position: absolute;
+      height: 3px;
+      border-radius: 999px;
+      opacity: 0.95;
+    }
+    .line.t1 { left: 8%; top: 63%; width: 78%; background: var(--teal); transform: rotate(-7deg); }
+    .line.t2 { left: 9%; top: 48%; width: 74%; background: var(--accent); transform: rotate(3deg); }
+    .line.t3 { left: 10%; top: 36%; width: 72%; background: var(--gold); transform: rotate(-2deg); }
+    .event {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
+    }
+    .event.e1 { left: 22%; top: 42%; background: var(--danger); }
+    .event.e2 { left: 52%; top: 31%; background: var(--accent); }
+    .event.e3 { left: 69%; top: 55%; background: var(--warn); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .chip, .input {
+      padding: 9px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.84);
+      font-size: 13px;
+    }
+    .summary-list {
+      display: grid;
+      gap: 10px;
+    }
+    .summary-item, .timeline-item, .table-row {
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.84);
+      border: 1px solid var(--line);
+    }
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 122px 92px 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 62px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .badge.danger { background: var(--danger); }
+    .badge.warn { background: var(--warn); }
+    .badge.info { background: var(--teal); }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .tab {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(45,110,118,0.10);
+      font-size: 13px;
+    }
+    .tab.active {
+      background: #1e282d;
+      color: #fffaf4;
+    }
+    .table {
+      display: grid;
+      gap: 10px;
+    }
+    .table-row {
+      display: grid;
+      grid-template-columns: 140px 72px 1fr 1fr;
+      gap: 12px;
+      align-items: start;
+      font-size: 13px;
+    }
+    .footer-note {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    @media (max-width: 1360px) {
+      .desktop,
+      .workspace-grid,
+      .main-header {
+        grid-template-columns: 1fr;
+      }
+      .cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <p class="eyebrow">Recommended Final Direction</p>
+      <h1>A 架构 + 模式驱动首页 + 中等导航深度</h1>
+      <p>这版不是原型修补，而是我建议的最终产品方向。核心原则是：骨架稳定、专业感强、客户/售后/工程三种人共用一套软件，但看到的首页重点和入口深度不同。左侧是稳定导航，顶部切换模式，首页内容跟随模式变化。</p>
+    </section>
+
+    <section class="desktop">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">YLDQ Analytics</p>
+          <h2>数据分析系统</h2>
+          <p class="small">本地化、专业化、可交付给客户使用的设备运行数据软件。</p>
+        </div>
+
+        <div class="section-title">数据入口</div>
+        <button class="nav-item">导入数据</button>
+        <div class="nav-sub">导入文件夹</div>
+        <div class="nav-sub">导入单个文件</div>
+        <div class="nav-sub">导入历史批次</div>
+        <div class="nav-sub">清空当前会话</div>
+
+        <div class="section-title">总览中心</div>
+        <button class="nav-item active">首页概览</button>
+        <button class="nav-item">总体曲线</button>
+        <div class="nav-sub">时间筛选</div>
+        <div class="nav-sub">曲线叠加</div>
+        <div class="nav-sub">事件图层</div>
+
+        <div class="section-title">专题分析</div>
+        <button class="nav-item">环境数据</button>
+        <div class="nav-sub">叠加曲线</div>
+        <div class="nav-sub">阈值分析</div>
+        <div class="nav-sub">事件联动</div>
+        <button class="nav-item">呼吸事件</button>
+        <div class="nav-sub">秒级事件</div>
+        <div class="nav-sub">统计筛选</div>
+        <button class="nav-item">运行日志</button>
+        <div class="nav-sub">汉化日志</div>
+        <div class="nav-sub">分页浏览</div>
+
+        <div class="section-title">配置中心</div>
+        <button class="nav-item">配置快照</button>
+        <button class="nav-item">参数编辑</button>
+      </aside>
+
+      <div>
+        <header class="main-header">
+          <div>
+            <p class="eyebrow">Mode Driven Home</p>
+            <h2>首页概览</h2>
+            <p class="small">顶部切换角色模式后，首页卡片、主图、告警摘要和快捷操作自动变化。这一版默认展示的是“售后模式”首页，因为它最能体现软件的专业度和实际操作价值。</p>
+            <div class="mode-bar">
+              <div class="mode">客户模式</div>
+              <div class="mode active">售后模式</div>
+              <div class="mode">工程模式</div>
+            </div>
+          </div>
+          <div class="header-side">
+            <div class="status-box">
+              <p class="eyebrow">Current Session</p>
+              <div>批次：2026-05-18 现场采集</div>
+              <div>导入方式：文件夹导入</div>
+              <div>文件数：28 个</div>
+            </div>
+            <div class="session-box">
+              <p class="eyebrow">Quick Actions</p>
+              <div class="toolbar">
+                <div class="chip">刷新数据</div>
+                <div class="chip">导出报告</div>
+                <div class="chip">切到总体曲线</div>
+                <div class="chip">进入日志中心</div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section class="workspace-grid">
+          <section class="panel">
+            <h3>首页主工作区</h3>
+            <div class="cards">
+              <div class="card">
+                <div class="small">最近 24h 异常</div>
+                <div class="value">12</div>
+                <div class="small">较昨日 +3</div>
+              </div>
+              <div class="card">
+                <div class="small">呼吸告警</div>
+                <div class="value">4</div>
+                <div class="small">低流速 3，高流速 1</div>
+              </div>
+              <div class="card">
+                <div class="small">环境断档</div>
+                <div class="value">2</div>
+                <div class="small">最长 17 分钟</div>
+              </div>
+              <div class="card">
+                <div class="small">最新严重事件</div>
+                <div class="value">08:42</div>
+                <div class="small">CH2 关闭异常</div>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <div class="chip">最近 24h</div>
+              <div class="chip">温度 + 湿度 + 流速</div>
+              <div class="chip">叠加运行事件</div>
+              <div class="chip">悬浮查看事件详情</div>
+            </div>
+
+            <div class="chart">
+              <div class="line t1"></div>
+              <div class="line t2"></div>
+              <div class="line t3"></div>
+              <div class="event e1"></div>
+              <div class="event e2"></div>
+              <div class="event e3"></div>
+            </div>
+
+            <div class="footer-note">
+              首页主图不是“所有信息堆在一起”，而是模式驱动的主任务面板。
+              客户模式下这里会更偏结论和报告；售后模式下偏异常事件和快速排障；
+              工程模式下偏原始数据、阈值和详细时间轴。
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>右侧信息区</h3>
+            <div class="tabs">
+              <div class="tab active">待处理事件</div>
+              <div class="tab">系统建议</div>
+              <div class="tab">最近导入</div>
+            </div>
+            <div class="summary-list">
+              <div class="summary-item">建议优先检查 08:42 的 CH2 关闭事件，事件前后湿度存在异常波动。</div>
+              <div class="summary-item">最近 6 小时内呼吸状态切换频率高于历史中位值。</div>
+              <div class="summary-item">当前批次包含 12 天数据，建议直接切到“总体曲线”按日定位。</div>
+            </div>
+
+            <h3 style="margin-top:18px">事件摘要</h3>
+            <div class="timeline-item">
+              <div class="small">2026-05-18 08:42</div>
+              <div><span class="badge danger">严重</span></div>
+              <div>CH2 关闭事件，伴随在线检测错误与湿度高于阈值。</div>
+            </div>
+            <div class="timeline-item" style="margin-top:10px">
+              <div class="small">2026-05-18 07:26</div>
+              <div><span class="badge warn">告警</span></div>
+              <div>低流速呼吸告警持续 96 秒，达到配置报警时间。</div>
+            </div>
+            <div class="timeline-item" style="margin-top:10px">
+              <div class="small">2026-05-18 06:13</div>
+              <div><span class="badge info">信息</span></div>
+              <div>220V 打开事件，随后环境温度缓慢上升。</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel" style="margin-top:18px">
+          <h3>运行日志中心形态</h3>
+          <div class="toolbar">
+            <div class="input">关键词搜索：watchdog / alarm / open / close</div>
+            <div class="chip">级别：全部</div>
+            <div class="chip">开始时间</div>
+            <div class="chip">结束时间</div>
+            <div class="chip">应用筛选</div>
+          </div>
+          <div class="table">
+            <div class="table-row">
+              <div class="small">2026-05-18 08:42:11</div>
+              <div><span class="badge danger">E</span></div>
+              <div>`ONLINE ERR CH2 close ...`</div>
+              <div>CH2 在线检测错误，发生于关闭过程</div>
+            </div>
+            <div class="table-row">
+              <div class="small">2026-05-18 07:26:33</div>
+              <div><span class="badge warn">W</span></div>
+              <div>`Flow alarm high ...`</div>
+              <div>流速异常告警，超过阈值</div>
+            </div>
+            <div class="table-row">
+              <div class="small">2026-05-18 06:13:09</div>
+              <div><span class="badge info">I</span></div>
+              <div>`220V open ...`</div>
+              <div>220V 输出打开事件</div>
+            </div>
+          </div>
+          <div class="footer-note">
+            日志中心不只看“关键事件”，还要保留全量日志、中文解释、分页浏览、按时间过滤和按级别过滤。
+            这部分会是售后和工程模式的高频入口。
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

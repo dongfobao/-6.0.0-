@@ -1,0 +1,29 @@
+YLDQ 数据分析系统 - 客户交付版
+
+一、如何使用
+1. 把设备导出的数据放到“实时数据”文件夹内。
+2. 确保“实时数据”内至少包含：
+   - config.json
+   - data_0
+   - breath_data
+   - run
+3. 双击“YLDQ数据分析.exe”。
+4. 程序会自动生成 output\分析报告.html 并自动打开。
+
+二、报告输出位置
+- output\分析报告.html
+- output\分析摘要.txt
+- output\analysis.json
+
+三、如果无法生成
+请先检查：
+1. 实时数据 文件夹是否和 exe 在同一级目录。
+2. data_0、breath_data、run 是否存在。
+3. config.json 是否存在。
+4. CSV 文件是否被其他程序占用。
+
+四、交付建议
+- 如果要发给客户，建议直接发送整个文件夹。
+- 客户无需安装 Python。
+- 客户无需联网。
+- 客户无需打开命令行。
