@@ -46,6 +46,23 @@ class MonitoringProjectionTests(unittest.TestCase):
         result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
         self.assertEqual(result["process"]["breathState"]["displayValue"], "吸气")
 
+    def test_projects_runtime_valve_command_and_feedback(self):
+        controls = []
+        for channel in range(1, 4):
+            prefix = f"holding.runtime.valve_{channel}"
+            controls.extend([
+                item(prefix, 2, enumValues={0: "释放远程控制", 1: "回原位", 2: "到工作位"}),
+                item(f"{prefix}_diagnostic_fault", 8, enumValues={0: "无故障", 8: "开路"}),
+                item(f"{prefix}_diagnostic_source", 2, enumValues={2: "远程"}),
+                item(f"{prefix}_remote_seconds", 600),
+            ])
+        result = build_monitoring_snapshot({"metrics": [], "controls": controls, "session": {}})
+        valve = result["runtimeValves"][0]
+        self.assertEqual(valve["command"]["displayValue"], "到工作位")
+        self.assertEqual(valve["faultReason"]["displayValue"], "开路")
+        self.assertEqual(valve["effectiveSource"]["displayValue"], "远程")
+        self.assertEqual(valve["remoteSeconds"]["value"], 600)
+
 
 if __name__ == "__main__":
     unittest.main()

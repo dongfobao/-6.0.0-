@@ -71,6 +71,19 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "input_register.alarm.active_low", "input_register.alarm.active_high", "input_register.alarm.latched"
     )]
     alarm_active = any(int(item.get("value") or 0) != 0 for item in alarm_items)
+    control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
+    controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
+    runtime_valves = []
+    for channel, valve_name in enumerate(valve_names, start=1):
+        prefix = f"holding.runtime.valve_{channel}"
+        runtime_valves.append({
+            "channel": channel,
+            "name": valve_name,
+            "command": _take(controls_by_id, prefix),
+            "faultReason": _take(controls_by_id, f"{prefix}_diagnostic_fault"),
+            "effectiveSource": _take(controls_by_id, f"{prefix}_diagnostic_source"),
+            "remoteSeconds": _take(controls_by_id, f"{prefix}_remote_seconds"),
+        })
     session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
     return {
         "deviceId": snapshot.get("deviceId"),
@@ -96,6 +109,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "outputs": outputs,
         "remoteHeat": _take(by_id, "input_register.output.remote_heat"),
         "valves": valves,
+        "runtimeValves": runtime_valves,
         "alarms": {"active": alarm_active, "groups": alarm_items},
         "communication": {
             "online": _take(by_id, "input_register.communication.online"),

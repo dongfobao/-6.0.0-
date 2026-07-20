@@ -277,6 +277,14 @@ _ENUM_MAPS: dict[str, dict[int, str]] = {
     "holding.valve_route.mode": {0: "自动", 1: "固定", 2: "轮换"},
     "holding.valve_route.initial_route": {0: "上阀", 1: "左阀", 2: "右阀"},
     "holding.communication.parity": {0: "无校验", 1: "奇校验", 2: "偶校验"},
+    **{f"holding.runtime.valve_{channel}": {0: "释放远程控制", 1: "回原位", 2: "到工作位"} for channel in range(1, 4)},
+    **{f"holding.runtime.valve_{channel}_diagnostic_fault": {
+        0: "无故障", 1: "阀门编号无效", 2: "阀门忙", 3: "动作队列已满", 4: "回原位超时",
+        5: "目标位置校验失败", 6: "驱动器故障", 7: "过流", 8: "开路", 9: "限位开关卡滞",
+    } for channel in range(1, 4)},
+    **{f"holding.runtime.valve_{channel}_diagnostic_source": {
+        0: "初始", 1: "自动", 2: "远程", 3: "安全保护", 4: "维护",
+    } for channel in range(1, 4)},
 }
 for point_id in (
     "holding.control.temperature_humidity_fault_action",

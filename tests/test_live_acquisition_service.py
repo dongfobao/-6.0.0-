@@ -82,6 +82,38 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(payload["item"]["currentValue"], True)
         self.assertIn(("register", 800, 1), calls)
 
+    def test_valve_command_is_read_back_before_success(self):
+        calls = []
+
+        class FakeClient:
+            def __init__(self, device):
+                self.device = device
+
+            def open(self):
+                pass
+
+            def close(self):
+                pass
+
+            def write_single_register(self, address, value):
+                calls.append(("write", address, value))
+
+            def read_holding_registers(self, address, count):
+                calls.append(("read", address, count))
+                return [2, 0, 0, 0, 0, 2, 600, 0, 0, 0, 0, 0, 0]
+
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        service._device_slots["dev-a"]["state"]["running"] = True
+
+        with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
+            payload = service.write_value("dev-a", "holding.runtime.valve_1", 2)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["runtimeFeedback"]["holding.runtime.valve_1"], 2)
+        self.assertIn(("write", 804, 2), calls)
+        self.assertIn(("read", 804, 13), calls)
+
     def test_write_value_uses_multi_register_write_for_float32(self):
         calls = []
 

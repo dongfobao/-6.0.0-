@@ -347,7 +347,7 @@ class LiveAcquisitionService:
             controls = [
                 self._catalog_item_with_value(item, slot["values"])
                 for item in self._catalog
-                if item.get("group") in {"control", "config", "task"}
+                if item.get("group") in {"control", "config", "task", "runtime_control", "diagnostic"}
             ]
             return {
                 "deviceId": device_id,
@@ -458,6 +458,7 @@ class LiveAcquisitionService:
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
+        runtime_feedback: dict[str, Any] = {}
         with self._io_lock:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
@@ -578,6 +579,7 @@ class LiveAcquisitionService:
 
         device = deepcopy(slot["config"])
         encoded_words, decoded_value = self._encode_write_value(item, value)
+        runtime_feedback: dict[str, Any] = {}
 
         port_key = _device_port_key(device)
         with self._io_lock:
@@ -593,12 +595,19 @@ class LiveAcquisitionService:
                         client.write_multiple_registers(address, encoded_words)
                 else:
                     raise ValueError(f"unsupported writable area: {area}")
+                if re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
+                    runtime_feedback = self._read_runtime_valve_feedback(client)
+                    confirmed = runtime_feedback.get(item_id)
+                    if confirmed is None or int(confirmed) != int(decoded_value):
+                        raise ModbusError(f"阀门命令回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
             finally:
                 client.close()
 
         timestamp = _iso(_now())
         with self._lock:
             slot["values"][item_id] = {"value": decoded_value, "ts": timestamp}
+            for feedback_id, feedback_value in runtime_feedback.items():
+                slot["values"][feedback_id] = {"value": feedback_value, "ts": timestamp}
             slot["event_seq"] += 1
             slot["events"].append({
                 "id": slot["event_seq"],
@@ -614,8 +623,24 @@ class LiveAcquisitionService:
                 "implemented": True,
                 "message": f"live value written: {item_id}",
                 "item": row,
+                "runtimeFeedback": runtime_feedback,
                 "session": deepcopy(slot["state"]),
             }
+
+    def _read_runtime_valve_feedback(self, client: LiveModbusClient) -> dict[str, Any]:
+        start_address = 804
+        words = client.read_holding_registers(start_address, 13)
+        feedback: dict[str, Any] = {}
+        for item in self._catalog:
+            address = int(item.get("address") or -1)
+            if item.get("area") != "holding_register" or address < start_address or address > 816:
+                continue
+            offset = address - start_address
+            word_length = int(item.get("wordLength") or 1)
+            if offset + word_length > len(words):
+                continue
+            feedback[str(item["id"])] = self._decode_value(item, words[offset:offset + word_length])
+        return feedback
 
     def get_session_meta(self, device_id: str | None = None) -> dict[str, Any]:
         slot = self._get_device_slot(device_id)

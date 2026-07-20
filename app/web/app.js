@@ -15,6 +15,7 @@ const TREND_META = {
   pressure:["压力","#c084fc"], flow:["流量","#2dd4bf"],
 };
 const activeTrends = new Set(["sensor_1.temperature","sensor_2.temperature","sensor_3.temperature","sensor_1.humidity","sensor_2.humidity","sensor_3.humidity"]);
+const pendingControls = new Set();
 
 async function api(path, options={}) {
   const response = await fetch(path, {headers:{"Content-Type":"application/json",...(options.headers||{})},...options});
@@ -65,7 +66,7 @@ function renderSnapshot(){
   $("sensorCards").innerHTML=s.environmentChannels.map(ch=>`<article class="sensor-card"><div class="card-head"><h3>温湿度 ${ch.channel}</h3><span class="quality-dot ${ch.readOk.value?"ok":""}">${ch.readOk.value?"通信正常":"无有效数据"}</span></div><div class="sensor-values"><div class="sensor-value"><span>温度</span><strong>${fmt(ch.temperature.value)} <small>°C</small></strong></div><div class="sensor-value"><span>湿度</span><strong>${fmt(ch.humidity.value)} <small>%RH</small></strong></div></div><div class="output-meta"><span>传感器状态</span><strong>${fmt(ch.status.displayValue)}</strong></div></article>`).join("");
   $("outputCards").innerHTML=s.outputs.map(out=>`<article class="output-card"><div class="card-head"><strong>${esc(out.name)}</strong><span class="state-pill ${Number(out.state.value)===1?"on":""}">${esc(fmt(out.state.displayValue))}</span></div><div class="output-meta"><span>模式 ${esc(fmt(out.mode?.displayValue))}</span><span>${out.count?`累计 ${esc(fmt(out.count.value,0))} 次`:""}</span></div></article>`).join("");
   $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card"><div class="valve-row"><strong>${esc(v.name)}</strong><div><span>显示状态</span><br>${esc(fmt(v.displayState.displayValue))}</div><div><span>执行状态</span><br>${esc(fmt(v.actuatorState.displayValue))}</div><div><span>位置 / 电流</span><br>${fmt(v.position.value,0)}% / ${fmt(v.currentAdc.value,0)}</div></div><div class="output-meta"><span>控制源 ${esc(fmt(v.controlSource.displayValue))}</span><span class="${Number(v.faultReason.value)?"state-pill fault":""}">故障 ${fmt(v.faultReason.value,0)}</span></div></article>`).join("");
-  renderAlarmSummary();renderDiagnostics();
+  renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();
 }
 
 const TREND_PRESETS={environment:["sensor_1.temperature","sensor_1.humidity","sensor_2.temperature","sensor_2.humidity","sensor_3.temperature","sensor_3.humidity"],process:["pressure","flow"],all:Object.keys(TREND_META)};
@@ -100,10 +101,31 @@ function exportTrendCsv(){const keys=[...activeTrends],timestamps=[...new Set(ke
 
 function buildControlButtons(){
   document.querySelectorAll("[data-mode-control]").forEach(host=>{host.innerHTML=[[0,"自动"],[1,"强制关"],[2,"强制开"]].map(([v,t])=>`<button data-control="${host.dataset.modeControl}" data-value="${v}">${t}</button>`).join("");});
-  $("valveControls").innerHTML=[1,2,3].map((n)=>`<article class="panel control-card"><h3>${["上阀","左阀","右阀"][n-1]}</h3><p>清除远程 / 回原位 / 到工作位</p><div class="segmented"><button data-control="holding.runtime.valve_${n}" data-value="0">释放</button><button data-control="holding.runtime.valve_${n}" data-value="1">原位</button><button data-control="holding.runtime.valve_${n}" data-value="2">工作位</button></div></article>`).join("");
   document.querySelectorAll("[data-control]").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
+  renderValveControls();
 }
-async function writeControl(itemId,value){if(!state.selectedDeviceId)return showNotice("请先选择设备","error");try{await api("/api/control/write",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value})});showNotice(`命令已发送：${itemId} = ${value}`);await refreshLive();}catch(error){showNotice(error.message,"error");}}
+function renderValveControls(runtimeValves=[]){
+  const fallbackNames=["上阀","左阀","右阀"], byChannel=new Map(runtimeValves.map(item=>[Number(item.channel),item]));
+  $("valveControls").innerHTML=[1,2,3].map(channel=>{
+    const valve=byChannel.get(channel)||{}, command=Number(valve.command?.value ?? 0), fault=Number(valve.faultReason?.value ?? 0), pending=pendingControls.has(`holding.runtime.valve_${channel}`);
+    const faultText=valve.faultReason?.displayValue || (fault?`故障 ${fault}`:"无故障"), source=valve.effectiveSource?.displayValue || "--", seconds=valve.remoteSeconds?.value;
+    const detail=fault===8?"开路：请检查阀门线圈、接线端子及驱动输出。":"";
+    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
+  }).join("");
+  document.querySelectorAll("[data-control^='holding.runtime.valve_']").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
+}
+async function writeControl(itemId,value){
+  if(!state.selectedDeviceId)return showNotice("请先选择设备","error");
+  if(pendingControls.has(itemId))return;
+  pendingControls.add(itemId);renderValveControls(state.snapshot?.runtimeValves||[]);
+  try{
+    const result=await api("/api/control/write",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value})});
+    const confirmed=result.runtimeFeedback?.[itemId];
+    showNotice(confirmed===undefined?"命令已发送":`命令已确认：${result.item?.displayValue||value}`);
+    await refreshLive();
+  }catch(error){showNotice(error.message,"error");}
+  finally{pendingControls.delete(itemId);renderValveControls(state.snapshot?.runtimeValves||[]);}
+}
 
 async function refreshParameters(){if(!state.selectedDeviceId){state.parameters=[];return renderConfigTable();}try{const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(state.selectedDeviceId)}`);state.parameters=payload.config||[];renderConfigGroups();renderConfigTable();}catch(error){showNotice(error.message,"error");}}
 function configSection(item){const parts=String(item.id||"").split(".");return parts[1]||"other";}
