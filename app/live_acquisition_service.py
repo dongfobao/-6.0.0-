@@ -19,8 +19,6 @@ from modbus_v7_config import V7ConfigTransaction
 
 
 HISTORY_POINT_IDS = (
-    "input_register.temperature",
-    "input_register.humidity",
     "input_register.sensor_1.temperature",
     "input_register.sensor_1.humidity",
     "input_register.sensor_2.temperature",
@@ -361,16 +359,28 @@ class LiveAcquisitionService:
                 "session": self._state_with_health(slot),
             }
 
-    def get_series(self, device_id: str | None = None, window_ms: int = 300000, limit: int = 300) -> dict[str, Any]:
+    def get_series(
+        self,
+        device_id: str | None = None,
+        window_ms: int = 300000,
+        limit: int = 300,
+        start_at: str | None = None,
+        end_at: str | None = None,
+    ) -> dict[str, Any]:
         slot = self._get_device_slot(device_id)
         if slot is None:
-            return {"rows": [], "byMetric": {}}
-        cutoff = time.time() - max(1000, window_ms) / 1000.0
+            return {"rows": [], "byMetric": {}, "range": {"start": start_at, "end": end_at}}
+        start_time = _parse_iso(start_at)
+        end_time = _parse_iso(end_at)
+        if start_time is not None and end_time is not None and end_time < start_time:
+            raise ValueError("曲线结束时间不能早于开始时间")
+        cutoff = start_time.timestamp() if start_time is not None else time.time() - max(1000, window_ms) / 1000.0
+        end_epoch = end_time.timestamp() if end_time is not None else float("inf")
         capped_limit = max(1, min(limit, 2000))
         with self._lock:
             by_metric: dict[str, list[dict[str, Any]]] = {}
             for key, rows in slot["history"].items():
-                filtered = [dict(row) for row in rows if row["epoch"] >= cutoff]
+                filtered = [dict(row) for row in rows if cutoff <= row["epoch"] <= end_epoch]
                 by_metric[key] = filtered[-capped_limit:]
 
             aggregated: dict[str, dict[str, Any]] = {}
@@ -385,6 +395,10 @@ class LiveAcquisitionService:
             return {
                 "rows": merged_rows[-capped_limit:],
                 "byMetric": by_metric,
+                "range": {
+                    "start": _iso(start_time) if start_time is not None else None,
+                    "end": _iso(end_time) if end_time is not None else None,
+                },
             }
 
     def get_events(self, device_id: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
@@ -1069,8 +1083,14 @@ class LiveAcquisitionService:
             return
 
         analog: dict[str, float] = {}
-        for key in ("pressure", "temperature", "flow", "humidity"):
-            cached = slot["values"].get(f"input_register.{key}") or {}
+        source_keys = {
+            "pressure": "pressure",
+            "temperature": "sensor_1.temperature",
+            "flow": "flow",
+            "humidity": "sensor_1.humidity",
+        }
+        for key, source_key in source_keys.items():
+            cached = slot["values"].get(f"input_register.{source_key}") or {}
             analog[key] = float(cached.get("value") or 0.0)
 
         try:

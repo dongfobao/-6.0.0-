@@ -126,7 +126,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/monitor/series":
             window_ms = self._query_int(query, "windowMs", 900000, 10000, 86400000)
             limit = self._query_int(query, "limit", 600, 10, 2000)
-            return self._json(service.get_series(device_id, window_ms=window_ms, limit=limit))
+            return self._json(service.get_series(
+                device_id,
+                window_ms=window_ms,
+                limit=limit,
+                start_at=self._query(query, "start"),
+                end_at=self._query(query, "end"),
+            ))
         if path == "/api/monitor/events":
             return self._json({"items": service.get_events(device_id, self._query_int(query, "limit", 100, 1, 240))})
         if path == "/api/monitor/traffic":

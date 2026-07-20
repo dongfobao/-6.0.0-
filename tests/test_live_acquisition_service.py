@@ -533,7 +533,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
     def test_series_returns_device_specific_data(self):
         service = LiveAcquisitionService()
         service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
-        service._device_slots["dev-a"]["history"]["temperature"].append({
+        service._device_slots["dev-a"]["history"]["sensor_1.temperature"].append({
             "ts": "2025-01-01 12:00:00",
             "value": 25.5,
             "epoch": time.time(),
@@ -550,6 +550,25 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
         series_none = service.get_series(device_id="dev-b")
         self.assertEqual(series_none["rows"], [])
+
+    def test_series_accepts_an_arbitrary_time_range(self):
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        history = service._device_slots["dev-a"]["history"]["pressure"]
+        history.extend([
+            {"ts": "2026-07-20 10:00:00", "value": 1.0, "epoch": datetime(2026, 7, 20, 10, 0, 0).timestamp()},
+            {"ts": "2026-07-20 11:00:00", "value": 2.0, "epoch": datetime(2026, 7, 20, 11, 0, 0).timestamp()},
+            {"ts": "2026-07-20 12:00:00", "value": 3.0, "epoch": datetime(2026, 7, 20, 12, 0, 0).timestamp()},
+        ])
+
+        series = service.get_series(
+            "dev-a",
+            start_at="2026-07-20 10:30:00",
+            end_at="2026-07-20 11:30:00",
+        )
+
+        self.assertEqual([row["value"] for row in series["byMetric"]["pressure"]], [2.0])
+        self.assertEqual(series["range"]["start"], "2026-07-20 10:30:00")
 
     @staticmethod
     def _lock_context(service):

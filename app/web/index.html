@@ -50,8 +50,11 @@
       </section>
 
       <section class="page" data-page-view="trends">
-        <div class="panel toolbar-panel">
+        <div class="panel toolbar-panel trend-control-panel">
+          <div class="trend-toolbar-row"><div><h3>关键点位</h3><p>按业务场景快速选择，仍可单独勾选任意曲线。</p></div><div class="button-row"><button class="button small secondary" data-trend-preset="environment">三路温湿度</button><button class="button small secondary" data-trend-preset="process">过程重点</button><button class="button small secondary" data-trend-preset="all">全部关键点</button></div></div>
           <div id="trendToggles" class="trend-toggles"></div>
+          <div class="trend-toolbar-row trend-time-row"><div class="quick-range"><button class="button small secondary" data-trend-window="900000">15 分钟</button><button class="button small secondary" data-trend-window="3600000">1 小时</button><button class="button small secondary" data-trend-window="21600000">6 小时</button><button class="button small secondary" data-trend-window="86400000">24 小时</button></div><div class="trend-time-inputs"><label>开始<input id="trendStart" type="datetime-local"></label><label>结束<input id="trendEnd" type="datetime-local"></label><button id="applyTrendRangeBtn" class="button secondary">查询时段</button></div></div>
+          <div class="trend-toolbar-row"><small id="trendRangeText">实时数据</small><div class="button-row"><button id="zoomOutTrendBtn" class="button small secondary">缩小</button><button id="resetTrendZoomBtn" class="button small secondary">复位</button><button id="zoomInTrendBtn" class="button small secondary">放大</button><button id="exportTrendBtn" class="button small primary">导出 CSV</button></div></div>
           <select id="trendWindow"><option value="300000">最近5分钟</option><option value="900000" selected>最近15分钟</option><option value="3600000">最近1小时</option><option value="21600000">最近6小时</option></select>
           <button id="refreshTrendBtn" class="button secondary">刷新曲线</button>
         </div>
