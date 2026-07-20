@@ -52,6 +52,26 @@ class ModbusV7ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigTransactionError):
             V7ConfigTransaction(client).stage_value(item, True)
 
+    def test_new_time_unit_range_is_enforced_before_write(self) -> None:
+        client = FakeClient()
+        item = {
+            "id": "holding.valve_route.cooling_delay_hours",
+            "name": "停热后阀门冷却延时",
+            "area": "holding_register",
+            "address": 306,
+            "dataType": "uint32",
+            "unit": "小时",
+            "minimum": 0,
+            "maximum": 8760,
+            "writable": True,
+        }
+        with self.assertRaisesRegex(ConfigTransactionError, "不能大于 8760小时"):
+            V7ConfigTransaction(client).stage_value(item, 8761)
+        self.assertEqual(client.writes, [])
+
+        words = V7ConfigTransaction(client).stage_value(item, 24)
+        self.assertEqual(client.read_holding_registers(306, 2), words)
+
 
 if __name__ == "__main__":
     unittest.main()

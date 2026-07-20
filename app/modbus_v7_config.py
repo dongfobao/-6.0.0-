@@ -60,6 +60,7 @@ class V7ConfigTransaction:
         address = int(item["address"])
         if address < 100 or address >= 800:
             raise ConfigTransactionError("配置事务只允许写入 100-799 配置区")
+        self._validate_value_range(item, value)
         words = encode_words(value, str(item["dataType"]))
         if len(words) == 1:
             self.client.write_single_register(address, words[0])
@@ -69,6 +70,26 @@ class V7ConfigTransaction:
         if list(readback) != words:
             raise ConfigTransactionError(f"配置回读不一致: {item.get('id')}")
         return words
+
+    @staticmethod
+    def _validate_value_range(item: dict[str, Any], value: Any) -> None:
+        minimum = item.get("minimum")
+        maximum = item.get("maximum")
+        if minimum is None and maximum is None:
+            return
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigTransactionError(f"参数不是有效数字: {item.get('id')}") from exc
+        unit = str(item.get("unit") or "")
+        if minimum is not None and numeric_value < float(minimum):
+            raise ConfigTransactionError(
+                f"{item.get('name', item.get('id'))}不能小于 {minimum}{unit}"
+            )
+        if maximum is not None and numeric_value > float(maximum):
+            raise ConfigTransactionError(
+                f"{item.get('name', item.get('id'))}不能大于 {maximum}{unit}"
+            )
 
     def commit(self) -> ConfigStatus:
         status = self._command(COMMAND_COMMIT)

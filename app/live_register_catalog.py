@@ -204,12 +204,12 @@ _CONFIG_BLOCKS: tuple[tuple[int, str, str, tuple[tuple[int, str, str, str, str],
     (220, "flow", "流量", (
         (0, "online", "启用", "bool", ""), (1, "offset", "偏移", "float32", "L/min"),
         (3, "breath_high", "呼吸高阈值", "float32", "L/min"), (5, "breath_low", "呼吸低阈值", "float32", "L/min"),
-        (7, "no_change_alarm_seconds", "无变化报警时间", "uint32", "s"),
+        (7, "no_change_alarm_days", "无变化报警时间", "uint32", "天"),
     )),
     (400, "control", "控制", (
         (0, "humidity_enabled", "湿度控制使能", "bool", ""), (1, "antifreeze_enabled", "防冻使能", "bool", ""),
         (2, "antifreeze_sensor_id", "防冻传感器ID", "uint16", ""), (3, "antifreeze_on_temperature", "防冻开启温度", "float32", "°C"),
-        (5, "antifreeze_off_temperature", "防冻关闭温度", "float32", "°C"), (7, "close_delay_seconds", "关闭延时", "uint32", "s"),
+        (5, "antifreeze_off_temperature", "防冻关闭温度", "float32", "°C"), (7, "close_delay_hours", "关闭延时", "uint32", "小时"),
         (9, "temperature_humidity_fault_action", "温湿度故障动作", "enum16", ""),
         (10, "pressure_fault_action", "压力故障动作", "enum16", ""), (11, "flow_fault_action", "流量故障动作", "enum16", ""),
     )),
@@ -243,10 +243,11 @@ for base, prefix, display, fields in _CONFIG_BLOCKS:
 
 
 REGISTER_CATALOG.extend([
-    _holding("holding.valve_route.mode", "阀门路由模式", 300, "enum16", config_key="valve_route.mode"),
-    _holding("holding.valve_route.switch_interval", "阀门切换间隔", 301, "uint32", unit="s", config_key="valve_route.switch_interval"),
-    _holding("holding.valve_route.force_close_seconds", "阀门强制关闭时间", 303, "uint32", unit="s", config_key="valve_route.force_close_seconds"),
-    _holding("holding.valve_route.initial_route", "阀门初始路由", 305, "enum16", config_key="valve_route.initial_route"),
+    _holding("holding.valve_route.mode", "阀门路由模式", 300, "enum16", config_key="control.valveRouting.mode"),
+    _holding("holding.valve_route.restart_protection_days", "停热后同路再次启动保护间隔", 301, "uint32", unit="天", config_key="control.valveRouting.switchIntervalDays"),
+    _holding("holding.valve_route.force_close_days", "强制关闭时间", 303, "uint32", unit="天", config_key="control.valveRouting.forceCloseDays"),
+    _holding("holding.valve_route.initial_route", "阀门初始路由", 305, "enum16", config_key="control.valveRouting.initialRoute"),
+    _holding("holding.valve_route.cooling_delay_hours", "停热后阀门冷却延时", 306, "uint32", unit="小时", config_key="control.valveRouting.valveCoolingHours"),
 ])
 for channel_index, base_address in enumerate((310, 312, 314), start=1):
     REGISTER_CATALOG.extend([
@@ -294,6 +295,27 @@ for item in REGISTER_CATALOG:
     enum_values = _ENUM_MAPS.get(str(item["id"]))
     if enum_values:
         item["enumValues"] = enum_values
+
+_CONFIG_KEY_OVERRIDES = {
+    "holding.flow.no_change_alarm_days": "sensors.flow.noChangeAlarmDays",
+    "holding.control.close_delay_hours": "control.antifreeze.closeDelayHours",
+}
+_VALUE_CONSTRAINTS = {
+    "holding.flow.no_change_alarm_days": (0, 365),
+    "holding.valve_route.restart_protection_days": (0, 365),
+    "holding.valve_route.force_close_days": (0, 365),
+    "holding.valve_route.cooling_delay_hours": (0, 8760),
+    "holding.control.close_delay_hours": (0, 8760),
+}
+for item in REGISTER_CATALOG:
+    point_id = str(item["id"])
+    if point_id in _CONFIG_KEY_OVERRIDES:
+        item["configKey"] = _CONFIG_KEY_OVERRIDES[point_id]
+    if point_id in _VALUE_CONSTRAINTS:
+        minimum, maximum = _VALUE_CONSTRAINTS[point_id]
+        item["minimum"] = minimum
+        item["maximum"] = maximum
+        item["step"] = 1
 
 
 def _validate_catalog() -> None:
