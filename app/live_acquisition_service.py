@@ -358,7 +358,7 @@ class LiveAcquisitionService:
                 "metrics": metrics,
                 "statuses": statuses,
                 "controls": controls,
-                "session": deepcopy(slot["state"]),
+                "session": self._state_with_health(slot),
             }
 
     def get_series(self, device_id: str | None = None, window_ms: int = 300000, limit: int = 300) -> dict[str, Any]:

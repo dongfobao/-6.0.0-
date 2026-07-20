@@ -25,6 +25,17 @@ if not defined PYTHON_EXE (
   exit /b 1
 )
 
+"%PYTHON_EXE%" %PYTHON_ARGS% -c "import serial" >nul 2>nul
+if errorlevel 1 (
+  echo Installing required serial communication dependency...
+  "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r requirements.txt
+  if errorlevel 1 (
+    echo Failed to install required dependencies. Check network access and Python pip.
+    pause
+    exit /b 1
+  )
+)
+
 set "APP_URL=http://127.0.0.1:8765"
 set "API_URL=http://127.0.0.1:8765/api/health"
 set "PROJECT_DIR=%cd%"

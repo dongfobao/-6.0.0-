@@ -515,10 +515,16 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
         service._device_slots["dev-a"]["values"]["input_register.temperature"] = {"value": 25.5, "ts": "2025-01-01 12:00:00"}
         service._device_slots["dev-a"]["state"]["last_snapshot_at"] = "2025-01-01 12:00:00"
+        service._device_slots["dev-a"]["state"].update({
+            "running": True,
+            "last_success_at": datetime.now().isoformat(sep=" "),
+            "consecutive_error_count": 0,
+        })
 
         snapshot = service.get_snapshot(device_id="dev-a")
         self.assertEqual(snapshot["deviceId"], "dev-a")
         self.assertGreater(len(snapshot["metrics"]), 0)
+        self.assertEqual(snapshot["session"]["communication_health"], "ok")
 
         snapshot_none = service.get_snapshot(device_id="dev-b")
         self.assertEqual(snapshot_none["metrics"], [])
