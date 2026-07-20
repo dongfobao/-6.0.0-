@@ -883,7 +883,10 @@ class LiveAcquisitionService:
                 command = device_commands[command_index]
                 command_indexes[current_device_id] = (command_index + 1) % len(device_commands)
 
-                c = ensure_client_for(current_device)
+                # 串口打开也必须与手动报文共用同一把锁，否则手动调试关闭轮询客户端后，
+                # 轮询线程可能在手动帧尚未完成时抢先重新打开 COM 口。
+                with self._io_lock:
+                    c = ensure_client_for(current_device)
                 if c is None:
                     self._record_device_error(
                         current_device_id,

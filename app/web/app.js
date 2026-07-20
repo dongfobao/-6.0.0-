@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   bootstrap: null, devices: [], selectedDeviceId: null, snapshot: null,
-  series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [],
+  series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [], trafficLoading: false,
   activePage: "overview", refreshTimer: null, trendTimer: null,
   trendQuery: {windowMs: 900000, start: null, end: null}, trendViewport: null, trendDrag: null,
   configModule: "sensor_1",
@@ -155,8 +155,18 @@ async function configAction(action){try{const result=await api("/api/config/tran
 function renderAlarmSummary(){const a=state.snapshot?.alarms;if(!a)return;$("alarmSummary").innerHTML=(a.groups||[]).map((g,i)=>`<article class="alarm-card ${Number(g.value)?"active":""}"><span>告警组 ${i}</span><strong>0x${Number(g.value||0).toString(16).padStart(8,"0").toUpperCase()}</strong><small>${Number(g.value)?"存在活动告警":"无告警"}</small></article>`).join("");}
 async function refreshEvents(){if(!state.selectedDeviceId)return;try{state.events=(await api(`/api/monitor/events?deviceId=${encodeURIComponent(state.selectedDeviceId)}&limit=120`)).items||[];renderEvents();}catch(error){showNotice(error.message,"error");}}
 function renderEvents(){$("eventList").innerHTML=state.events.length?[...state.events].reverse().map(e=>`<div class="event-item"><time>${esc(e.ts||"")}</time><span>${esc(e.type||"")}</span><strong>${esc(e.message||"")}</strong></div>`).join(""):'<div class="empty-state">暂无事件</div>';}
-async function refreshTraffic(){try{state.traffic=(await api(`/api/monitor/traffic?deviceId=${encodeURIComponent(state.selectedDeviceId||"")}&limit=200`)).items||[];renderTraffic();}catch(error){showNotice(error.message,"error");}}
+async function refreshTraffic(){if(!state.selectedDeviceId||state.trafficLoading)return;state.trafficLoading=true;try{state.traffic=(await api(`/api/monitor/traffic?deviceId=${encodeURIComponent(state.selectedDeviceId)}&limit=200`)).items||[];renderTraffic();}catch(error){showNotice(error.message,"error");}finally{state.trafficLoading=false;}}
 function renderTraffic(){$("trafficTableBody").innerHTML=state.traffic.length?[...state.traffic].reverse().map(r=>`<tr><td>${esc(r.sentAt||"")}</td><td>${esc(r.deviceName||r.deviceId||"")}</td><td><code>${esc(r.requestHex||"")}</code></td><td><code>${esc(r.responseHex||"")}</code></td><td><span class="state-pill ${r.status==='ok'?'ok':r.status==='error'?'fault':''}">${esc(r.status||"")}</span></td><td>${esc(r.error||"")}</td></tr>`).join(""):'<tr><td colspan="6" class="empty-state">暂无通信记录</td></tr>';}
+async function sendDebugFrame(){
+  if(!state.selectedDeviceId)return showNotice("请先选择设备","error");
+  const requestHex=$("debugFrameInput").value.trim();if(!requestHex)return showNotice("请输入十六进制报文","error");
+  const button=$("sendDebugFrameBtn"), resultNode=$("debugFrameResult");button.disabled=true;resultNode.textContent="正在发送…";
+  try{
+    const result=await api("/api/diagnostics/send-frame",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,requestHex,appendCrc:$("debugAppendCrc").checked,expectResponse:$("debugExpectResponse").checked,responseTimeoutMs:Number($("debugTimeoutMs").value)||1200})});
+    resultNode.textContent=`状态：${result.status}\n请求：${result.requestHex}\n响应：${result.responseHex||"无响应"}`;showNotice("手动报文已发送");await refreshTraffic();
+  }catch(error){resultNode.textContent=`发送失败：${error.message}`;showNotice(error.message,"error");}
+  finally{button.disabled=false;}
+}
 function renderDiagnostics(){const c=state.snapshot?.communication,s=state.snapshot?.session;if(!c)return;$("diagnosticStats").innerHTML=[["通信健康",c.text,""],["连续失败",fmt(c.failureCount.value,0),"次"],["请求总数",fmt(s?.request_count,0),"次"],["最近成功",s?.last_success_at||"--",""]].map(([name,value,unit])=>`<article class="hero-card"><span>${name}</span><strong>${esc(value)}</strong><em>${unit}</em></article>`).join("");}
 
 function renderDevices(){const selected=state.selectedDeviceId;$("deviceCards").innerHTML=state.devices.length?state.devices.map(d=>`<article class="device-card ${d.id===selected?"selected":""}"><div class="card-head"><h3>${esc(d.name)}</h3><span class="state-pill ${d.enabled?'ok':''}">${d.enabled?'已启用':'已禁用'}</span></div><div class="device-meta"><span>端口</span><strong>${esc(d.address)}</strong><span>从站</span><strong>${d.slaveId}</strong><span>串口</span><strong>${d.baudrate} ${d.parity}81</strong><span>协议</span><strong>V7 RTU</strong></div><div class="device-actions"><button class="button small primary" data-select-device="${esc(d.id)}">选择</button><button class="button small secondary" data-edit-device="${esc(d.id)}">编辑</button><button class="button small danger ghost" data-delete-device="${esc(d.id)}">删除</button></div></article>`).join(""):'<div class="empty-state panel">暂无设备，点击“添加设备”开始配置。</div>';
@@ -182,9 +192,9 @@ function bind(){
   $("resetAllValvesBtn").addEventListener("click",()=>writeControl("holding.runtime.reset",7));
   $("refreshConfigBtn").addEventListener("click",async()=>{try{await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});await refreshParameters();showNotice("参数读取完成");}catch(e){showNotice(e.message,"error");}});
   $("commitConfigBtn").addEventListener("click",()=>configAction("commit"));$("discardConfigBtn").addEventListener("click",()=>configAction("discard"));$("configSearch").addEventListener("input",renderConfigTable);
-  $("refreshEventsBtn").addEventListener("click",refreshEvents);$("refreshTrafficBtn").addEventListener("click",refreshTraffic);$("clearTrafficBtn").addEventListener("click",async()=>{await api("/api/traffic/clear",{method:"POST",body:"{}"});await refreshTraffic();});
+  $("refreshEventsBtn").addEventListener("click",refreshEvents);$("refreshTrafficBtn").addEventListener("click",refreshTraffic);$("clearTrafficBtn").addEventListener("click",async()=>{await api("/api/traffic/clear",{method:"POST",body:"{}"});await refreshTraffic();});$("sendDebugFrameBtn").addEventListener("click",sendDebugFrame);
   $("addDeviceBtn").addEventListener("click",()=>openDeviceDialog());$("closeDeviceDialog").addEventListener("click",()=>$("deviceDialog").close());$("cancelDeviceBtn").addEventListener("click",()=>$("deviceDialog").close());$("deviceForm").addEventListener("submit",saveDevice);
-  setInterval(()=>$("clockText").textContent=new Date().toLocaleString("zh-CN",{hour12:false}),1000);
+  setInterval(()=>$("clockText").textContent=new Date().toLocaleString("zh-CN",{hour12:false}),1000);setInterval(()=>state.activePage==="diagnostics"&&refreshTraffic(),1000);
 }
 
 bind();bootstrap().catch(error=>showNotice(`系统初始化失败：${error.message}`,"error"));

@@ -93,6 +93,7 @@
 
       <section class="page" data-page-view="diagnostics">
         <div id="diagnosticStats" class="hero-grid compact"></div>
+        <div class="panel diagnostic-send-panel"><div><h3>手动报文发送</h3><p>输入十六进制字节，可自动附加 Modbus RTU CRC；发送过程会暂停同串口轮询并在结束后恢复。</p></div><div class="diagnostic-send-form"><textarea id="debugFrameInput" spellcheck="false" placeholder="示例：01 03 03 20 00 11"></textarea><div class="diagnostic-send-options"><label class="check-label"><input id="debugAppendCrc" type="checkbox" checked>自动附加 CRC</label><label class="check-label"><input id="debugExpectResponse" type="checkbox" checked>等待响应</label><label>超时(ms)<input id="debugTimeoutMs" type="number" min="100" max="10000" value="1200"></label><button id="sendDebugFrameBtn" class="button primary">发送报文</button></div><pre id="debugFrameResult" class="debug-frame-result">等待发送</pre></div></div>
         <div class="panel"><div class="panel-title"><div><h3>Modbus 请求记录</h3><p>CRC、超时、异常码和请求/响应帧</p></div><div class="button-row"><button id="clearTrafficBtn" class="button small secondary">清空</button><button id="refreshTrafficBtn" class="button small secondary">刷新</button></div></div><div class="table-scroll"><table><thead><tr><th>时间</th><th>设备</th><th>请求</th><th>响应</th><th>状态</th><th>错误</th></tr></thead><tbody id="trafficTableBody"></tbody></table></div></div>
       </section>
 

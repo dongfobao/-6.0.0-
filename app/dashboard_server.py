@@ -176,6 +176,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 return self._json(service.execute_config_transaction(str(body.get("deviceId") or ""), str(body.get("action") or "")))
             if method == "POST" and path == "/api/control/write":
                 return self._json(service.write_runtime_control(str(body.get("deviceId") or ""), str(body.get("itemId") or ""), body.get("value")))
+            if method == "POST" and path == "/api/diagnostics/send-frame":
+                devices_payload = load_live_devices(LIVE_DEVICES_PATH)
+                device_id = str(body.get("deviceId") or devices_payload.get("selectedDeviceId") or "")
+                device = _find_device(devices_payload, device_id)
+                if device is None:
+                    raise ValueError("未找到要发送报文的设备")
+                timeout_ms = body.get("responseTimeoutMs")
+                return self._json(service.send_debug_frame(
+                    device,
+                    str(body.get("requestHex") or ""),
+                    append_crc_bytes=bool(body.get("appendCrc", True)),
+                    expect_response=bool(body.get("expectResponse", True)),
+                    response_timeout_ms=int(timeout_ms) if timeout_ms not in (None, "") else None,
+                ))
             if method == "POST" and path == "/api/traffic/clear":
                 return self._json(service.clear_command_traffic())
             if method == "POST" and path == "/api/session/export":
