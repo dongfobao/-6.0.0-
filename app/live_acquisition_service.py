@@ -377,7 +377,7 @@ class LiveAcquisitionService:
     ) -> dict[str, Any]:
         slot = self._get_device_slot(device_id)
         if slot is None:
-            return {"rows": [], "byMetric": {}, "range": {"start": start_at, "end": end_at}}
+            return {"rows": [], "byMetric": {}, "availableDates": [], "availableRange": None, "range": {"start": start_at, "end": end_at}}
         start_time = _parse_iso(start_at)
         end_time = _parse_iso(end_at)
         if start_time is not None and end_time is not None and end_time < start_time:
@@ -386,6 +386,8 @@ class LiveAcquisitionService:
         end_epoch = end_time.timestamp() if end_time is not None else float("inf")
         capped_limit = max(1, min(limit, 2000))
         with self._lock:
+            all_epochs = sorted({float(row["epoch"]) for rows in slot["history"].values() for row in rows})
+            available_dates = sorted({datetime.fromtimestamp(epoch).strftime("%Y-%m-%d") for epoch in all_epochs}, reverse=True)
             by_metric: dict[str, list[dict[str, Any]]] = {}
             for key, rows in slot["history"].items():
                 filtered = [dict(row) for row in rows if cutoff <= row["epoch"] <= end_epoch]
@@ -403,6 +405,11 @@ class LiveAcquisitionService:
             return {
                 "rows": merged_rows[-capped_limit:],
                 "byMetric": by_metric,
+                "availableDates": available_dates,
+                "availableRange": {
+                    "start": _iso(datetime.fromtimestamp(all_epochs[0])),
+                    "end": _iso(datetime.fromtimestamp(all_epochs[-1])),
+                } if all_epochs else None,
                 "range": {
                     "start": _iso(start_time) if start_time is not None else None,
                     "end": _iso(end_time) if end_time is not None else None,

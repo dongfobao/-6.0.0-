@@ -6,6 +6,7 @@
   <title>YLDQ 6.0 远程监控系统</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/valve-controls.css">
+  <link rel="stylesheet" href="/trend-workbench.css">
 </head>
 <body>
   <div class="app-shell">
@@ -51,16 +52,21 @@
       </section>
 
       <section class="page" data-page-view="trends">
-        <div class="panel toolbar-panel trend-control-panel">
-          <div class="trend-toolbar-row"><div><h3>关键点位</h3><p>按业务场景快速选择，仍可单独勾选任意曲线。</p></div><div class="button-row"><button class="button small secondary" data-trend-preset="environment">三路温湿度</button><button class="button small secondary" data-trend-preset="process">过程重点</button><button class="button small secondary" data-trend-preset="all">全部关键点</button></div></div>
-          <div id="trendToggles" class="trend-toggles"></div>
-          <div class="trend-toolbar-row trend-time-row"><div class="quick-range"><button class="button small secondary" data-trend-window="900000">15 分钟</button><button class="button small secondary" data-trend-window="3600000">1 小时</button><button class="button small secondary" data-trend-window="21600000">6 小时</button><button class="button small secondary" data-trend-window="86400000">24 小时</button></div><div class="trend-time-inputs"><label>开始<input id="trendStart" type="datetime-local"></label><label>结束<input id="trendEnd" type="datetime-local"></label><button id="applyTrendRangeBtn" class="button secondary">查询时段</button></div></div>
-          <div class="trend-toolbar-row"><small id="trendRangeText">实时数据</small><div class="button-row"><button id="zoomOutTrendBtn" class="button small secondary">缩小</button><button id="resetTrendZoomBtn" class="button small secondary">复位</button><button id="zoomInTrendBtn" class="button small secondary">放大</button><button id="exportTrendBtn" class="button small primary">导出 CSV</button></div></div>
-          <select id="trendWindow"><option value="300000">最近5分钟</option><option value="900000" selected>最近15分钟</option><option value="3600000">最近1小时</option><option value="21600000">最近6小时</option></select>
-          <button id="refreshTrendBtn" class="button secondary">刷新曲线</button>
+        <div class="trend-page-heading"><div><span>LIVE TREND WORKBENCH</span><h2>实时曲线工作台</h2><p>按日期和任意时间调用数据，支持框选统计、缩放、平移、关键点、悬浮读数与导出。</p></div><div class="trend-live-badge"><i></i><div><strong>实时更新</strong><small id="trendRangeText">等待数据</small></div></div></div>
+        <div class="panel trend-query-panel">
+          <div class="trend-query-section"><label class="trend-section-label">日期</label><select id="trendDatePreset"><option value="">全部可用日期</option></select></div>
+          <div class="trend-query-section trend-time-inputs"><label>开始时间<input id="trendStart" type="datetime-local"></label><span>至</span><label>结束时间<input id="trendEnd" type="datetime-local"></label><button id="applyTrendRangeBtn" class="button primary">应用时间</button></div>
+          <div class="trend-query-section quick-range"><label class="trend-section-label">快捷范围</label><button class="button small secondary" data-trend-window="900000">15 分钟</button><button class="button small secondary" data-trend-window="3600000">1 小时</button><button class="button small secondary" data-trend-window="21600000">6 小时</button><button class="button small secondary" data-trend-window="86400000">24 小时</button><button class="button small secondary" data-trend-window="604800000">7 天</button></div>
         </div>
-        <div class="panel chart-panel"><canvas id="trendCanvas"></canvas><div id="chartEmpty" class="empty-overlay">等待实时数据</div></div>
-        <div class="panel"><h3>最新测量值</h3><div id="trendLatest" class="latest-grid"></div></div>
+        <div class="panel trend-series-panel"><div class="trend-series-head"><div><h3>显示曲线</h3><p>按业务场景选择，或单独开关任意测点。</p></div><div class="button-row"><button class="button small secondary" data-trend-preset="environment">三路温湿度</button><button class="button small secondary" data-trend-preset="process">压力与流量</button><button class="button small secondary" data-trend-preset="all">全部测点</button></div></div><div id="trendToggles" class="trend-toggles"></div></div>
+        <div id="trendChartPanel" class="panel chart-panel trend-chart-panel">
+          <div class="trend-chart-toolbar"><div class="trend-tool-group"><button id="undoTrendZoomBtn" title="返回上一视图">↶ 上一步</button><button id="resetTrendZoomBtn" title="重置视图 (R)">↻ 复位</button></div><div class="trend-tool-group"><button id="panLeftTrendBtn" title="向左平移">←</button><button id="zoomOutTrendBtn" title="缩小时间轴 (-)">时间−</button><button id="zoomInTrendBtn" title="放大时间轴 (+)">时间＋</button><button id="panRightTrendBtn" title="向右平移">→</button></div><div class="trend-tool-group"><button id="tightenTrendYBtn" title="放大纵轴波动">纵轴＋</button><button id="relaxTrendYBtn" title="缩小纵轴波动">纵轴−</button></div><div class="trend-tool-group"><button id="toggleTrendLabelsBtn" title="显示数值标签">数值</button><button id="toggleTrendKeyPointsBtn" class="active" title="显示最小、最大和最新点">关键点</button><button id="toggleTrendEventsBtn" class="active" title="显示设备事件">事件</button><button id="fullscreenTrendBtn" title="全屏 (F)">全屏</button></div><div class="trend-tool-group"><button id="exportTrendPngBtn" title="导出图片">PNG</button><button id="exportTrendBtn" class="primary" title="导出数据">CSV</button></div></div>
+          <canvas id="trendCanvas" class="interactive-chart"></canvas><div id="chartEmpty" class="empty-overlay">等待实时数据</div>
+          <div class="trend-chart-hint">滚轮缩放 · 拖拽框选时间段 · Shift+拖拽平移 · 悬浮查看精确值 · R/方向键快捷操作</div>
+        </div>
+        <div id="trendSelectionStats" class="panel trend-selection-stats hidden"></div>
+        <div class="panel trend-stat-panel"><div class="panel-title"><div><h3>当前时段统计</h3><p>最新值、最小值、最大值和平均值</p></div><button id="refreshTrendBtn" class="button small secondary">立即刷新</button></div><div id="trendLatest" class="latest-grid"></div></div>
+          <select id="trendWindow" hidden aria-hidden="true"><option value="300000">最近5分钟</option><option value="900000" selected>最近15分钟</option><option value="3600000">最近1小时</option><option value="21600000">最近6小时</option></select>
       </section>
 
       <section class="page" data-page-view="control">

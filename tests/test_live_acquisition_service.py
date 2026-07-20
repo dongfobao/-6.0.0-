@@ -617,6 +617,9 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
         self.assertEqual([row["value"] for row in series["byMetric"]["pressure"]], [2.0])
         self.assertEqual(series["range"]["start"], "2026-07-20 10:30:00")
+        self.assertEqual(series["availableDates"], ["2026-07-20"])
+        self.assertEqual(series["availableRange"]["start"], "2026-07-20 10:00:00")
+        self.assertEqual(series["availableRange"]["end"], "2026-07-20 12:00:00")
 
     @staticmethod
     def _lock_context(service):
