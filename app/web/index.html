@@ -68,7 +68,6 @@
       </section>
 
       <section class="page" data-page-view="control">
-        <div class="warning-banner">即时控制会直接改变设备输出。所有命令仅写入 V7 运行区 800–807，并显示执行结果。</div>
         <div class="control-grid">
           <article class="panel control-card"><h3>远程加热</h3><p>控制远程加热总标志</p><div class="button-pair"><button data-control="holding.runtime.remote_heat" data-value="1" class="button primary">启用</button><button data-control="holding.runtime.remote_heat" data-value="0" class="button secondary">关闭</button></div></article>
           <article class="panel control-card"><h3>加热通道1</h3><p>自动 / 强制关 / 强制开</p><div class="segmented" data-mode-control="holding.runtime.htc1_mode"></div></article>
@@ -78,6 +77,7 @@
         <div class="section-heading"><div><h2>阀门控制</h2><p>远程命令超过固件时限会自动释放</p></div></div>
         <div id="valveControls" class="control-grid"></div>
         <div class="panel reset-panel"><div><h3>阀门故障复位</h3><p>按位复位：上阀 1、左阀 2、右阀 4、全部 7</p></div><button id="resetAllValvesBtn" class="button danger">复位全部阀门故障</button></div>
+        <div class="warning-banner control-footer-note">即时控制会直接改变设备输出。所有命令仅写入 V7 运行区 800–807，并显示执行结果。</div>
       </section>
 
       <section class="page" data-page-view="configuration">
