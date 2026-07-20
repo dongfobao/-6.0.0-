@@ -81,8 +81,6 @@ REGISTER_CATALOG: list[dict[str, Any]] = [
     _point("input_register.system.rtc_seconds", "设备时间", "input_register", 2, "uint32", group="system", unit="s"),
     _point("input_register.system.config_generation", "配置代次", "input_register", 4, group="system"),
     _point("input_register.system.last_config_error", "最近配置错误", "input_register", 5, group="system"),
-    _point("input_register.temperature", "主显示温度", "input_register", 6, "float32", group="environment", unit="°C"),
-    _point("input_register.humidity", "主显示湿度", "input_register", 8, "float32", group="environment", unit="%RH"),
 ]
 
 

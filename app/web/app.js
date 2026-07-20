@@ -56,12 +56,10 @@ function renderAcquisitionStatus(payload){
   setConnection(status?.communication_health||"idle",status?.communication_text||"待采集");
   $("startBtn").disabled=Boolean(status?.running); $("stopBtn").disabled=!payload.global?.running;
 }
-function renderEmptySnapshot(){state.snapshot=null;["mainTemperature","mainHumidity","pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';setConnection("idle","待配置");}
+function renderEmptySnapshot(){state.snapshot=null;["pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';setConnection("idle","待配置");}
 function renderSnapshot(){
   const s=state.snapshot;if(!s)return renderEmptySnapshot();
-  $("mainTemperature").textContent=fmt(s.system.mainTemperature.value);$("mainHumidity").textContent=fmt(s.system.mainHumidity.value);
   $("pressureValue").textContent=fmt(s.process.pressure.value);$("flowValue").textContent=fmt(s.process.flow.value);
-  $("mainTemperatureTs").textContent=s.system.mainTemperature.updatedAt||"等待数据";$("mainHumidityTs").textContent=s.system.mainHumidity.updatedAt||"等待数据";
   $("pressureStatus").textContent=`状态 ${fmt(s.process.pressureStatus.displayValue)}`;$("breathState").textContent=`呼吸状态 ${fmt(s.process.breathState.displayValue)}`;
   $("sensorCards").innerHTML=s.environmentChannels.map(ch=>`<article class="sensor-card"><div class="card-head"><h3>温湿度 ${ch.channel}</h3><span class="quality-dot ${ch.readOk.value?"ok":""}">${ch.readOk.value?"通信正常":"无有效数据"}</span></div><div class="sensor-values"><div class="sensor-value"><span>温度</span><strong>${fmt(ch.temperature.value)} <small>°C</small></strong></div><div class="sensor-value"><span>湿度</span><strong>${fmt(ch.humidity.value)} <small>%RH</small></strong></div></div><div class="output-meta"><span>传感器状态</span><strong>${fmt(ch.status.displayValue)}</strong></div></article>`).join("");
   $("outputCards").innerHTML=s.outputs.map(out=>`<article class="output-card"><div class="card-head"><strong>${esc(out.name)}</strong><span class="state-pill ${Number(out.state.value)===1?"on":""}">${esc(fmt(out.state.displayValue))}</span></div><div class="output-meta"><span>模式 ${esc(fmt(out.mode?.displayValue))}</span><span>${out.count?`累计 ${esc(fmt(out.count.value,0))} 次`:""}</span></div></article>`).join("");

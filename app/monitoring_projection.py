@@ -83,8 +83,6 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "rtcSeconds": _take(by_id, "input_register.system.rtc_seconds"),
             "configGeneration": _take(by_id, "input_register.system.config_generation"),
             "lastConfigError": _take(by_id, "input_register.system.last_config_error"),
-            "mainTemperature": _take(by_id, "input_register.temperature"),
-            "mainHumidity": _take(by_id, "input_register.humidity"),
         },
         "environmentChannels": channels,
         "process": {

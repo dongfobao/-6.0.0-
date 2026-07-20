@@ -15,7 +15,7 @@ READ_FUNCTION_AREAS = {2: "discrete_input", 3: "holding_register", 4: "input_reg
 
 # 地址块按下位机 V7 映射显式定义，避免跨越保留区读取。
 _DEFAULT_BLOCKS = (
-    ("standard", 4, 0, 10, True, 250, "系统状态与主显示温湿度"),
+    ("standard", 4, 0, 10, True, 250, "系统状态"),
     ("fast", 4, 100, 18, True, 120, "三路温湿度"),
     ("fast", 4, 200, 14, True, 120, "压力、流量与呼吸状态"),
     ("fast", 4, 300, 38, True, 120, "输出、累计运行与三路阀门"),

@@ -40,8 +40,8 @@ class LiveRegisterCatalogTests(unittest.TestCase):
             self.assertEqual(self.by_id[f"{prefix}.control_source"]["address"], base + 5)
 
     def test_multiword_values_follow_big_endian_word_lengths(self) -> None:
-        self.assertEqual(self.by_id["input_register.temperature"]["address"], 6)
-        self.assertEqual(self.by_id["input_register.temperature"]["wordLength"], 2)
+        self.assertNotIn("input_register.temperature", self.by_id)
+        self.assertNotIn("input_register.humidity", self.by_id)
         self.assertEqual(self.by_id["input_register.output.htc1_open_count"]["address"], 308)
         self.assertEqual(self.by_id["input_register.output.htc1_open_count"]["wordLength"], 4)
         self.assertEqual(self.by_id["input_register.communication.failure_count"]["wordLength"], 2)
