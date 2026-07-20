@@ -43,8 +43,13 @@
           <div id="sensorCards" class="sensor-grid"></div>
         </section>
 
+        <section class="overview-section process-section">
+          <div class="overview-section-head"><div><small>PROCESS</small><h3>压力与流量</h3></div><p>实时过程量与呼吸状态</p></div>
+          <div class="overview-quick-metrics"><article class="quick-metric pressure"><span>压力</span><div><strong id="pressureValue">--</strong><em>kPa</em></div><small id="pressureStatus">状态 --</small></article><article class="quick-metric flow"><span>流量</span><div><strong id="flowValue">--</strong><em>L/min</em></div><small id="breathState">呼吸状态 --</small></article></div>
+        </section>
+
         <div class="overview-operations-grid">
-          <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div class="overview-quick-metrics"><article class="quick-metric pressure"><span>压力</span><div><strong id="pressureValue">--</strong><em>kPa</em></div><small id="pressureStatus">状态 --</small></article><article class="quick-metric flow"><span>流量</span><div><strong id="flowValue">--</strong><em>L/min</em></div><small id="breathState">呼吸状态 --</small></article></div><div id="outputCards" class="output-grid"></div></section>
+          <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div id="outputCards" class="output-grid"></div></section>
           <section class="overview-section valve-section"><div class="overview-section-head"><div><small>VALVES</small><h3>阀门工作状态</h3></div><p>位置、执行状态、故障和控制来源</p></div><div id="valveCards" class="valve-list"></div></section>
         </div>
       </section>
