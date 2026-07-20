@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 import threading
 import time
 from collections import deque
@@ -12,8 +11,9 @@ from typing import Any
 
 from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
-from live_register_catalog import get_register_catalog
+from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog
 from live_session_recorder import LiveSessionRecorder
+from modbus_v7_codec import decode_words, encode_words
 
 
 def _now() -> datetime:
@@ -483,9 +483,7 @@ class LiveAcquisitionService:
             try:
                 area = str(item.get("area") or "")
                 address = int(item.get("address") or 0)
-                if area == "coil":
-                    client.write_single_coil(address, bool(decoded_value))
-                elif area == "holding_register":
+                if area == "holding_register":
                     if len(encoded_words) == 1:
                         client.write_single_register(address, encoded_words[0])
                     else:
@@ -908,27 +906,17 @@ class LiveAcquisitionService:
         with self._lock:
             slot["state"]["request_count"] = int(slot["state"].get("request_count") or 0) + 1
             slot["state"]["last_attempt_at"] = _iso(_now())
-        mode = str(command.get("mode") or "modbus_read")
-        if mode == "raw_hex":
-            request_bytes = self._parse_command_request_hex(command, client.config.slave_id)
-            client.send_raw_frame(
-                request_bytes,
-                append_crc_bytes=bool(command.get("appendCrc", True)),
-                expect_response=bool(command.get("expectResponse", True)),
-                response_timeout_ms=command.get("responseTimeoutMs"),
-            )
-        else:
-            block = self._command_to_block(command)
-            values = self._read_block(client, block)
-            if block["items"] and str(command.get("decodeMode") or "catalog") == "catalog":
-                self._apply_block_values(device_id, slot, block, values)
+        block = self._command_to_block(command)
+        values = self._read_block(client, block)
+        if block["items"] and str(command.get("decodeMode") or "catalog") == "catalog":
+            self._apply_block_values(device_id, slot, block, values)
         self._record_command_success_event(slot, command, 1)
 
     def _command_to_block(self, command: dict[str, Any]) -> dict[str, Any]:
         function_code = _safe_int(command.get("functionCode"), 0)
         address = max(0, _safe_int(command.get("address"), 0))
         count = max(1, _safe_int(command.get("count"), 1))
-        area_by_function = {1: "coil", 2: "discrete_input", 3: "holding_register", 4: "input_register"}
+        area_by_function = {2: "discrete_input", 3: "holding_register", 4: "input_register"}
         area = area_by_function.get(function_code)
         if area is None:
             raise ValueError(f"unsupported polling command function code: {function_code}")
@@ -943,18 +931,10 @@ class LiveAcquisitionService:
             "items": items,
         }
 
-    @staticmethod
-    def _parse_command_request_hex(command: dict[str, Any], slave_id: int) -> bytes:
-        template = str(command.get("requestHex") or "")
-        template = template.replace("{slaveId}", f"{slave_id:02X}").replace("{slave_id}", f"{slave_id:02X}")
-        return LiveAcquisitionService._parse_debug_hex(template)
-
     def _read_block(self, client: LiveModbusClient, block: dict[str, Any]) -> list[Any]:
         function_code = block["function_code"]
         address = block["start"]
         count = block["count"]
-        if function_code == 1:
-            return client.read_coils(address, count)
         if function_code == 2:
             return client.read_discrete_inputs(address, count)
         if function_code == 3:
@@ -972,6 +952,11 @@ class LiveAcquisitionService:
             word_length = int(item.get("wordLength") or 1)
             chunk = values[start : start + word_length]
             decoded = self._decode_value(item, chunk)
+            if item["id"] in {"input_register.system.protocol_version", "holding.config.protocol_version"}:
+                if decoded != PROTOCOL_VERSION_WORD:
+                    raise ModbusError(
+                        f"Modbus 协议版本不匹配: 期望 0x{PROTOCOL_VERSION_WORD:04X}, 实际 0x{int(decoded or 0):04X}"
+                    )
             updates.append((item["id"], decoded))
         with self._lock:
             for item_id, decoded in updates:
@@ -1034,29 +1019,11 @@ class LiveAcquisitionService:
     @staticmethod
     def _encode_write_value(item: dict[str, Any], value: Any) -> tuple[list[int], Any]:
         data_type = str(item.get("dataType") or "")
-        area = str(item.get("area") or "")
-        if area == "coil" or data_type == "bool":
-            bool_value = LiveAcquisitionService._parse_bool_value(value)
-            return [0xFF00 if bool_value else 0x0000], bool_value
-        if data_type == "int16":
-            int_value = int(value)
-            return [struct.unpack(">H", struct.pack(">h", int_value))[0]], int_value
-        if data_type == "uint16":
-            int_value = int(value)
-            if int_value < 0 or int_value > 0xFFFF:
-                raise ValueError(f"value out of range for uint16: {int_value}")
-            return [int_value], int_value
-        if data_type == "uint32":
-            int_value = int(value)
-            if int_value < 0 or int_value > 0xFFFFFFFF:
-                raise ValueError(f"value out of range for uint32: {int_value}")
-            words = struct.unpack(">HH", struct.pack(">I", int_value))
-            return [int(words[0]), int(words[1])], int_value
-        if data_type == "float32":
-            float_value = float(value)
-            words = struct.unpack(">HH", struct.pack(">f", float_value))
-            return [int(words[0]), int(words[1])], round(float_value, 4)
-        raise ValueError(f"unsupported writable data type: {data_type}")
+        words = encode_words(value, data_type)
+        decoded = decode_words(words, data_type)
+        if isinstance(decoded, float):
+            decoded = round(decoded, 4)
+        return words, decoded
 
     @staticmethod
     def _parse_bool_value(value: Any) -> bool:
@@ -1073,30 +1040,16 @@ class LiveAcquisitionService:
 
     @staticmethod
     def _decode_value(item: dict[str, Any], raw_values: list[Any]) -> Any:
-        data_type = str(item.get("dataType") or "")
         area = str(item.get("area") or "")
-        if area in {"coil", "discrete_input"}:
+        if area == "discrete_input":
             return bool(raw_values[0]) if raw_values else None
         if not raw_values:
             return None
-        if data_type == "bool":
-            return bool(raw_values[0])
-        if data_type == "int16":
-            return struct.unpack(">h", struct.pack(">H", int(raw_values[0]) & 0xFFFF))[0]
-        if data_type == "uint16":
-            return int(raw_values[0]) & 0xFFFF
-        if data_type == "uint32":
-            if len(raw_values) < 2:
-                return None
-            return struct.unpack(">I", struct.pack(">HH", int(raw_values[0]) & 0xFFFF, int(raw_values[1]) & 0xFFFF))[0]
-        if data_type == "float32":
-            if len(raw_values) < 2:
-                return None
-            return round(
-                struct.unpack(">f", struct.pack(">HH", int(raw_values[0]) & 0xFFFF, int(raw_values[1]) & 0xFFFF))[0],
-                4,
-            )
-        return int(raw_values[0])
+        word_length = int(item.get("wordLength") or 1)
+        if len(raw_values) < word_length:
+            return None
+        value = decode_words([int(word) for word in raw_values[:word_length]], str(item.get("dataType") or "uint16"))
+        return round(value, 4) if isinstance(value, float) else value
 
     def _build_group_schedule(self, device: dict[str, Any]) -> list[dict[str, Any]]:
         settings = device.get("pollingSettings") if isinstance(device.get("pollingSettings"), dict) else {}

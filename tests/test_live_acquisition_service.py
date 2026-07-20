@@ -31,6 +31,15 @@ class SlowStopService(LiveAcquisitionService):
 
 
 class LiveAcquisitionServiceTests(unittest.TestCase):
+    def test_protocol_mismatch_stops_v7_decoding(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        command = next(item for item in service._default_polling_commands if item["address"] == 0 and item["functionCode"] == 4)
+        block = service._command_to_block(command)
+
+        with self.assertRaises(ModbusError):
+            service._apply_block_values("dev-a", slot, block, [0x0600] + [0] * 9)
+
     def test_restarting_waits_for_old_poller_before_new_session(self):
         service = SlowStopService()
         service.start_all([{"id": "old", "name": "old", "address": "COM1", "enabled": True}])
@@ -46,7 +55,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
         service.stop_all()
 
-    def test_write_value_updates_cache_for_coil(self):
+    def test_write_value_updates_runtime_control_register(self):
         calls = []
 
         class FakeClient:
@@ -59,19 +68,19 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             def close(self):
                 calls.append(("close", self.device["id"]))
 
-            def write_single_coil(self, address, value):
-                calls.append(("coil", address, value))
+            def write_single_register(self, address, value):
+                calls.append(("register", address, value))
 
         service = LiveAcquisitionService()
         service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
         service._device_slots["dev-a"]["state"]["running"] = True
 
         with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
-            payload = service.write_value("dev-a", "coil.manual_heat", True)
+            payload = service.write_value("dev-a", "holding.runtime.remote_heat", True)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["item"]["currentValue"], True)
-        self.assertIn(("coil", 1, True), calls)
+        self.assertIn(("register", 800, 1), calls)
 
     def test_write_value_uses_multi_register_write_for_float32(self):
         calls = []
@@ -94,11 +103,11 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         service._device_slots["dev-a"]["state"]["running"] = True
 
         with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
-            payload = service.write_value("dev-a", "holding.derange_ht", 12.5)
+            payload = service.write_value("dev-a", "holding.sensor_1.temperature_offset", 12.5)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["item"]["currentValue"], 12.5)
-        self.assertEqual(calls[0][0], 25)
+        self.assertEqual(calls[0][0], 103)
         self.assertEqual(calls[0][1], [0x4148, 0x0000])
 
     def test_write_value_opens_target_device_client_instead_of_reusing_port_runner(self):
@@ -137,13 +146,13 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         service._port_runners["COM1"] = {"client": ActiveClient(), "device_ids": ["dev-a", "dev-b"]}
 
         with patch.object(live_acquisition_service, "LiveModbusClient", TargetClient):
-            payload = service.write_value("dev-a", "holding.humidity_high", 55)
+            payload = service.write_value("dev-a", "holding.sensor_1.modbus_address", 55)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["item"]["currentValue"], 55)
         self.assertIn(("active-close",), calls)
         self.assertIn(("target-open", "dev-a", 2), calls)
-        self.assertIn(("target-write", "dev-a", 2, 1, 55), calls)
+        self.assertIn(("target-write", "dev-a", 2, 102, 55), calls)
         self.assertIn(("target-close", "dev-a"), calls)
         self.assertIsNone(service._port_runners["COM1"]["client"])
 

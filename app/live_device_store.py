@@ -10,14 +10,14 @@ from live_polling_commands import build_default_polling_commands, normalize_poll
 
 
 DEFAULT_POLLING_GROUPS: dict[str, dict[str, Any]] = {
-    "fast": {"intervalMs": 1000, "targets": ["flow", "breath_states", "heating_states", "alarm_states"]},
-    "standard": {"intervalMs": 5000, "targets": ["temperature", "humidity", "pressure", "sensor_alarms"]},
-    "slow": {"intervalMs": 30000, "targets": ["holding_registers", "coils", "task_config"]},
+    "fast": {"intervalMs": 1000, "targets": ["three_channel_environment", "flow", "pressure", "outputs", "valves"]},
+    "standard": {"intervalMs": 5000, "targets": ["system", "alarms", "communication", "runtime"]},
+    "slow": {"intervalMs": 30000, "targets": ["configuration"]},
 }
 
 DEFAULT_DEVICE_PROFILE: dict[str, Any] = {
     "name": "New Device",
-    "deviceType": "YLDQ-4.0.6",
+    "deviceType": "YLDQ-6.0-Modbus-V7",
     "protocolType": "modbus",
     "transport": "rtu",
     "address": "COM1",
@@ -33,14 +33,6 @@ DEFAULT_DEVICE_PROFILE: dict[str, Any] = {
     "pollingCommands": build_default_polling_commands(),
     "enabled": True,
 }
-
-LEGACY_CATALOG_ITEM_IDS: dict[str, str] = {
-    "coil.drain_online": "coil.valve_online",
-    "coil.cht_online": "coil.antifreeze_online",
-    "input.drain_state": "input.valve_state",
-    "input.valve_state": "input.antifreeze_state",
-}
-
 
 def _normalize_interval_ms(value: Any, default_value: int) -> int:
     try:
@@ -122,33 +114,6 @@ def _normalize_profiles(profiles: Any) -> list[dict[str, Any]]:
     return normalized_profiles or _default_profiles()
 
 
-def _uses_generated_default_commands(commands: Any) -> bool:
-    if not isinstance(commands, list) or not commands:
-        return True
-    for command in commands:
-        if not isinstance(command, dict):
-            return False
-        command_id = str(command.get("id") or "")
-        if not command_id.startswith("default."):
-            return False
-    return True
-
-
-def _migrate_legacy_catalog_item_ids(commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    migrated: list[dict[str, Any]] = []
-    for command in commands:
-        next_command = deepcopy(command)
-        item_ids = next_command.get("catalogItemIds")
-        if isinstance(item_ids, list):
-            next_command["catalogItemIds"] = [
-                LEGACY_CATALOG_ITEM_IDS.get(str(item_id), str(item_id))
-                for item_id in item_ids
-                if str(item_id)
-            ]
-        migrated.append(next_command)
-    return migrated
-
-
 def _build_profile_groups_index(profiles: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
     index: dict[str, dict[str, dict[str, Any]]] = {}
     for profile in profiles:
@@ -190,15 +155,7 @@ def _normalize_device_payload(
     if raw_polling_settings is None:
         raw_polling_settings = device.get("pollingGroups")
     device["pollingSettings"] = _normalize_polling_groups(raw_polling_settings, polling_defaults)
-    if (
-        device["pollingProfile"] == DEFAULT_DEVICE_PROFILE["pollingProfile"]
-        and _uses_generated_default_commands(device.get("pollingCommands"))
-    ):
-        device["pollingCommands"] = build_default_polling_commands()
-    else:
-        device["pollingCommands"] = normalize_polling_commands(
-            _migrate_legacy_catalog_item_ids(device.get("pollingCommands") or [])
-        )
+    device["pollingCommands"] = normalize_polling_commands(device.get("pollingCommands"))
     device["enabled"] = bool(device.get("enabled", True))
     return device
 

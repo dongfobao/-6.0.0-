@@ -105,9 +105,6 @@ class LiveModbusClient:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.close()
 
-    def read_coils(self, address: int, count: int) -> list[bool]:
-        return self._read_bits(1, address, count)
-
     def read_discrete_inputs(self, address: int, count: int) -> list[bool]:
         return self._read_bits(2, address, count)
 
@@ -116,12 +113,6 @@ class LiveModbusClient:
 
     def read_input_registers(self, address: int, count: int) -> list[int]:
         return self._read_registers(4, address, count)
-
-    def write_single_coil(self, address: int, value: bool) -> None:
-        payload = struct.pack(">B B H H", self.config.slave_id, 5, address, 0xFF00 if value else 0x0000)
-        response = self._request(payload, minimum_length=8)
-        if response[:6] != payload[:6]:
-            raise ModbusError("unexpected response payload for write single coil")
 
     def write_single_register(self, address: int, value: int) -> None:
         payload = struct.pack(">B B H H", self.config.slave_id, 6, address, int(value) & 0xFFFF)
@@ -285,7 +276,7 @@ class LiveModbusClient:
         function_code = frame[1]
         if function_code & 0x80:
             return len(frame) >= 5
-        if function_code in {5, 6, 15, 16}:
+        if function_code in {6, 16}:
             return len(frame) >= 8
         byte_count = frame[2]
         expected_length = 3 + byte_count + 2
@@ -341,15 +332,15 @@ class LiveModbusClient:
         if len(payload) < 2:
             return "request"
         fc = payload[1]
-        if fc in {1, 2, 3, 4} and len(payload) >= 6:
+        if fc in {2, 3, 4} and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             count = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} count {count}"
-        if fc in {5, 6} and len(payload) >= 6:
+        if fc == 6 and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             value = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} value {value}"
-        if fc in {15, 16} and len(payload) >= 6:
+        if fc == 16 and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             count = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} count {count}"
@@ -362,7 +353,7 @@ class LiveModbusClient:
         fc = response[1]
         if fc & 0x80 and len(response) >= 3:
             return f"FC{fc & 0x7F:02d} exception {response[2]}"
-        if fc in {5, 6, 15, 16} and len(response) >= 6:
+        if fc in {6, 16} and len(response) >= 6:
             address = int.from_bytes(response[2:4], "big")
             value = int.from_bytes(response[4:6], "big")
             return f"FC{fc:02d} ack {address} / {value}"

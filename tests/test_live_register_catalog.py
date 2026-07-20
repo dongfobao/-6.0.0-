@@ -6,98 +6,62 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from live_register_catalog import get_register_catalog
+from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_catalog_summary
 
 
 class LiveRegisterCatalogTests(unittest.TestCase):
-    def test_respiratory_registers_use_new_config_keys(self) -> None:
-        catalog = get_register_catalog()
-        by_address = {
-            item["address"]: item
-            for item in catalog
-            if item.get("area") == "holding_register" and item.get("address") in {8, 9, 10, 11, 13, 15, 17, 18, 20, 23, 25, 150, 152}
-        }
+    def setUp(self) -> None:
+        self.catalog = get_register_catalog()
+        self.by_id = {item["id"]: item for item in self.catalog}
 
-        self.assertEqual(by_address[8]["configKey"], "RespiratoryRate.HeatOnThreshold")
-        self.assertEqual(by_address[9]["configKey"], "RespiratoryRate.HeatOffThreshold")
-        self.assertEqual(by_address[10]["configKey"], "RespiratoryRate.ExhaleTimeoutMinSec")
-        self.assertEqual(by_address[11]["configKey"], "RespiratoryRate.NoChangeAlarmTimeSec")
-        self.assertEqual(by_address[11]["addressEnd"], 12)
-        self.assertEqual(by_address[13]["configKey"], "RespiratoryRate.ExhaleTimeoutSec")
-        self.assertEqual(by_address[13]["addressEnd"], 14)
-        self.assertEqual(by_address[15]["configKey"], "RespiratoryRate.HeatEvidenceIntervalSec")
-        self.assertEqual(by_address[15]["addressEnd"], 16)
-        self.assertEqual(by_address[17]["configKey"], "RespiratoryRate.HeatEvidenceCount")
-        self.assertEqual(by_address[18]["configKey"], "HumidityValue.offset")
-        self.assertEqual(by_address[18]["addressEnd"], 19)
-        self.assertEqual(by_address[18]["dataType"], "float32")
-        self.assertEqual(by_address[20]["configKey"], "RespiratoryRate.offset")
-        self.assertEqual(by_address[20]["addressEnd"], 21)
-        self.assertEqual(by_address[20]["dataType"], "float32")
-        self.assertEqual(by_address[23]["configKey"], "RespiratoryRate.DERangeLT")
-        self.assertEqual(by_address[25]["configKey"], "RespiratoryRate.DERangeHT")
-        self.assertEqual(by_address[150]["configKey"], "HumidityValue.HeatEvidenceIntervalSec")
-        self.assertEqual(by_address[150]["addressEnd"], 151)
-        self.assertEqual(by_address[150]["dataType"], "uint32")
-        self.assertEqual(by_address[152]["configKey"], "HumidityValue.HeatEvidenceCount")
-        self.assertEqual(by_address[152]["dataType"], "uint16")
+    def test_catalog_is_v7_only_and_has_unique_points(self) -> None:
+        self.assertEqual(PROTOCOL_VERSION_WORD, 0x0700)
+        self.assertEqual(len(self.catalog), len(self.by_id))
+        self.assertFalse(any(item["area"] == "coil" for item in self.catalog))
+        self.assertFalse(any(1 in item["functionCode"] or 5 in item["functionCode"] for item in self.catalog))
+        self.assertEqual(get_register_catalog_summary()["protocolVersion"], "7.0")
 
-    def test_output_online_coils_follow_firmware_config_keys(self) -> None:
-        catalog = get_register_catalog()
-        by_address = {
-            item["address"]: item
-            for item in catalog
-            if item.get("area") == "coil" and item.get("address") in {6, 7, 8, 9, 10}
-        }
+    def test_three_temperature_humidity_channels_match_firmware_map(self) -> None:
+        for channel, base in enumerate((100, 106, 112), start=1):
+            prefix = f"input_register.sensor_{channel}"
+            self.assertEqual(self.by_id[f"{prefix}.temperature"]["address"], base)
+            self.assertEqual(self.by_id[f"{prefix}.humidity"]["address"], base + 2)
+            self.assertEqual(self.by_id[f"{prefix}.status"]["address"], base + 4)
+            self.assertEqual(self.by_id[f"{prefix}.read_ok"]["address"], base + 5)
 
-        self.assertEqual(by_address[6]["configKey"], "outOnline.HeatChannel1_Online")
-        self.assertEqual(by_address[7]["configKey"], "outOnline.HeatChannel2_Online")
-        self.assertEqual(by_address[8]["configKey"], "outOnline.Valve_Online")
-        self.assertEqual(by_address[9]["configKey"], "outOnline.Antifreeze_Online")
-        self.assertEqual(by_address[10]["configKey"], "outOnline.AlarmOutput_Online")
+    def test_three_valves_expose_full_work_state(self) -> None:
+        for channel, base in enumerate((320, 326, 332), start=1):
+            prefix = f"input_register.valve_{channel}"
+            self.assertEqual(self.by_id[f"{prefix}.display_state"]["address"], base)
+            self.assertEqual(self.by_id[f"{prefix}.actuator_state"]["address"], base + 1)
+            self.assertEqual(self.by_id[f"{prefix}.position"]["address"], base + 2)
+            self.assertEqual(self.by_id[f"{prefix}.fault_reason"]["address"], base + 3)
+            self.assertEqual(self.by_id[f"{prefix}.current_adc"]["address"], base + 4)
+            self.assertEqual(self.by_id[f"{prefix}.control_source"]["address"], base + 5)
 
-        config_keys = {item.get("configKey") for item in catalog}
-        self.assertNotIn("outOnline.HTC1_Online", config_keys)
-        self.assertNotIn("outOnline.HTC2_Online", config_keys)
-        self.assertNotIn("outOnline.CHT_Online", config_keys)
-        self.assertNotIn("outOnline.DRAIN_Online", config_keys)
+    def test_multiword_values_follow_big_endian_word_lengths(self) -> None:
+        self.assertEqual(self.by_id["input_register.temperature"]["address"], 6)
+        self.assertEqual(self.by_id["input_register.temperature"]["wordLength"], 2)
+        self.assertEqual(self.by_id["input_register.output.htc1_open_count"]["address"], 308)
+        self.assertEqual(self.by_id["input_register.output.htc1_open_count"]["wordLength"], 4)
+        self.assertEqual(self.by_id["input_register.communication.failure_count"]["wordLength"], 2)
 
-    def test_output_state_inputs_follow_firmware_device_order(self) -> None:
-        catalog = get_register_catalog()
-        by_address = {
-            item["address"]: item
-            for item in catalog
-            if item.get("area") == "discrete_input" and item.get("address") in {13, 14}
-        }
+    def test_config_and_runtime_regions_are_separate(self) -> None:
+        self.assertEqual(self.by_id["holding.config.command"]["address"], 3)
+        self.assertEqual(self.by_id["holding.config.generation"]["address"], 2)
+        self.assertEqual(self.by_id["holding.config.error"]["address"], 4)
+        self.assertEqual(self.by_id["holding.runtime.remote_heat"]["address"], 800)
+        self.assertEqual(self.by_id["holding.runtime.valve_3"]["address"], 806)
+        self.assertFalse(self.by_id["holding.runtime.valve_1_diagnostic_fault"]["writable"])
 
-        self.assertEqual(by_address[13]["id"], "input.valve_state")
-        self.assertEqual(by_address[14]["id"], "input.antifreeze_state")
-
-    def test_task_registers_follow_firmware_modbus_layout(self) -> None:
-        catalog = get_register_catalog()
-        by_id = {item["id"]: item for item in catalog}
-        config_keys = {item.get("configKey") for item in catalog}
-
-        self.assertEqual(by_id["holding.task_count"]["address"], 27)
-
-        self.assertEqual(by_id["holding.task0_start_month"]["address"], 30)
-        self.assertFalse(by_id["holding.task0_start_month"]["writable"])
-        self.assertEqual(by_id["holding.task0_delay"]["address"], 34)
-        self.assertEqual(by_id["holding.task0_delay"]["addressEnd"], 35)
-        self.assertEqual(by_id["holding.task0_humidity_high"]["address"], 36)
-        self.assertEqual(by_id["holding.task0_humidity_low"]["address"], 37)
-        self.assertEqual(by_id["holding.task0_respiratory_on"]["address"], 38)
-        self.assertEqual(by_id["holding.task0_respiratory_off"]["address"], 39)
-
-        self.assertEqual(by_id["holding.task1_delay"]["address"], 44)
-        self.assertEqual(by_id["holding.task2_delay"]["address"], 54)
-
-        self.assertNotIn("TaskArray[0].cycleTime", config_keys)
-        self.assertNotIn("TaskArray[1].cycleTime", config_keys)
-        self.assertNotIn("TaskArray[2].cycleTime", config_keys)
-        self.assertNotIn("holding.task0_cycle", by_id)
-        self.assertNotIn("holding.task1_cycle", by_id)
-        self.assertNotIn("holding.task2_cycle", by_id)
+    def test_configuration_field_offsets_match_v7_document(self) -> None:
+        self.assertEqual(self.by_id["holding.sensor_1.online"]["address"], 100)
+        self.assertEqual(self.by_id["holding.sensor_1.temperature_offset"]["address"], 103)
+        self.assertEqual(self.by_id["holding.sensor_3.humidity_alarm_enabled"]["address"], 162)
+        self.assertEqual(self.by_id["holding.pressure.offset"]["address"], 201)
+        self.assertEqual(self.by_id["holding.flow.no_change_alarm_seconds"]["address"], 227)
+        self.assertEqual(self.by_id["holding.valve_route.switch_interval"]["wordLength"], 2)
+        self.assertEqual(self.by_id["holding.communication.baudrate"]["addressEnd"], 702)
 
 
 if __name__ == "__main__":
