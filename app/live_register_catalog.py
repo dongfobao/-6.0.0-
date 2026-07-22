@@ -186,12 +186,66 @@ _SENSOR_CONFIG_FIELDS = (
     (19, "temperature_alarm_enabled", "温度报警使能", "bool", ""),
     (20, "humidity_alarm_enabled", "湿度报警使能", "bool", ""),
 )
+_UPPER_SENSOR_ONLY_FIELDS = {
+    "temperature_alarm_high", "temperature_alarm_low", "humidity_alarm_high", "humidity_alarm_low",
+    "temperature_alarm_enabled", "humidity_alarm_enabled",
+}
 for channel_index, base_address in enumerate((100, 121, 142), start=1):
     for offset, key, label, data_type, unit in _SENSOR_CONFIG_FIELDS:
+        if channel_index != 3 and key in _UPPER_SENSOR_ONLY_FIELDS:
+            continue
         REGISTER_CATALOG.append(_holding(
             f"holding.sensor_{channel_index}.{key}", f"温湿度{channel_index}{label}", base_address + offset,
             data_type, unit=unit, config_key=f"sensors[{channel_index - 1}].{key}",
         ))
+
+
+# 阈值确认属于每路温湿度传感器的运行参数。主传感器配置块已占满，故使用紧随其后的独立连续块。
+for channel_index, base_address in enumerate((163, 167, 171), start=1):
+    REGISTER_CATALOG.extend([
+        _holding(
+            f"holding.sensor_{channel_index}.threshold_confirm_interval_seconds",
+            f"温湿度{channel_index}阈值确认间隔", base_address, "uint32", unit="秒",
+            config_key=f"humidityTemperature[{channel_index - 1}].thresholdConfirmIntervalSeconds",
+            notes="阈值连续确认的采样间隔，范围 1–86400 秒。",
+        ),
+        _holding(
+            f"holding.sensor_{channel_index}.threshold_confirm_count",
+            f"温湿度{channel_index}阈值确认次数", base_address + 2, "uint32", unit="次",
+            config_key=f"humidityTemperature[{channel_index - 1}].thresholdConfirmCount",
+            notes="达到高/低阈值后需要的确认次数，范围 1–10。",
+        ),
+    ])
+
+
+REGISTER_CATALOG.append(_holding(
+    "holding.system.rtc_sync_epoch", "同步电脑时间", 175, "uint32", group="time_sync", unit="Unix 秒",
+    notes="仅由“同步电脑时间”操作写入；标准 Unix UTC 秒由下位机转换为中国标准时间后写入 RTC，不保存为开机同步配置。",
+))
+
+
+_SCHEDULE_FIELDS = (
+    (0, "selected_task", "当前编辑任务", "uint16", "", "选择要查看或编辑的任务，范围 1–12。"),
+    (1, "task_count", "已配置任务数", "uint16", "条", "任务库中有效任务数，范围 0–12。"),
+    (2, "enabled", "当前任务启用", "bool", "", ""),
+    (3, "start_month", "开始月份", "uint16", "月", "0 表示不设置开始时间。"),
+    (4, "start_day", "开始日期", "uint16", "日", ""),
+    (5, "start_hour", "开始小时", "uint16", "时", ""),
+    (6, "start_minute", "开始分钟", "uint16", "分", ""),
+    (7, "duration_days", "持续时间", "uint32", "天", ""),
+    (9, "humidity_override_enabled", "湿度覆盖启用", "bool", "", ""),
+    (10, "humidity_high_1", "温湿度1覆盖上限", "float32", "%RH", ""),
+    (12, "humidity_high_2", "温湿度2覆盖上限", "float32", "%RH", ""),
+    (14, "humidity_high_3", "温湿度3覆盖上限", "float32", "%RH", ""),
+    (16, "humidity_low_1", "温湿度1覆盖下限", "float32", "%RH", ""),
+    (18, "humidity_low_2", "温湿度2覆盖下限", "float32", "%RH", ""),
+    (20, "humidity_low_3", "温湿度3覆盖下限", "float32", "%RH", ""),
+)
+for offset, key, label, data_type, unit, notes in _SCHEDULE_FIELDS:
+    REGISTER_CATALOG.append(_holding(
+        f"holding.schedule.{key}", label, 720 + offset, data_type, group="schedule",
+        unit=unit, config_key=f"schedule.current.{key}", notes=notes,
+    ))
 
 
 _CONFIG_BLOCKS: tuple[tuple[int, str, str, tuple[tuple[int, str, str, str, str], ...]], ...] = (
@@ -252,6 +306,11 @@ for channel_index, base_address in enumerate((310, 312, 314), start=1):
         _holding(f"holding.valve_{channel_index}.online", f"阀门{channel_index}启用", base_address, "bool", config_key=f"valves[{channel_index - 1}].online"),
         _holding(f"holding.valve_{channel_index}.home_high_level", f"阀门{channel_index}回零方向高电平", base_address + 1, "bool", config_key=f"valves[{channel_index - 1}].home_high_level"),
     ])
+for channel_index, address in enumerate((316, 317, 318), start=1):
+    REGISTER_CATALOG.append(_holding(
+        f"holding.valve_{channel_index}.initial_position", f"阀门{channel_index}上电初始位置", address,
+        "enum16", config_key=f"valves[{channel_index - 1}].initialPosition",
+    ))
 
 
 REGISTER_CATALOG.extend([
@@ -262,7 +321,8 @@ REGISTER_CATALOG.extend([
     _holding("holding.runtime.valve_1", "阀门1命令", 804, group="runtime_control"),
     _holding("holding.runtime.valve_2", "阀门2命令", 805, group="runtime_control"),
     _holding("holding.runtime.valve_3", "阀门3命令", 806, group="runtime_control"),
-    _holding("holding.runtime.reset", "复位命令", 807, group="runtime_control"),
+    _holding("holding.runtime.reset", "阀门故障复位/系统复位", 807, group="runtime_control",
+             notes="1/2/4/7 为阀门故障复位掩码；0xA55A 为远程系统复位。"),
 ])
 for channel_index, base_address in enumerate((808, 811, 814), start=1):
     REGISTER_CATALOG.extend([
@@ -276,11 +336,13 @@ _ENUM_MAPS: dict[str, dict[int, str]] = {
     "holding.runtime.htc1_mode": {0: "自动", 1: "强制关", 2: "强制开"},
     "holding.runtime.htc2_mode": {0: "自动", 1: "强制关", 2: "强制开"},
     "holding.runtime.antifreeze_mode": {0: "自动", 1: "强制关", 2: "强制开"},
+    "holding.runtime.reset": {0: "无操作", 1: "复位阀门1故障", 2: "复位阀门2故障", 4: "复位阀门3故障", 7: "复位全部阀门故障", 0xA55A: "远程系统复位"},
     **{f"holding.sensor_{channel}.bus": {0: "UART", 1: "I2C"} for channel in range(1, 4)},
     "holding.valve_route.mode": {0: "自动", 1: "固定", 2: "轮换"},
     "holding.valve_route.initial_route": {0: "上阀", 1: "左阀", 2: "右阀"},
+    **{f"holding.valve_{channel}.initial_position": {0: "原位", 1: "工作位"} for channel in range(1, 4)},
     "holding.communication.parity": {0: "无校验", 1: "奇校验", 2: "偶校验"},
-    **{f"holding.runtime.valve_{channel}": {0: "释放远程控制", 1: "回原位", 2: "到工作位"} for channel in range(1, 4)},
+    **{f"holding.runtime.valve_{channel}": {0: "释放远程控制", 1: "回原位", 2: "到工作位", 3: "回原点校准"} for channel in range(1, 4)},
     **{f"holding.runtime.valve_{channel}_diagnostic_fault": {
         0: "无故障", 1: "阀门编号无效", 2: "阀门忙", 3: "动作队列已满", 4: "回原位超时",
         5: "目标位置校验失败", 6: "驱动器故障", 7: "过流", 8: "开路", 9: "限位开关卡滞",
@@ -315,6 +377,17 @@ _VALUE_CONSTRAINTS = {
     "holding.valve_route.force_close_days": (0, 365),
     "holding.valve_route.cooling_delay_hours": (0, 8760),
     "holding.control.close_delay_hours": (0, 8760),
+    **{f"holding.sensor_{channel}.threshold_confirm_interval_seconds": (1, 86400) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.threshold_confirm_count": (1, 10) for channel in range(1, 4)},
+    "holding.system.rtc_sync_epoch": (946684800, 4102444799),
+    "holding.schedule.selected_task": (1, 12),
+    "holding.schedule.task_count": (0, 12),
+    "holding.schedule.start_month": (0, 12),
+    "holding.schedule.start_day": (0, 31),
+    "holding.schedule.start_hour": (0, 23),
+    "holding.schedule.start_minute": (0, 59),
+    "holding.schedule.duration_days": (0, 3650),
+    **{f"holding.schedule.humidity_{bound}_{channel}": (0, 100) for bound in ("high", "low") for channel in range(1, 4)},
 }
 for item in REGISTER_CATALOG:
     point_id = str(item["id"])

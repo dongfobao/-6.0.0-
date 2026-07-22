@@ -167,11 +167,18 @@ class LiveSessionRecorder:
         line = (
             f"[{second_key}],/* "
             f"{float(snapshot.get('pressure') or 0):.2f},"
-            f"{float(snapshot.get('temperature') or 0):.2f},"
+            f"{float(snapshot.get('sensor_1.temperature', snapshot.get('temperature')) or 0):.2f},"
             f"{float(snapshot.get('flow') or 0):.2f},"
-            f"{float(snapshot.get('humidity') or 0):.2f}"
+            f"{float(snapshot.get('sensor_1.humidity', snapshot.get('humidity')) or 0):.2f}"
             " */\n"
         )
+        detailed_keys = (
+            "sensor_1.temperature", "sensor_2.temperature", "sensor_3.temperature",
+            "sensor_1.humidity", "sensor_2.humidity", "sensor_3.humidity",
+        )
+        if any(key in snapshot for key in detailed_keys):
+            details = {key: float(snapshot.get(key) or 0) for key in detailed_keys}
+            line = line.rstrip("\n") + " | " + json.dumps(details, ensure_ascii=False, separators=(",", ":")) + "\n"
         self._append_line(self._env_path, line)
         self._record_breath(timestamp, float(snapshot.get("flow") or 0))
 

@@ -1,6 +1,7 @@
 .segmented button.selected{background:var(--cyan);border-color:var(--cyan);color:#03212a;font-weight:800;box-shadow:0 0 0 2px rgba(45,212,191,.18)}
 .segmented button:disabled{cursor:not-allowed;opacity:.42}
 .valve-control-card.has-fault{border-color:rgba(248,113,113,.5)}
+.valve-home-cal{margin-top:10px}
 .valve-control-status{display:grid;gap:5px;margin-top:14px;color:var(--muted);font-size:12px}
 .valve-control-status strong{font-size:12px;color:var(--green)}
 .valve-control-status.fault strong{color:var(--red)}

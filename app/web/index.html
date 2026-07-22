@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/overview-dashboard.css">
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
+  <link rel="stylesheet" href="/analysis.css">
 </head>
 <body>
   <div class="app-shell">
@@ -16,6 +17,7 @@
       <nav id="nav">
         <button class="nav-item active" data-page="overview">运行总览</button>
         <button class="nav-item" data-page="trends">实时曲线</button>
+        <button class="nav-item" data-page="analysis">数据分析</button>
         <button class="nav-item" data-page="control">远程控制</button>
         <button class="nav-item" data-page="configuration">参数配置</button>
         <button class="nav-item" data-page="alarms">告警事件</button>
@@ -72,6 +74,41 @@
           <select id="trendWindow" hidden aria-hidden="true"><option value="300000">最近5分钟</option><option value="900000" selected>最近15分钟</option><option value="3600000">最近1小时</option><option value="21600000">最近6小时</option></select>
       </section>
 
+      <section class="page" data-page-view="analysis">
+        <div class="trend-page-heading"><div><span>OFFLINE DATA ANALYSIS</span><h2>数据分析</h2><p>导入实时采集会话文件夹，回放环境曲线，并对日志关键节点（阀门动作、加热启停、告警等）进行标注分析。</p></div><div class="trend-live-badge offline"><i></i><div><strong>离线分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
+        <div class="panel analysis-import-panel">
+          <div class="analysis-import-actions">
+            <button id="analysisImportFolderBtn" class="button primary">导入会话文件夹</button>
+            <button id="analysisImportFilesBtn" class="button secondary">导入数据文件</button>
+            <button id="analysisClearBtn" class="button secondary">清空</button>
+          </div>
+          <p class="analysis-import-hint">推荐直接选择“实时采集会话”下的整个会话文件夹；也可以单独选择 data_0/log_*.csv（环境量）、breath_data/breath_*.csv（呼吸记录）、run/*.csv（运行日志）、config.json / session_meta.json，文件可以不全。</p>
+          <div id="analysisImportSummary" class="analysis-import-summary">尚未导入数据</div>
+          <div id="analysisRecognition" class="analysis-recognition"></div>
+          <input id="analysisFolderInput" type="file" webkitdirectory directory multiple hidden>
+          <input id="analysisFilesInput" type="file" multiple hidden>
+        </div>
+        <div class="panel trend-query-panel analysis-query-panel">
+          <div class="trend-query-section"><label class="trend-section-label">日期</label><select id="analysisDatePreset"><option value="">全部已导入日期</option></select></div>
+          <div class="trend-query-section trend-time-inputs"><label>开始时间<input id="analysisStart" type="datetime-local"></label><span>至</span><label>结束时间<input id="analysisEnd" type="datetime-local"></label><button id="analysisApplyRangeBtn" class="button primary">应用时间</button></div>
+          <div class="trend-query-section quick-range"><label class="trend-section-label">快捷范围</label><button class="button small secondary" data-analysis-window="900000">15 分钟</button><button class="button small secondary" data-analysis-window="3600000">1 小时</button><button class="button small secondary" data-analysis-window="21600000">6 小时</button><button class="button small secondary" data-analysis-window="86400000">24 小时</button><button class="button small secondary" data-analysis-window="604800000">7 天</button></div>
+        </div>
+        <div class="panel trend-series-panel"><div class="trend-series-head"><div><h3>显示曲线</h3><p>选择需要对比分析的测量量。</p></div></div><div id="analysisToggles" class="trend-toggles"></div></div>
+        <div id="analysisChartPanel" class="panel chart-panel trend-chart-panel">
+          <div class="trend-chart-toolbar"><div class="trend-tool-group"><button id="analysisUndoBtn" title="返回上一视图">↶ 上一步</button><button id="analysisResetBtn" title="重置视图 (R)">↻ 复位</button></div><div class="trend-tool-group"><button id="analysisPanLeftBtn" title="向左平移">←</button><button id="analysisZoomOutBtn" title="缩小时间轴 (-)">时间−</button><button id="analysisZoomInBtn" title="放大时间轴 (+)">时间＋</button><button id="analysisPanRightBtn" title="向右平移">→</button></div><div class="trend-tool-group"><button id="analysisTightenYBtn" title="放大纵轴波动">纵轴＋</button><button id="analysisRelaxYBtn" title="缩小纵轴波动">纵轴−</button></div><div class="trend-tool-group"><button id="analysisToggleLabelsBtn" title="显示曲线数值标签">数值</button><button id="analysisToggleKeyPointsBtn" class="active" title="显示最小、最大和最新点">关键点</button><button id="analysisToggleEventsBtn" class="active" title="在时间线上叠加日志节点">事件</button><button id="analysisLogBtn" title="日志显示和分析">日志</button><button id="analysisFullscreenBtn" title="全屏 (F)">全屏</button></div><div class="trend-tool-group"><button id="analysisExportPngBtn" title="导出当前图像">PNG</button><button id="analysisExportBtn" class="primary" title="导出当前视图数据">CSV</button></div></div>
+          <canvas id="analysisCanvas" class="interactive-chart"></canvas><div id="analysisChartEmpty" class="empty-overlay">请先导入会话数据</div>
+          <div id="analysisTooltip" class="analysis-tooltip hidden"></div>
+          <div class="trend-chart-hint">滚轮缩放 · 拖拽平移 · 悬浮查看精确值 · 顶部时间线叠加日志 · R/F/方向键快捷操作</div>
+        </div>
+        <div class="panel trend-stat-panel"><div class="panel-title"><div><h3>当前视图统计</h3><p>最新值、最小值、最大值、平均值与关键节点数量</p></div></div><div id="analysisStats" class="latest-grid"></div></div>
+        <div id="analysisLogPanel" class="panel analysis-log-panel hidden">
+          <div class="panel-title"><div><h3>日志显示与分析</h3><p>从运行日志与呼吸记录中提取的关键节点，点击任意条目即可在曲线上定位标注。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
+          <div id="analysisEventSummary" class="analysis-event-summary"></div>
+          <div id="analysisEventFilters" class="trend-toggles"></div>
+          <div id="analysisLogList" class="event-list analysis-log-list"></div>
+        </div>
+      </section>
+
       <section class="page" data-page-view="control">
         <div class="control-grid">
           <article class="panel control-card"><h3>远程加热</h3><p>控制远程加热总标志</p><div class="button-pair"><button data-control="holding.runtime.remote_heat" data-value="1" class="button primary">启用</button><button data-control="holding.runtime.remote_heat" data-value="0" class="button secondary">关闭</button></div></article>
@@ -87,10 +124,11 @@
       <section class="page" data-page-view="configuration">
         <div class="config-toolbar panel">
           <div><h3>V7 配置事务</h3><p>修改先暂存并回读；确认后提交，或放弃全部暂存。</p></div>
-          <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="discardConfigBtn" class="button secondary">放弃暂存</button><button id="commitConfigBtn" class="button primary">提交配置</button></div>
+          <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="syncRtcBtn" class="button secondary" title="将当前电脑时间强制写入下位机 RTC">同步电脑时间</button><button id="remoteResetBtn" class="button danger" title="设备将立即重启，通信会短暂中断">远程重启复位</button><button id="discardConfigBtn" class="button secondary">放弃暂存</button><button id="commitConfigBtn" class="button primary">提交配置</button></div>
         </div>
         <div class="filter-row"><input id="configSearch" type="search" placeholder="搜索参数名称或点 ID"></div>
         <div id="configModules" class="config-modules" aria-label="参数模块"></div>
+        <div id="scheduleTaskPicker" class="schedule-task-picker hidden" aria-label="定时任务选择"></div>
         <div class="panel table-panel"><table><thead><tr><th>参数</th><th>地址</th><th>当前值</th><th>单位</th><th>操作</th></tr></thead><tbody id="configTableBody"></tbody></table></div>
       </section>
 
@@ -125,5 +163,6 @@
     </form>
   </dialog>
   <script src="/app.js"></script>
+  <script src="/analysis.js"></script>
 </body>
 </html>

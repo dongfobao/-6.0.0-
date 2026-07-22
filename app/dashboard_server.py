@@ -174,6 +174,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 return self._json(service.stage_config_value(str(body.get("deviceId") or ""), str(body.get("itemId") or ""), body.get("value")))
             if method == "POST" and path == "/api/config/transaction":
                 return self._json(service.execute_config_transaction(str(body.get("deviceId") or ""), str(body.get("action") or "")))
+            if method == "POST" and path == "/api/system/rtc/sync":
+                return self._json(service.sync_rtc_from_epoch(
+                    str(body.get("deviceId") or ""), body.get("epoch"),
+                ))
             if method == "POST" and path == "/api/control/write":
                 return self._json(service.write_runtime_control(str(body.get("deviceId") or ""), str(body.get("itemId") or ""), body.get("value")))
             if method == "POST" and path == "/api/diagnostics/send-frame":

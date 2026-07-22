@@ -9,7 +9,7 @@ const state = {
   configModule: "sensor_1",
 };
 
-const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
+const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",analysis:"数据分析",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
 const TREND_META = {
   "sensor_1.temperature": ["温度1","#fb923c","°C"], "sensor_2.temperature": ["温度2","#facc15","°C"], "sensor_3.temperature": ["温度3","#f87171","°C"],
   "sensor_1.humidity": ["湿度1","#38bdf8","%RH"], "sensor_2.humidity": ["湿度2","#818cf8","%RH"], "sensor_3.humidity": ["湿度3","#a78bfa","%RH"],
@@ -148,7 +148,7 @@ function renderValveControls(runtimeValves=[]){
     const valve=byChannel.get(channel)||{}, command=Number(valve.command?.value ?? 0), fault=Number(valve.faultReason?.value ?? 0), pending=pendingControls.has(`holding.runtime.valve_${channel}`);
     const faultText=valve.faultReason?.displayValue || (fault?`故障 ${fault}`:"无故障"), source=valve.effectiveSource?.displayValue || "--", seconds=valve.remoteSeconds?.value;
     const detail=fault===8?"开路：请检查阀门线圈、接线端子及驱动输出。":"";
-    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
+    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。回原点校准为一次性触发命令，期间该阀显示为运动中。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><button class="button small secondary valve-home-cal" data-control="holding.runtime.valve_${channel}" data-value="3" ${pending?"disabled":""}>回原点校准</button><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
   }).join("");
   document.querySelectorAll("[data-control^='holding.runtime.valve_']").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
 }
@@ -160,7 +160,7 @@ async function writeControl(itemId,value){
     const result=await api("/api/control/write",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value})});
     const confirmed=result.runtimeFeedback?.[itemId];
     const confirmedLabel=result.item?.enumValues?.[confirmed] ?? result.item?.enumValues?.[String(confirmed)] ?? confirmed;
-    showNotice(confirmed===undefined?"命令已发送":`命令已确认：${confirmedLabel}`);
+    showNotice(value===3?"回原点校准已触发":confirmed===undefined?"命令已发送":`命令已确认：${confirmedLabel}`);
     await refreshLive();
   }catch(error){showNotice(error.message,"error");}
   finally{pendingControls.delete(itemId);renderHeatModeControls(state.snapshot?.outputs||[]);renderValveControls(state.snapshot?.runtimeValves||[]);}
@@ -172,13 +172,28 @@ const CONFIG_MODULES=[
   ["pressure","压力传感器"],["flow","流量与呼吸"],["valve","阀门与路由"],
   ["control","控制策略"],["output","输出设置"],["alarm","告警设置"],
   ["logging","数据记录"],["communication","通信设置"],
+  ["schedule","定时任务"],
 ];
 function configSection(item){const section=String(item.id||"").split(".")[1]||"other";return section.startsWith("valve_")?"valve":section;}
 function renderConfigGroups(){
   const available=new Set(state.parameters.map(configSection));
   if(state.configModule&& !available.has(state.configModule))state.configModule="";
   $("configModules").innerHTML=`<button class="config-module ${state.configModule===""?"selected":""}" data-config-module="">全部</button>`+CONFIG_MODULES.filter(([key])=>available.has(key)).map(([key,label])=>`<button class="config-module ${state.configModule===key?"selected":""}" data-config-module="${key}">${label}</button>`).join("");
+  renderScheduleTaskPicker();
   document.querySelectorAll("[data-config-module]").forEach(button=>button.addEventListener("click",()=>{state.configModule=button.dataset.configModule;renderConfigGroups();renderConfigTable();}));
+}
+function renderScheduleTaskPicker(){
+  const picker=$("scheduleTaskPicker");
+  if(state.configModule!=="schedule"){picker.classList.add("hidden");picker.innerHTML="";return;}
+  const selected=Number(state.parameters.find(item=>item.id==="holding.schedule.selected_task")?.currentValue||1);
+  const count=Number(state.parameters.find(item=>item.id==="holding.schedule.task_count")?.currentValue||0);
+  picker.classList.remove("hidden");
+  picker.innerHTML=`<span>编辑任务</span>${Array.from({length:12},(_,index)=>{const number=index+1;return `<button class="schedule-task ${number===selected?"selected":""}" data-schedule-task="${number}">任务 ${number}${number<=count?"":" · 新建"}</button>`;}).join("")}`;
+  picker.querySelectorAll("[data-schedule-task]").forEach(button=>button.addEventListener("click",()=>selectScheduleTask(Number(button.dataset.scheduleTask))));
+}
+async function selectScheduleTask(taskNumber){
+  try{await api("/api/config/stage",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId:"holding.schedule.selected_task",value:taskNumber})});showNotice(`已切换到定时任务 ${taskNumber}`);await refreshParameters();}
+  catch(error){showNotice(error.message,"error");}
 }
 function renderConfigTable(){
   const search=$("configSearch")?.value.trim().toLowerCase()||"", group=state.configModule;const rows=state.parameters.filter(item=>(!group||configSection(item)===group)&&(!search||`${item.name} ${item.id}`.toLowerCase().includes(search)));
@@ -232,6 +247,8 @@ function bind(){
   $("refreshTrendBtn").addEventListener("click",refreshSeries);$("trendWindow").addEventListener("change",()=>applyTrendWindow(Number($("trendWindow").value)));document.querySelectorAll("[data-trend-window]").forEach(button=>button.addEventListener("click",()=>applyTrendWindow(Number(button.dataset.trendWindow))));$("applyTrendRangeBtn").addEventListener("click",()=>{const start=$("trendStart").value,end=$("trendEnd").value;if(!start||!end)return showNotice("请选择完整的开始和结束时间","error");if(new Date(end)<new Date(start))return showNotice("结束时间不能早于开始时间","error");state.trendQuery={windowMs:state.trendQuery.windowMs,start:start.replace("T"," "),end:end.replace("T"," ")};state.trendViewport=null;state.trendViewportHistory=[];refreshSeries();});$("zoomInTrendBtn").addEventListener("click",()=>zoomTrend(.65));$("zoomOutTrendBtn").addEventListener("click",()=>zoomTrend(1.55));$("resetTrendZoomBtn").addEventListener("click",resetTrendViewport);$("exportTrendBtn").addEventListener("click",exportTrendCsv);setupTrendInteractions();bindTrendWorkbench();window.addEventListener("resize",()=>state.activePage==="trends"&&drawTrendChart());
   $("resetAllValvesBtn").addEventListener("click",()=>writeControl("holding.runtime.reset",7));
   $("refreshConfigBtn").addEventListener("click",async()=>{try{await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});await refreshParameters();showNotice("参数读取完成");}catch(e){showNotice(e.message,"error");}});
+  $("syncRtcBtn").addEventListener("click",async()=>{try{const epoch=Math.floor(Date.now()/1000);await api("/api/system/rtc/sync",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,epoch})});showNotice("已将电脑当前本地时间写入下位机 RTC");}catch(e){showNotice(e.message,"error");}});
+  $("remoteResetBtn").addEventListener("click",async()=>{if(!state.selectedDeviceId)return showNotice("请先选择设备","error");if(!confirm("确认远程重启复位设备？设备通信将中断约一分钟。"))return;try{await api("/api/control/write",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId:"holding.runtime.reset",value:0xA55A})});showNotice("重启命令已发送，正在等待设备恢复通信");}catch(e){showNotice(e.message,"error");}});
   $("commitConfigBtn").addEventListener("click",()=>configAction("commit"));$("discardConfigBtn").addEventListener("click",()=>configAction("discard"));$("configSearch").addEventListener("input",renderConfigTable);
   $("refreshEventsBtn").addEventListener("click",refreshEvents);$("refreshTrafficBtn").addEventListener("click",refreshTraffic);$("clearTrafficBtn").addEventListener("click",async()=>{await api("/api/traffic/clear",{method:"POST",body:"{}"});await refreshTraffic();});$("sendDebugFrameBtn").addEventListener("click",sendDebugFrame);
   $("addDeviceBtn").addEventListener("click",()=>openDeviceDialog());$("closeDeviceDialog").addEventListener("click",()=>$("deviceDialog").close());$("cancelDeviceBtn").addEventListener("click",()=>$("deviceDialog").close());$("deviceForm").addEventListener("submit",saveDevice);

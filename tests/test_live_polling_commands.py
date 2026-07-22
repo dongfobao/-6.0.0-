@@ -25,11 +25,18 @@ class LivePollingCommandsTests(unittest.TestCase):
     def test_configuration_blocks_are_manual_refresh_only(self) -> None:
         commands = build_default_polling_commands()
         config_commands = [item for item in commands if item["sourceGroup"] == "slow"]
-        self.assertEqual({item["address"] for item in config_commands}, {100, 200, 220, 300, 400, 500, 600, 700})
+        self.assertEqual({item["address"] for item in config_commands}, {100, 163, 175, 200, 220, 300, 400, 500, 600, 700, 720})
         self.assertTrue(all(not item["autoPoll"] for item in config_commands))
         valve_command = next(item for item in config_commands if item["address"] == 300)
         self.assertGreaterEqual(valve_command["count"], 8)
         self.assertIn("holding.valve_route.cooling_delay_hours", valve_command["catalogItemIds"])
+        self.assertIn("holding.valve_3.initial_position", valve_command["catalogItemIds"])
+        threshold_command = next(item for item in config_commands if item["address"] == 163)
+        self.assertEqual(threshold_command["count"], 12)
+        self.assertIn("holding.sensor_2.threshold_confirm_count", threshold_command["catalogItemIds"])
+        schedule_command = next(item for item in config_commands if item["address"] == 720)
+        self.assertEqual(schedule_command["count"], 22)
+        self.assertIn("holding.schedule.humidity_low_3", schedule_command["catalogItemIds"])
 
     def test_old_or_raw_plan_is_rejected_instead_of_migrated(self) -> None:
         commands = normalize_polling_commands([{

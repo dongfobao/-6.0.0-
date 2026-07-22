@@ -447,6 +447,7 @@ class LiveAcquisitionService:
                 "config": [
                     builder(item) for item in self._catalog
                     if item.get("area") == "holding_register" and 100 <= int(item.get("address") or 0) < 800
+                    and item.get("group") != "time_sync"
                 ],
                 "runtime": [builder(item) for item in self._catalog if item.get("group") == "runtime_control"],
                 "diagnostic": [builder(item) for item in self._catalog if item.get("group") == "diagnostic"],
@@ -493,6 +494,20 @@ class LiveAcquisitionService:
                 "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
             })
         return {"ok": True, "itemId": item_id, "value": self._config_value_from_wire(item, decoded, slot["values"]), "wireValue": decoded, "words": words, "staged": True}
+
+    def sync_rtc_from_epoch(self, device_id: str, epoch_seconds: Any,
+                            timezone_offset_minutes: Any = 0) -> dict[str, Any]:
+        try:
+            epoch = int(epoch_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("电脑时间不是有效的 Unix 秒") from exc
+        # 时区换算由下位机统一完成，避免浏览器和后台服务版本不一致时重复或遗漏换算。
+        self.stage_config_value(device_id, "holding.system.rtc_sync_epoch", epoch)
+        return {
+            "ok": True,
+            "epoch": epoch,
+            "transaction": self.execute_config_transaction(device_id, "commit"),
+        }
 
     def execute_config_transaction(self, device_id: str, action: str) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
@@ -624,9 +639,13 @@ class LiveAcquisitionService:
                         )
                 elif re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
                     runtime_feedback = self._read_runtime_valve_feedback(client)
-                    confirmed = runtime_feedback.get(item_id)
-                    if confirmed is None or int(confirmed) != int(decoded_value):
-                        raise ModbusError(f"阀门命令回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
+                    if int(decoded_value) == 3:
+                        # 回原点校准为一次性触发命令，下位机不回填该值，跳过回读比对
+                        runtime_feedback.pop(item_id, None)
+                    else:
+                        confirmed = runtime_feedback.get(item_id)
+                        if confirmed is None or int(confirmed) != int(decoded_value):
+                            raise ModbusError(f"阀门命令回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
             finally:
                 client.close()
 
@@ -1199,9 +1218,13 @@ class LiveAcquisitionService:
         analog: dict[str, float] = {}
         source_keys = {
             "pressure": "pressure",
-            "temperature": "sensor_1.temperature",
             "flow": "flow",
-            "humidity": "sensor_1.humidity",
+            "sensor_1.temperature": "sensor_1.temperature",
+            "sensor_2.temperature": "sensor_2.temperature",
+            "sensor_3.temperature": "sensor_3.temperature",
+            "sensor_1.humidity": "sensor_1.humidity",
+            "sensor_2.humidity": "sensor_2.humidity",
+            "sensor_3.humidity": "sensor_3.humidity",
         }
         for key, source_key in source_keys.items():
             cached = slot["values"].get(f"input_register.{source_key}") or {}
@@ -1281,14 +1304,14 @@ class LiveAcquisitionService:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
             raise ValueError("live acquisition session is not running for this device")
-        device = deepcopy(slot["config"])
         parameter_commands = [
             item
-            for item in normalize_polling_commands(device.get("pollingCommands"), self._catalog)
-            if item.get("sourceGroup") == "slow" or str(item.get("name") or "").startswith("参数")
+            for item in self._default_polling_commands
+            if item.get("sourceGroup") == "slow"
         ]
         if not parameter_commands:
             return {"ok": True, "message": "no parameter polling commands", "blockCount": 0}
+        device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
         with self._io_lock:
             self._close_runner_client_for_port(port_key)

@@ -41,7 +41,7 @@ set "API_URL=http://127.0.0.1:8765/api/health"
 set "PROJECT_DIR=%cd%"
 
 rem Stop old YLDQ/source processes from this project.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$project=(Resolve-Path '%PROJECT_DIR%').Path.TrimEnd('\'); Get-CimInstance Win32_Process | Where-Object { $exe=[string]$_.ExecutablePath; $cmd=[string]$_.CommandLine; (($exe -and $exe.StartsWith($project,[StringComparison]::OrdinalIgnoreCase)) -or ($cmd -and $cmd.IndexOf($project,[StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($cmd -and $cmd -like '*dashboard_server.py*') -or ($exe -and $exe -like '*YLDQ*.exe')) } | Sort-Object ProcessId -Descending | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$self=$PID; $parent=(Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $self)).ParentProcessId; $project=(Resolve-Path '%PROJECT_DIR%').Path.TrimEnd('\'); Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $self -and $_.ProcessId -ne $parent -and ($exe=[string]$_.ExecutablePath; $cmd=[string]$_.CommandLine; (($exe -and $exe.StartsWith($project,[StringComparison]::OrdinalIgnoreCase)) -or ($cmd -and $cmd.IndexOf($project,[StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($cmd -and $cmd -like '*dashboard_server.py*') -or ($exe -and $exe -like '*YLDQ*.exe'))) } | Sort-Object ProcessId -Descending | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 1" >nul
 
 rem Refuse to start only when port 8765 is still held by an unrelated process.
