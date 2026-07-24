@@ -80,6 +80,8 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.assertEqual(self.by_id["holding.valve_route.mode"]["configKey"], "control.valveRouting.mode")
         self.assertEqual(self.by_id["holding.valve_route.restart_protection_days"]["unit"], "天")
         self.assertEqual(self.by_id["holding.valve_route.force_close_days"]["unit"], "天")
+        self.assertEqual(self.by_id["holding.valve_route.mode"]["enumValues"], {0: "单路", 1: "双路"})
+        self.assertEqual(self.by_id["holding.valve_route.initial_route"]["enumValues"], {0: "左路", 1: "右路"})
         self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["address"], 306)
         self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["addressEnd"], 307)
         self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["unit"], "小时")
