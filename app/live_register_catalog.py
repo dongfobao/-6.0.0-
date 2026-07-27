@@ -153,12 +153,13 @@ def _holding(
     group: str = "config",
     unit: str = "",
     writable: bool = True,
+    poll_group: str = "slow",
     config_key: str | None = None,
     notes: str = "",
 ) -> dict[str, Any]:
     return _point(
         point_id, name, "holding_register", address, data_type, group=group, unit=unit,
-        writable=writable, poll_group="slow", config_key=config_key, notes=notes,
+        writable=writable, poll_group=poll_group, config_key=config_key, notes=notes,
     )
 
 
@@ -337,6 +338,24 @@ for channel_index, base_address in enumerate((808, 811, 814), start=1):
         _holding(f"holding.runtime.valve_{channel_index}_diagnostic_source", f"阀门{channel_index}生效控制源", base_address + 1, group="diagnostic", writable=False),
         _holding(f"holding.runtime.valve_{channel_index}_remote_seconds", f"阀门{channel_index}远程命令剩余时间", base_address + 2, group="diagnostic", unit="s", writable=False),
     ])
+REGISTER_CATALOG.extend([
+    _holding(
+        "holding.runtime.valve_guard_reason", "阀门动作保护原因", 817, "enum16",
+        group="diagnostic", writable=False, poll_group="fast",
+    ),
+    _holding(
+        "holding.runtime.valve_guard_remaining_seconds", "阀门动作保护剩余时间", 818,
+        group="diagnostic", unit="s", writable=False, poll_group="fast",
+    ),
+    _holding(
+        "holding.runtime.valve_action_count", "阀门当前动作脉冲数", 819,
+        group="diagnostic", unit="次", writable=False, poll_group="fast",
+    ),
+    _holding(
+        "holding.runtime.valve_action_limit", "阀门动作脉冲上限", 820,
+        group="diagnostic", unit="次", writable=False, poll_group="fast",
+    ),
+])
 
 
 _ENUM_MAPS: dict[str, dict[int, str]] = {
@@ -344,6 +363,9 @@ _ENUM_MAPS: dict[str, dict[int, str]] = {
     "holding.runtime.htc2_mode": {0: "自动", 1: "强制关", 2: "强制开"},
     "holding.runtime.antifreeze_mode": {0: "自动", 1: "强制关", 2: "强制开"},
     "holding.runtime.reset": {0: "无操作", 1: "复位阀门1故障", 2: "复位阀门2故障", 4: "复位阀门3故障", 7: "复位全部阀门故障", 0xA55A: "远程系统复位"},
+    "holding.runtime.valve_guard_reason": {
+        0: "无保护", 1: "开机充电等待", 2: "阀门动作保护", 3: "阀门未到位重试等待",
+    },
     **{f"holding.sensor_{channel}.bus": {0: "UART", 1: "I2C"} for channel in range(1, 4)},
     "holding.valve_route.mode": {0: "单路", 1: "双路"},
     **{f"holding.valve_route.idle_position_{role}": {0: "原位", 1: "工作位"}

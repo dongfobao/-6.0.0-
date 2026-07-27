@@ -55,6 +55,15 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.assertEqual(self.by_id["holding.runtime.reset"]["address"], 807)
         self.assertEqual(self.by_id["holding.runtime.reset"]["enumValues"][0xA55A], "远程系统复位")
         self.assertFalse(self.by_id["holding.runtime.valve_1_diagnostic_fault"]["writable"])
+        self.assertEqual(self.by_id["holding.runtime.valve_guard_reason"]["address"], 817)
+        self.assertEqual(self.by_id["holding.runtime.valve_guard_remaining_seconds"]["address"], 818)
+        self.assertEqual(self.by_id["holding.runtime.valve_action_count"]["address"], 819)
+        self.assertEqual(self.by_id["holding.runtime.valve_action_limit"]["address"], 820)
+        self.assertFalse(self.by_id["holding.runtime.valve_guard_reason"]["writable"])
+        self.assertEqual(
+            self.by_id["holding.runtime.valve_guard_reason"]["enumValues"][3],
+            "阀门未到位重试等待",
+        )
 
     def test_configuration_field_offsets_match_v7_document(self) -> None:
         self.assertEqual(self.by_id["holding.sensor_1.online"]["address"], 100)

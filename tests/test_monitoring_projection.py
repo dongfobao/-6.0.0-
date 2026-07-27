@@ -56,12 +56,23 @@ class MonitoringProjectionTests(unittest.TestCase):
                 item(f"{prefix}_diagnostic_source", 2, enumValues={2: "远程"}),
                 item(f"{prefix}_remote_seconds", 600),
             ])
+        controls.extend([
+            item("holding.runtime.valve_guard_reason", 3, enumValues={3: "阀门未到位重试等待"}),
+            item("holding.runtime.valve_guard_remaining_seconds", 42),
+            item("holding.runtime.valve_action_count", 5),
+            item("holding.runtime.valve_action_limit", 6),
+        ])
         result = build_monitoring_snapshot({"metrics": [], "controls": controls, "session": {}})
         valve = result["runtimeValves"][0]
         self.assertEqual(valve["command"]["displayValue"], "到工作位")
         self.assertEqual(valve["faultReason"]["displayValue"], "开路")
         self.assertEqual(valve["effectiveSource"]["displayValue"], "远程")
         self.assertEqual(valve["remoteSeconds"]["value"], 600)
+        self.assertTrue(result["valveGuard"]["active"])
+        self.assertEqual(result["valveGuard"]["reason"]["displayValue"], "阀门未到位重试等待")
+        self.assertEqual(result["valveGuard"]["remainingSeconds"]["value"], 42)
+        self.assertEqual(result["valveGuard"]["actionCount"]["value"], 5)
+        self.assertEqual(result["valveGuard"]["actionLimit"]["value"], 6)
 
 
 if __name__ == "__main__":

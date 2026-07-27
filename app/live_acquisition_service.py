@@ -687,11 +687,11 @@ class LiveAcquisitionService:
 
     def _read_runtime_valve_feedback(self, client: LiveModbusClient) -> dict[str, Any]:
         start_address = 804
-        words = client.read_holding_registers(start_address, 13)
+        words = client.read_holding_registers(start_address, 17)
         feedback: dict[str, Any] = {}
         for item in self._catalog:
             address = int(item.get("address") or -1)
-            if item.get("area") != "holding_register" or address < start_address or address > 816:
+            if item.get("area") != "holding_register" or address < start_address or address > 820:
                 continue
             offset = address - start_address
             word_length = int(item.get("wordLength") or 1)

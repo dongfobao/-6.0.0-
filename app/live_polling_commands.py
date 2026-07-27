@@ -22,7 +22,7 @@ _DEFAULT_BLOCKS = (
     ("standard", 4, 400, 6, True, 250, "告警状态"),
     ("standard", 4, 500, 7, True, 250, "通信健康"),
     ("standard", 3, 0, 5, True, 300, "配置事务状态"),
-    ("standard", 3, 800, 17, True, 300, "运行控制与阀门诊断"),
+    ("fast", 3, 800, 21, True, 300, "运行控制、阀门诊断与动作保护"),
     ("slow", 3, 100, 63, False, 500, "三路温湿度配置"),
     ("slow", 3, 163, 12, False, 500, "三路阈值确认配置"),
     ("slow", 3, 175, 2, False, 500, "RTC 同步事务值"),
@@ -121,6 +121,19 @@ def normalize_polling_commands(commands: Any, catalog: list[dict[str, Any]] | No
             "decodeMode": "catalog",
             "catalogItemIds": [str(value) for value in command.get("catalogItemIds", []) if str(value)],
         })
+    for item in normalized:
+        if (
+            item["functionCode"] == 3
+            and item["address"] == 800
+            and item["count"] == 17
+        ):
+            item["count"] = 21
+            item["requestHex"] = _request_template(3, 800, 21)
+            item["sourceGroup"] = "fast"
+            item["name"] = "运行控制、阀门诊断与动作保护"
+            item["catalogItemIds"] = _item_ids_for_block(
+                list(catalog or get_register_catalog()), 3, 800, 21
+            )
     return normalized or deepcopy(defaults)
 
 

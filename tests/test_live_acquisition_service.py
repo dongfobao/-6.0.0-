@@ -128,7 +128,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
             def read_holding_registers(self, address, count):
                 calls.append(("read", address, count))
-                return [2, 0, 0, 0, 0, 2, 600, 0, 0, 0, 0, 0, 0]
+                return [2, 0, 0, 0, 0, 2, 600, 0, 0, 0, 0, 0, 0, 2, 45, 6, 6]
 
         service = LiveAcquisitionService()
         service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
@@ -139,8 +139,10 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["runtimeFeedback"]["holding.runtime.valve_1"], 2)
+        self.assertEqual(payload["runtimeFeedback"]["holding.runtime.valve_guard_reason"], 2)
+        self.assertEqual(payload["runtimeFeedback"]["holding.runtime.valve_guard_remaining_seconds"], 45)
         self.assertIn(("write", 804, 2), calls)
-        self.assertIn(("read", 804, 13), calls)
+        self.assertIn(("read", 804, 17), calls)
 
     def test_heat_mode_is_read_back_before_success(self):
         calls = []

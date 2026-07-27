@@ -17,10 +17,22 @@ class LivePollingCommandsTests(unittest.TestCase):
         self.assertEqual(automatic, {
             (4, 100, 18), (4, 200, 14), (4, 300, 38),
             (4, 0, 10), (4, 400, 6), (4, 500, 7),
-            (3, 0, 5), (3, 800, 17),
+            (3, 0, 5), (3, 800, 21),
         })
         self.assertTrue(all(item["functionCode"] in {2, 3, 4} for item in commands))
         self.assertTrue(all(item["mode"] == "modbus_read" for item in commands))
+        guard_command = next(item for item in commands if item["address"] == 800)
+        self.assertEqual(guard_command["sourceGroup"], "fast")
+        self.assertIn("holding.runtime.valve_guard_reason", guard_command["catalogItemIds"])
+        self.assertIn("holding.runtime.valve_action_limit", guard_command["catalogItemIds"])
+
+    def test_old_runtime_poll_block_is_replaced(self) -> None:
+        old_commands = build_default_polling_commands()
+        runtime = next(item for item in old_commands if item["address"] == 800)
+        runtime["count"] = 17
+        normalized = normalize_polling_commands(old_commands)
+        migrated = next(item for item in normalized if item["address"] == 800)
+        self.assertEqual(migrated["count"], 21)
 
     def test_configuration_blocks_are_manual_refresh_only(self) -> None:
         commands = build_default_polling_commands()

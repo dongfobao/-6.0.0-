@@ -84,6 +84,22 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "effectiveSource": _take(controls_by_id, f"{prefix}_diagnostic_source"),
             "remoteSeconds": _take(controls_by_id, f"{prefix}_remote_seconds"),
         })
+    valve_guard_reason = _take(
+        controls_by_id, "holding.runtime.valve_guard_reason"
+    )
+    valve_guard = {
+        "active": int(valve_guard_reason.get("value") or 0) in {1, 2, 3},
+        "reason": valve_guard_reason,
+        "remainingSeconds": _take(
+            controls_by_id, "holding.runtime.valve_guard_remaining_seconds"
+        ),
+        "actionCount": _take(
+            controls_by_id, "holding.runtime.valve_action_count"
+        ),
+        "actionLimit": _take(
+            controls_by_id, "holding.runtime.valve_action_limit"
+        ),
+    }
     session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
     return {
         "deviceId": snapshot.get("deviceId"),
@@ -110,6 +126,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "remoteHeat": _take(by_id, "input_register.output.remote_heat"),
         "valves": valves,
         "runtimeValves": runtime_valves,
+        "valveGuard": valve_guard,
         "alarms": {"active": alarm_active, "groups": alarm_items},
         "communication": {
             "online": _take(by_id, "input_register.communication.online"),

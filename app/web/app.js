@@ -64,7 +64,7 @@ function renderAcquisitionStatus(payload){
   setConnection(status?.communication_health||"idle",status?.communication_text||"待采集");
   $("startBtn").disabled=Boolean(status?.running); $("stopBtn").disabled=!payload.global?.running;
 }
-function renderEmptySnapshot(){state.snapshot=null;["pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';setConnection("idle","待配置");}
+function renderEmptySnapshot(){state.snapshot=null;["pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';$("valveGuardNotice").className="valve-guard-notice hidden";$("valveGuardNotice").textContent="";setConnection("idle","待配置");}
 function renderSnapshot(){
   const s=state.snapshot;if(!s)return renderEmptySnapshot();
   $("pressureValue").textContent=fmt(s.process.pressure.value);$("flowValue").textContent=fmt(s.process.flow.value);
@@ -142,18 +142,42 @@ function buildControlButtons(){
   document.querySelectorAll("[data-control]:not([data-heat-mode])").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
   renderValveControls();
 }
+function valveGuardInfo(guard=state.snapshot?.valveGuard||{}){
+  const available=guard.reason?.value!==null&&guard.reason?.value!==undefined&&guard.actionLimit?.value!==null&&guard.actionLimit?.value!==undefined;
+  const reason=Number(guard.reason?.value ?? 0),remaining=Number(guard.remainingSeconds?.value ?? 0),count=Number(guard.actionCount?.value ?? 0),limit=Number(guard.actionLimit?.value ?? 0);
+  return {available,active:available&&[1,2,3].includes(reason),reason,remaining,count,limit,label:guard.reason?.displayValue||"无保护"};
+}
+function renderValveGuard(guard=state.snapshot?.valveGuard||{}){
+  const info=valveGuardInfo(guard),host=$("valveGuardNotice");if(!host)return info;
+  if(!info.available){
+    host.className="valve-guard-notice";
+    host.innerHTML="<strong>阀门保护状态：--</strong><span>启动监控后读取下位机 HR817～820</span>";
+    return info;
+  }
+  const countText=Number.isFinite(info.limit)&&info.limit>0?`动作次数 ${info.count}/${info.limit}`:`动作次数 ${info.count}`;
+  if(info.active){
+    host.className="valve-guard-notice active";
+    host.innerHTML=`<strong>${esc(info.label)}${info.remaining>0?`：请等待 ${fmt(info.remaining,0)} 秒`:""}</strong><span>${esc(countText)}；倒计时以下位机回读为准</span>`;
+  }else{
+    host.className="valve-guard-notice";
+    host.innerHTML=`<strong>阀门动作可用</strong><span>${esc(countText)}；60 秒窗口</span>`;
+  }
+  return info;
+}
 function renderValveControls(runtimeValves=[]){
+  const guard=renderValveGuard(),guardActive=guard.active;
   const fallbackNames=["上阀","左阀","右阀"], byChannel=new Map(runtimeValves.map(item=>[Number(item.channel),item]));
   $("valveControls").innerHTML=[1,2,3].map(channel=>{
     const valve=byChannel.get(channel)||{}, command=Number(valve.command?.value ?? 0), fault=Number(valve.faultReason?.value ?? 0), pending=pendingControls.has(`holding.runtime.valve_${channel}`);
     const faultText=valve.faultReason?.displayValue || (fault?`故障 ${fault}`:"无故障"), source=valve.effectiveSource?.displayValue || "--", seconds=valve.remoteSeconds?.value;
     const detail=fault===8?"开路：请检查阀门线圈、接线端子及驱动输出。":"";
-    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。回原点校准为一次性触发命令，期间该阀显示为运动中。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><button class="button small secondary valve-home-cal" data-control="holding.runtime.valve_${channel}" data-value="3" ${pending?"disabled":""}>回原点校准</button><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
+    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""} ${guardActive?"guard-active":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。回原点校准为一次性触发命令，期间该阀显示为运动中。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)||(guardActive&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><button class="button small secondary valve-home-cal" data-control="holding.runtime.valve_${channel}" data-value="3" ${pending||guardActive?"disabled":""}>回原点校准</button><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
   }).join("");
   document.querySelectorAll("[data-control^='holding.runtime.valve_']").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
 }
 async function writeControl(itemId,value){
   if(!state.selectedDeviceId)return showNotice("请先选择设备","error");
+  if(/^holding\.runtime\.valve_[1-3]$/.test(itemId)&&Number(value)!==0&&valveGuardInfo().active)return showNotice("阀门处于保护等待期，请按下位机倒计时结束后再操作","error");
   if(pendingControls.has(itemId))return;
   pendingControls.add(itemId);renderHeatModeControls(state.snapshot?.outputs||[]);renderValveControls(state.snapshot?.runtimeValves||[]);
   try{
