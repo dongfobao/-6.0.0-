@@ -296,20 +296,27 @@ for base, prefix, display, fields in _CONFIG_BLOCKS:
 
 REGISTER_CATALOG.extend([
     _holding("holding.valve_route.mode", "阀门路由模式", 300, "enum16", config_key="control.valveRouting.mode"),
-    _holding("holding.valve_route.restart_protection_days", "停热后同路再次启动保护间隔", 301, "uint32", unit="天", config_key="control.valveRouting.switchIntervalDays"),
+    _holding("holding.valve_route.route_cycle_days", "自动重启与维护换路周期", 301, "uint32", unit="天", config_key="control.valveRouting.routeCycleDays"),
     _holding("holding.valve_route.force_close_days", "强制关闭时间", 303, "uint32", unit="天", config_key="control.valveRouting.forceCloseDays"),
-    _holding("holding.valve_route.initial_route", "阀门初始路由", 305, "enum16", config_key="control.valveRouting.initialRoute"),
-    _holding("holding.valve_route.cooling_delay_hours", "停热后阀门冷却延时", 306, "uint32", unit="小时", config_key="control.valveRouting.valveCoolingHours"),
+    _holding("holding.valve_route.valve_cooling_hours", "停热后阀门冷却延时", 305, "uint32", unit="小时", config_key="control.valveRouting.valveCoolingHours"),
 ])
-for channel_index, base_address in enumerate((310, 312, 314), start=1):
+for channel_index, (role, display, base_address) in enumerate((
+    ("upper", "上阀", 310),
+    ("left", "左阀", 312),
+    ("right", "右阀", 314),
+), start=1):
     REGISTER_CATALOG.extend([
-        _holding(f"holding.valve_{channel_index}.online", f"阀门{channel_index}启用", base_address, "bool", config_key=f"valves[{channel_index - 1}].online"),
-        _holding(f"holding.valve_{channel_index}.home_high_level", f"阀门{channel_index}回零方向高电平", base_address + 1, "bool", config_key=f"valves[{channel_index - 1}].home_high_level"),
+        _holding(f"holding.valve_{channel_index}.online", f"{display}启用", base_address, "bool", config_key=f"valves.{role}.enabled"),
+        _holding(f"holding.valve_{channel_index}.home_high_level", f"{display}回零方向高电平", base_address + 1, "bool", config_key=f"valves.{role}.homeDirectionHigh"),
     ])
-for channel_index, address in enumerate((316, 317, 318), start=1):
+for role, display, address in (
+    ("upper", "上阀", 307),
+    ("left", "左阀", 308),
+    ("right", "右阀", 309),
+):
     REGISTER_CATALOG.append(_holding(
-        f"holding.valve_{channel_index}.initial_position", f"阀门{channel_index}上电初始位置", address,
-        "enum16", config_key=f"valves[{channel_index - 1}].initialPosition",
+        f"holding.valve_route.idle_position_{role}", f"{display}空闲位置", address,
+        "enum16", config_key=f"control.valveRouting.idlePositions.{role}",
     ))
 
 
@@ -339,16 +346,19 @@ _ENUM_MAPS: dict[str, dict[int, str]] = {
     "holding.runtime.reset": {0: "无操作", 1: "复位阀门1故障", 2: "复位阀门2故障", 4: "复位阀门3故障", 7: "复位全部阀门故障", 0xA55A: "远程系统复位"},
     **{f"holding.sensor_{channel}.bus": {0: "UART", 1: "I2C"} for channel in range(1, 4)},
     "holding.valve_route.mode": {0: "单路", 1: "双路"},
-    "holding.valve_route.initial_route": {0: "左路", 1: "右路"},
-    **{f"holding.valve_{channel}.initial_position": {0: "原位", 1: "工作位"} for channel in range(1, 4)},
+    **{f"holding.valve_route.idle_position_{role}": {0: "原位", 1: "工作位"}
+       for role in ("upper", "left", "right")},
     "holding.communication.parity": {0: "无校验", 1: "奇校验", 2: "偶校验"},
     **{f"holding.runtime.valve_{channel}": {0: "释放远程控制", 1: "回原位", 2: "到工作位", 3: "回原点校准"} for channel in range(1, 4)},
     **{f"holding.runtime.valve_{channel}_diagnostic_fault": {
         0: "无故障", 1: "阀门编号无效", 2: "阀门忙", 3: "动作队列已满", 4: "回原位超时",
         5: "目标位置校验失败", 6: "驱动器故障", 7: "过流", 8: "开路", 9: "限位开关卡滞",
     } for channel in range(1, 4)},
+    **{f"input_register.valve_{channel}.control_source": {
+        0: "自动", 1: "远程", 2: "安全保护", 3: "周期维护",
+    } for channel in range(1, 4)},
     **{f"holding.runtime.valve_{channel}_diagnostic_source": {
-        0: "初始", 1: "自动", 2: "远程", 3: "安全保护", 4: "维护",
+        0: "自动", 1: "远程", 2: "安全保护", 3: "周期维护",
     } for channel in range(1, 4)},
 }
 for point_id in (
@@ -373,9 +383,9 @@ _CONFIG_KEY_OVERRIDES = {
 }
 _VALUE_CONSTRAINTS = {
     "holding.flow.no_change_alarm_days": (0, 365),
-    "holding.valve_route.restart_protection_days": (0, 365),
+    "holding.valve_route.route_cycle_days": (0, 365),
     "holding.valve_route.force_close_days": (0, 365),
-    "holding.valve_route.cooling_delay_hours": (0, 8760),
+    "holding.valve_route.valve_cooling_hours": (0, 8760),
     "holding.control.close_delay_hours": (0, 8760),
     **{f"holding.sensor_{channel}.threshold_confirm_interval_seconds": (1, 86400) for channel in range(1, 4)},
     **{f"holding.sensor_{channel}.threshold_confirm_count": (1, 10) for channel in range(1, 4)},

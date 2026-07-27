@@ -76,23 +76,46 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.assertEqual(self.by_id["holding.flow.no_change_alarm_days"]["unit"], "天")
         self.assertEqual(self.by_id["holding.flow.no_change_alarm_days"]["maximum"], 365)
         self.assertEqual(self.by_id["holding.flow.no_change_alarm_days"]["configKey"], "sensors.flow.noChangeAlarmDays")
-        self.assertEqual(self.by_id["holding.valve_route.restart_protection_days"]["wordLength"], 2)
+        self.assertEqual(self.by_id["holding.valve_route.route_cycle_days"]["address"], 301)
+        self.assertEqual(self.by_id["holding.valve_route.route_cycle_days"]["addressEnd"], 302)
+        self.assertEqual(self.by_id["holding.valve_route.route_cycle_days"]["wordLength"], 2)
+        self.assertEqual(
+            self.by_id["holding.valve_route.route_cycle_days"]["configKey"],
+            "control.valveRouting.routeCycleDays",
+        )
         self.assertEqual(self.by_id["holding.valve_route.mode"]["configKey"], "control.valveRouting.mode")
-        self.assertEqual(self.by_id["holding.valve_route.restart_protection_days"]["unit"], "天")
+        self.assertEqual(self.by_id["holding.valve_route.route_cycle_days"]["unit"], "天")
         self.assertEqual(self.by_id["holding.valve_route.force_close_days"]["unit"], "天")
         self.assertEqual(self.by_id["holding.valve_route.mode"]["enumValues"], {0: "单路", 1: "双路"})
-        self.assertEqual(self.by_id["holding.valve_route.initial_route"]["enumValues"], {0: "左路", 1: "右路"})
-        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["address"], 306)
-        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["addressEnd"], 307)
-        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["unit"], "小时")
-        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["maximum"], 8760)
+        self.assertNotIn("holding.valve_route.initial_route", self.by_id)
+        self.assertNotIn("holding.valve_route.restart_protection_days", self.by_id)
+        self.assertNotIn("holding.valve_route.cooling_delay_hours", self.by_id)
+        self.assertEqual(self.by_id["holding.valve_route.valve_cooling_hours"]["address"], 305)
+        self.assertEqual(self.by_id["holding.valve_route.valve_cooling_hours"]["addressEnd"], 306)
+        self.assertEqual(self.by_id["holding.valve_route.valve_cooling_hours"]["unit"], "小时")
+        self.assertEqual(self.by_id["holding.valve_route.valve_cooling_hours"]["maximum"], 8760)
         self.assertEqual(self.by_id["holding.control.close_delay_hours"]["unit"], "小时")
         self.assertEqual(self.by_id["holding.control.close_delay_hours"]["configKey"], "control.antifreeze.closeDelayHours")
         self.assertNotIn("holding.flow.no_change_alarm_seconds", self.by_id)
         self.assertNotIn("holding.valve_route.force_close_seconds", self.by_id)
         self.assertEqual(self.by_id["holding.communication.baudrate"]["addressEnd"], 702)
-        self.assertEqual(self.by_id["holding.valve_1.initial_position"]["address"], 316)
-        self.assertEqual(self.by_id["holding.valve_3.initial_position"]["address"], 318)
+        self.assertEqual(self.by_id["holding.valve_route.idle_position_upper"]["address"], 307)
+        self.assertEqual(self.by_id["holding.valve_route.idle_position_left"]["address"], 308)
+        self.assertEqual(self.by_id["holding.valve_route.idle_position_right"]["address"], 309)
+        self.assertEqual(
+            self.by_id["holding.valve_route.idle_position_upper"]["configKey"],
+            "control.valveRouting.idlePositions.upper",
+        )
+        self.assertEqual(
+            self.by_id["holding.valve_route.idle_position_right"]["enumValues"],
+            {0: "原位", 1: "工作位"},
+        )
+        self.assertEqual(self.by_id["holding.valve_1.online"]["configKey"], "valves.upper.enabled")
+        self.assertEqual(
+            self.by_id["holding.valve_3.home_high_level"]["configKey"],
+            "valves.right.homeDirectionHigh",
+        )
+        self.assertNotIn("holding.valve_1.initial_position", self.by_id)
         self.assertEqual(self.by_id["holding.schedule.selected_task"]["address"], 720)
         self.assertEqual(self.by_id["holding.schedule.duration_days"]["addressEnd"], 728)
         self.assertEqual(self.by_id["holding.schedule.humidity_high_3"]["addressEnd"], 735)
@@ -103,9 +126,17 @@ class LiveRegisterCatalogTests(unittest.TestCase):
     def test_v7_configuration_time_units_follow_firmware_register_contract(self) -> None:
         self.assertEqual(self.by_id["holding.flow.no_change_alarm_days"]["unit"], "\u5929")
         self.assertEqual(self.by_id["holding.control.close_delay_hours"]["unit"], "\u5c0f\u65f6")
-        self.assertEqual(self.by_id["holding.valve_route.cooling_delay_hours"]["unit"], "\u5c0f\u65f6")
+        self.assertEqual(self.by_id["holding.valve_route.valve_cooling_hours"]["unit"], "\u5c0f\u65f6")
         self.assertEqual(self.by_id["holding.logging.sensor_interval"]["unit"], "\u79d2")
         self.assertEqual(self.by_id["holding.logging.retention_days"]["unit"], "\u5929")
+
+    def test_valve_control_source_enum_matches_firmware(self) -> None:
+        expected = {0: "自动", 1: "远程", 2: "安全保护", 3: "周期维护"}
+        self.assertEqual(self.by_id["input_register.valve_1.control_source"]["enumValues"], expected)
+        self.assertEqual(
+            self.by_id["holding.runtime.valve_1_diagnostic_source"]["enumValues"],
+            expected,
+        )
 
 
 if __name__ == "__main__":

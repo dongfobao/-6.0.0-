@@ -31,9 +31,9 @@ HISTORY_POINT_IDS = (
 
 _TIME_CONFIG_UNIT_SECONDS = {
     "holding.flow.no_change_alarm_days": 86400,
-    "holding.valve_route.restart_protection_days": 86400,
+    "holding.valve_route.route_cycle_days": 86400,
     "holding.valve_route.force_close_days": 86400,
-    "holding.valve_route.cooling_delay_hours": 3600,
+    "holding.valve_route.valve_cooling_hours": 3600,
     "holding.control.close_delay_hours": 3600,
 }
 
@@ -1396,8 +1396,8 @@ def get_live_acquisition_service() -> LiveAcquisitionService:
     return _SERVICE_SINGLETON
 _TIME_CONFIG_UNIT_SECONDS = {
     "holding.flow.no_change_alarm_days": 86400,
-    "holding.valve_route.restart_protection_days": 86400,
+    "holding.valve_route.route_cycle_days": 86400,
     "holding.valve_route.force_close_days": 86400,
-    "holding.valve_route.cooling_delay_hours": 3600,
+    "holding.valve_route.valve_cooling_hours": 3600,
     "holding.control.close_delay_hours": 3600,
 }

@@ -55,10 +55,10 @@ class ModbusV7ConfigTests(unittest.TestCase):
     def test_new_time_unit_range_is_enforced_before_write(self) -> None:
         client = FakeClient()
         item = {
-            "id": "holding.valve_route.cooling_delay_hours",
+            "id": "holding.valve_route.valve_cooling_hours",
             "name": "停热后阀门冷却延时",
             "area": "holding_register",
-            "address": 306,
+            "address": 305,
             "dataType": "uint32",
             "unit": "小时",
             "minimum": 0,
@@ -70,7 +70,7 @@ class ModbusV7ConfigTests(unittest.TestCase):
         self.assertEqual(client.writes, [])
 
         words = V7ConfigTransaction(client).stage_value(item, 24)
-        self.assertEqual(client.read_holding_registers(306, 2), words)
+        self.assertEqual(client.read_holding_registers(305, 2), words)
 
 
 if __name__ == "__main__":
