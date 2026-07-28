@@ -129,6 +129,7 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.assertEqual(self.by_id["holding.schedule.duration_days"]["addressEnd"], 728)
         self.assertEqual(self.by_id["holding.schedule.humidity_high_3"]["addressEnd"], 735)
         self.assertEqual(self.by_id["holding.schedule.humidity_low_3"]["addressEnd"], 741)
+        self.assertEqual(self.by_id["holding.schedule.operation"]["address"], 742)
         self.assertEqual(self.by_id["holding.schedule.selected_task"]["minimum"], 1)
         self.assertEqual(self.by_id["holding.schedule.task_count"]["maximum"], 12)
 

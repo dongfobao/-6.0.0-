@@ -247,6 +247,11 @@ for offset, key, label, data_type, unit, notes in _SCHEDULE_FIELDS:
         f"holding.schedule.{key}", label, 720 + offset, data_type, group="schedule",
         unit=unit, config_key=f"schedule.current.{key}", notes=notes,
     ))
+REGISTER_CATALOG.append(_holding(
+    "holding.schedule.operation", "任务增删操作", 742, "uint16", group="schedule",
+    config_key="schedule.operation",
+    notes="写 1 添加任务，写 2 删除当前任务；操作只修改暂存区，仍需通过 HR3 提交。",
+))
 
 
 _CONFIG_BLOCKS: tuple[tuple[int, str, str, tuple[tuple[int, str, str, str, str], ...]], ...] = (
@@ -419,6 +424,7 @@ _VALUE_CONSTRAINTS = {
     "holding.schedule.start_hour": (0, 23),
     "holding.schedule.start_minute": (0, 59),
     "holding.schedule.duration_days": (0, 3650),
+    "holding.schedule.operation": (1, 2),
     **{f"holding.schedule.humidity_{bound}_{channel}": (0, 100) for bound in ("high", "low") for channel in range(1, 4)},
 }
 for item in REGISTER_CATALOG:

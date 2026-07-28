@@ -260,6 +260,104 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(result["words"], [0x4148, 0x0000])
         self.assertEqual(client.words[103], 0x4148)
 
+    def test_select_schedule_task_reads_the_complete_selected_window(self):
+        class ScheduleClient:
+            def __init__(self):
+                self.selected = 1
+
+            def write_single_register(self, address, value):
+                self.assert_address(address)
+                self.selected = value
+
+            def read_holding_registers(self, address, count):
+                self.assert_address(address)
+                words = [0] * 23
+                words[0] = self.selected
+                words[1] = 3
+                words[2] = 1
+                words[3] = 4 if self.selected == 1 else 7
+                words[4] = self.selected
+                words[7:9] = [0, 4]
+                return words[:count]
+
+            def close(self):
+                pass
+
+            @staticmethod
+            def assert_address(address):
+                if address != 720:
+                    raise AssertionError(address)
+
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+
+        with patch.object(service, "_open_manual_client", return_value=ScheduleClient()):
+            result = service.select_schedule_task("dev-a", 2)
+
+        by_id = {item["id"]: item for item in result["config"]}
+        self.assertEqual(by_id["holding.schedule.selected_task"]["currentValue"], 2)
+        self.assertEqual(by_id["holding.schedule.task_count"]["currentValue"], 3)
+        self.assertEqual(by_id["holding.schedule.start_month"]["currentValue"], 7)
+        self.assertEqual(by_id["holding.schedule.start_day"]["currentValue"], 2)
+
+    def test_stage_schedule_task_writes_one_complete_window_and_reads_it_back(self):
+        class ScheduleClient:
+            def __init__(self):
+                self.selected = 1
+                self.windows = {}
+                for task_number in (1, 2, 3):
+                    words = [0] * 23
+                    words[0] = task_number
+                    words[1] = 3
+                    words[3] = task_number
+                    words[4] = 1
+                    words[7:9] = [0, 4]
+                    self.windows[task_number] = words
+                self.full_writes = []
+
+            def write_single_register(self, address, value):
+                self.selected = value
+
+            def write_multiple_registers(self, address, values):
+                self.full_writes.append((address, list(values)))
+                self.windows[self.selected][:len(values)] = list(values)
+
+            def read_holding_registers(self, address, count):
+                return list(self.windows[self.selected][:count])
+
+            def close(self):
+                pass
+
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+        client = ScheduleClient()
+        payload = {
+            "taskNumber": 2,
+            "month": 10,
+            "day": 8,
+            "hour": 9,
+            "minute": 30,
+            "durationDays": 6,
+            "enabled": True,
+            "humidityOverrideEnabled": True,
+            "humidityLow": [40, 41, 42],
+            "humidityHigh": [50, 51, 52],
+        }
+
+        with patch.object(service, "_open_manual_client", return_value=client):
+            result = service.stage_schedule_task("dev-a", payload)
+
+        self.assertEqual(len(client.full_writes), 1)
+        address, words = client.full_writes[0]
+        self.assertEqual(address, 720)
+        self.assertEqual(len(words), 22)
+        self.assertEqual(words[:10], [2, 3, 1, 10, 8, 9, 30, 0, 6, 1])
+        by_id = {item["id"]: item for item in result["config"]}
+        self.assertEqual(by_id["holding.schedule.start_month"]["currentValue"], 10)
+        self.assertAlmostEqual(by_id["holding.schedule.humidity_high_3"]["currentValue"], 52.0)
+
     def test_legacy_seconds_time_registers_are_presented_and_written_in_declared_units(self):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})

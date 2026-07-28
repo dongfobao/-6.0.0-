@@ -210,16 +210,64 @@ function renderScheduleTaskPicker(){
   const picker=$("scheduleTaskPicker");
   if(state.configModule!=="schedule"){picker.classList.add("hidden");picker.innerHTML="";return;}
   const selected=Number(state.parameters.find(item=>item.id==="holding.schedule.selected_task")?.currentValue||1);
-  const count=Number(state.parameters.find(item=>item.id==="holding.schedule.task_count")?.currentValue||0);
+  const count=Math.max(0,Number(state.parameters.find(item=>item.id==="holding.schedule.task_count")?.currentValue||0));
+  const maximum=Number(state.parameters.find(item=>item.id==="holding.schedule.task_count")?.maximum||12);
   picker.classList.remove("hidden");
-  picker.innerHTML=`<span>编辑任务</span>${Array.from({length:12},(_,index)=>{const number=index+1;return `<button class="schedule-task ${number===selected?"selected":""}" data-schedule-task="${number}">任务 ${number}${number<=count?"":" · 新建"}</button>`;}).join("")}`;
+  picker.innerHTML=`<span>已配置 ${count}/${maximum} 条</span>${Array.from({length:count},(_,index)=>{const number=index+1;return `<button class="schedule-task ${number===selected?"selected":""}" data-schedule-task="${number}">任务 ${number}</button>`;}).join("")}<div class="schedule-task-actions"><button class="button small primary" id="addScheduleTaskBtn" ${count>=maximum?"disabled":""}>＋ 添加任务</button><button class="button small danger ghost" id="deleteScheduleTaskBtn" ${count===0?"disabled":""}>删除当前任务</button></div>`;
   picker.querySelectorAll("[data-schedule-task]").forEach(button=>button.addEventListener("click",()=>selectScheduleTask(Number(button.dataset.scheduleTask))));
+  $("addScheduleTaskBtn").addEventListener("click",()=>mutateScheduleTasks("add"));
+  $("deleteScheduleTaskBtn").addEventListener("click",()=>mutateScheduleTasks("delete"));
 }
 async function selectScheduleTask(taskNumber){
-  try{await api("/api/config/stage",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId:"holding.schedule.selected_task",value:taskNumber})});showNotice(`已切换到定时任务 ${taskNumber}`);await refreshParameters();}
+  try{await api("/api/config/schedule/select",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,taskNumber})});showNotice(`已读取定时任务 ${taskNumber}`);await refreshParameters();}
+  catch(error){showNotice(error.message,"error");}
+}
+async function mutateScheduleTasks(action){
+  if(action==="delete"&&!confirm("确认删除当前任务？后续任务会自动前移；提交配置后才会永久生效。"))return;
+  try{
+    await api("/api/config/schedule/mutate",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,action})});
+    showNotice(action==="add"?"已新增一条任务并暂存，请设置时间后提交配置":"当前任务已删除并暂存，提交配置后生效");
+    await refreshParameters();
+  }catch(error){showNotice(error.message,"error");}
+}
+function scheduleValue(key,fallback=""){return state.parameters.find(item=>item.id===`holding.schedule.${key}`)?.currentValue??fallback;}
+function scheduleMonthDays(month){return new Date(2000,Number(month)||1,0).getDate();}
+function renderScheduleEditor(){
+  const editor=$("scheduleEditor");
+  if(state.configModule!=="schedule"){editor.classList.add("hidden");editor.innerHTML="";return;}
+  const count=Number(scheduleValue("task_count",0)),selected=Number(scheduleValue("selected_task",1));
+  editor.classList.remove("hidden");
+  if(count===0){
+    editor.innerHTML='<div class="schedule-empty"><strong>当前没有定时任务</strong><p>点击“添加任务”创建第一条任务。</p></div>';
+    return;
+  }
+  const month=Math.max(1,Number(scheduleValue("start_month",1))),day=Math.max(1,Number(scheduleValue("start_day",1)));
+  const hour=Math.max(0,Number(scheduleValue("start_hour",0))),minute=Math.max(0,Number(scheduleValue("start_minute",0)));
+  const monthOptions=Array.from({length:12},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===month?"selected":""}>${value} 月</option>`).join("");
+  const dayOptions=Array.from({length:scheduleMonthDays(month)},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===day?"selected":""}>${value} 日</option>`).join("");
+  const thresholds=[1,2,3].map(channel=>`<div class="schedule-threshold-row"><strong>温湿度 ${channel}</strong><label>湿度下限（%RH）<input id="scheduleLow${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_low_${channel}`,0))}"></label><label>湿度上限（%RH）<input id="scheduleHigh${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_high_${channel}`,0))}"></label></div>`).join("");
+  editor.innerHTML=`<div class="schedule-editor-head"><div><h3>任务 ${selected}</h3><p>按设备 RTC 每年在所选月日和时刻触发；任务修改先暂存，点击页面上方“提交配置”后永久生效。</p></div><button id="saveScheduleTaskBtn" class="button primary">暂存当前任务</button></div><div class="schedule-form-grid"><label>开始日期（每年）<span class="schedule-date-fields"><select id="scheduleMonth">${monthOptions}</select><select id="scheduleDay">${dayOptions}</select></span></label><label>开始时间<input id="scheduleTime" type="time" value="${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}" required></label><label>持续时间（天）<input id="scheduleDuration" type="number" min="1" max="3650" step="1" value="${esc(scheduleValue("duration_days",4))}"></label><div class="schedule-switches"><label class="check-label"><input id="scheduleEnabled" type="checkbox" ${scheduleValue("enabled",false)?"checked":""}>启用任务</label><label class="check-label"><input id="scheduleOverrideEnabled" type="checkbox" ${scheduleValue("humidity_override_enabled",false)?"checked":""}>启用湿度覆盖</label></div></div><div class="schedule-thresholds"><h4>三路湿度覆盖阈值</h4>${thresholds}</div>`;
+  $("scheduleMonth").addEventListener("change",()=>{
+    const daySelect=$("scheduleDay"),previous=Number(daySelect.value),days=scheduleMonthDays($("scheduleMonth").value);
+    daySelect.innerHTML=Array.from({length:days},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===Math.min(previous,days)?"selected":""}>${value} 日</option>`).join("");
+  });
+  $("saveScheduleTaskBtn").addEventListener("click",saveScheduleTask);
+}
+async function saveScheduleTask(){
+  const time=$("scheduleTime").value.split(":").map(Number);
+  const humidityLow=[1,2,3].map(channel=>Number($(`scheduleLow${channel}`).value));
+  const humidityHigh=[1,2,3].map(channel=>Number($(`scheduleHigh${channel}`).value));
+  if(time.length!==2||time.some(value=>!Number.isFinite(value)))return showNotice("请选择有效的开始时间","error");
+  if(humidityLow.some((value,index)=>!Number.isFinite(value)||!Number.isFinite(humidityHigh[index])||value<0||humidityHigh[index]>100||value>=humidityHigh[index]))return showNotice("每路湿度必须满足 0 ≤ 下限 < 上限 ≤ 100","error");
+  const payload={deviceId:state.selectedDeviceId,taskNumber:Number(scheduleValue("selected_task",1)),month:Number($("scheduleMonth").value),day:Number($("scheduleDay").value),hour:time[0],minute:time[1],durationDays:Number($("scheduleDuration").value),enabled:$("scheduleEnabled").checked,humidityOverrideEnabled:$("scheduleOverrideEnabled").checked,humidityLow,humidityHigh};
+  try{await api("/api/config/schedule/update",{method:"POST",body:JSON.stringify(payload)});showNotice(`任务 ${payload.taskNumber} 已暂存并完整回读`);await refreshParameters();}
   catch(error){showNotice(error.message,"error");}
 }
 function renderConfigTable(){
+  const scheduleMode=state.configModule==="schedule";
+  $("configTableBody").closest(".table-panel").classList.toggle("hidden",scheduleMode);
+  renderScheduleEditor();
+  if(scheduleMode)return;
   const search=$("configSearch")?.value.trim().toLowerCase()||"", group=state.configModule;const rows=state.parameters.filter(item=>(!group||configSection(item)===group)&&(!search||`${item.name} ${item.id}`.toLowerCase().includes(search)));
   $("configTableBody").innerHTML=rows.length?rows.map(item=>`<tr><td><strong>${esc(item.name)}</strong><br><code>${esc(item.id)}</code>${configRange(item)}</td><td>HR ${item.address}${item.addressEnd!==item.address?`–${item.addressEnd}`:""}</td><td>${configEditor(item)}</td><td>${esc(item.unit||"")}</td><td><button class="button small secondary" data-stage-item="${esc(item.id)}">暂存</button></td></tr>`).join(""):'<tr><td colspan="5" class="empty-state">没有匹配参数</td></tr>';
   document.querySelectorAll("[data-stage-item]").forEach(btn=>btn.addEventListener("click",()=>stageConfig(btn.dataset.stageItem)));
@@ -227,7 +275,7 @@ function renderConfigTable(){
 function configEditor(item){const value=item.currentValue??"",unknown=item.currentValue===null||item.currentValue===undefined;if(item.dataType==="bool")return `<select class="config-input" data-config-value="${esc(item.id)}"><option value="" disabled ${unknown?"selected":""}>未读取</option><option value="1" ${value===true||value===1?"selected":""}>启用</option><option value="0" ${value===false||value===0?"selected":""}>关闭</option></select>`;if(item.enumValues&&Object.keys(item.enumValues).length)return `<select class="config-input" data-config-value="${esc(item.id)}"><option value="" disabled ${unknown?"selected":""}>未读取</option>${Object.entries(item.enumValues).map(([v,t])=>`<option value="${v}" ${String(value)===String(v)?"selected":""}>${esc(t)} (${v})</option>`).join("")}</select>`;const min=item.minimum!==undefined?` min="${item.minimum}"`:"",max=item.maximum!==undefined?` max="${item.maximum}"`:"",step=item.step??(item.dataType==='float32'?'0.01':'1');return `<input class="config-input" data-config-value="${esc(item.id)}" type="number" step="${step}"${min}${max} value="${esc(value)}" placeholder="未读取">`;}
 function configRange(item){if(item.minimum===undefined&&item.maximum===undefined)return "";const unit=esc(item.unit||"");return `<br><small>允许范围：${item.minimum??"−∞"}–${item.maximum??"∞"}${unit}</small>`;}
 async function stageConfig(itemId){const input=document.querySelector(`[data-config-value="${CSS.escape(itemId)}"]`);if(!input)return;if(input.validity&&!input.checkValidity())return showNotice(input.validationMessage||"参数超出允许范围","error");try{await api("/api/config/stage",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value:input.value})});showNotice("参数已暂存并回读成功");await refreshParameters();}catch(error){showNotice(error.message,"error");}}
-async function configAction(action){try{const result=await api("/api/config/transaction",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,action})});showNotice(action==="commit"?`配置提交成功，代次 ${result.status.generation}`:"已放弃暂存配置");await refreshParameters();}catch(error){showNotice(error.message,"error");}}
+async function configAction(action){try{const result=await api("/api/config/transaction",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,action})});await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});showNotice(action==="commit"?`配置提交成功，代次 ${result.status.generation}`:"已放弃暂存配置");await refreshParameters();}catch(error){showNotice(error.message,"error");}}
 
 function renderAlarmSummary(){const a=state.snapshot?.alarms;if(!a)return;$("alarmSummary").innerHTML=(a.groups||[]).map((g,i)=>`<article class="alarm-card ${Number(g.value)?"active":""}"><span>告警组 ${i}</span><strong>0x${Number(g.value||0).toString(16).padStart(8,"0").toUpperCase()}</strong><small>${Number(g.value)?"存在活动告警":"无告警"}</small></article>`).join("");}
 async function refreshEvents(){if(!state.selectedDeviceId)return;try{state.events=(await api(`/api/monitor/events?deviceId=${encodeURIComponent(state.selectedDeviceId)}&limit=120`)).items||[];renderEvents();}catch(error){showNotice(error.message,"error");}}

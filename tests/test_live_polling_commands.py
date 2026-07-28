@@ -49,7 +49,7 @@ class LivePollingCommandsTests(unittest.TestCase):
         self.assertEqual(threshold_command["count"], 12)
         self.assertIn("holding.sensor_2.threshold_confirm_count", threshold_command["catalogItemIds"])
         schedule_command = next(item for item in config_commands if item["address"] == 720)
-        self.assertEqual(schedule_command["count"], 22)
+        self.assertEqual(schedule_command["count"], 23)
         self.assertIn("holding.schedule.humidity_low_3", schedule_command["catalogItemIds"])
 
     def test_old_or_raw_plan_is_rejected_instead_of_migrated(self) -> None:

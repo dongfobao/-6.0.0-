@@ -37,6 +37,14 @@ _TIME_CONFIG_UNIT_SECONDS = {
     "holding.control.close_delay_hours": 3600,
 }
 
+SCHEDULE_BASE_ADDRESS = 720
+SCHEDULE_DATA_WORD_COUNT = 22
+SCHEDULE_WINDOW_WORD_COUNT = 23
+SCHEDULE_OPERATION_ADDRESS = 742
+SCHEDULE_MAX_TASKS = 12
+SCHEDULE_OPERATION_ADD = 1
+SCHEDULE_OPERATION_DELETE_SELECTED = 2
+
 
 def _now() -> datetime:
     return datetime.now()
@@ -448,6 +456,7 @@ class LiveAcquisitionService:
                     builder(item) for item in self._catalog
                     if item.get("area") == "holding_register" and 100 <= int(item.get("address") or 0) < 800
                     and item.get("group") != "time_sync"
+                    and item.get("id") != "holding.schedule.operation"
                 ],
                 "runtime": [builder(item) for item in self._catalog if item.get("group") == "runtime_control"],
                 "diagnostic": [builder(item) for item in self._catalog if item.get("group") == "diagnostic"],
@@ -494,6 +503,188 @@ class LiveAcquisitionService:
                 "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
             })
         return {"ok": True, "itemId": item_id, "value": self._config_value_from_wire(item, decoded, slot["values"]), "wireValue": decoded, "words": words, "staged": True}
+
+    def select_schedule_task(self, device_id: str, task_number: Any) -> dict[str, Any]:
+        slot = self._get_device_slot_required(device_id)
+        if not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+        selected = _safe_int(task_number, 0)
+        if selected < 1 or selected > SCHEDULE_MAX_TASKS:
+            raise ValueError("定时任务序号必须在 1–12 之间")
+
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        with self._io_lock:
+            self._close_runner_client_for_port(port_key)
+            client = self._open_manual_client(device, device_id)
+            try:
+                current = self._refresh_schedule_from_client(device_id, slot, client)
+                task_count = int(current[1])
+                if selected > task_count:
+                    raise ValueError(f"任务 {selected} 尚未配置，当前仅有 {task_count} 个任务")
+                client.write_single_register(SCHEDULE_BASE_ADDRESS, selected)
+                refreshed = self._refresh_schedule_from_client(device_id, slot, client)
+                if int(refreshed[0]) != selected:
+                    raise ModbusError("定时任务切换回读不一致")
+            finally:
+                client.close()
+        return self._schedule_result(slot)
+
+    def mutate_schedule_tasks(self, device_id: str, action: str) -> dict[str, Any]:
+        slot = self._get_device_slot_required(device_id)
+        if not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+        normalized = str(action or "").strip().lower()
+        operations = {
+            "add": SCHEDULE_OPERATION_ADD,
+            "delete": SCHEDULE_OPERATION_DELETE_SELECTED,
+        }
+        if normalized not in operations:
+            raise ValueError(f"不支持的定时任务操作: {action}")
+
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        with self._io_lock:
+            self._close_runner_client_for_port(port_key)
+            client = self._open_manual_client(device, device_id)
+            try:
+                before = self._refresh_schedule_from_client(device_id, slot, client)
+                old_count = int(before[1])
+                if normalized == "add" and old_count >= SCHEDULE_MAX_TASKS:
+                    raise ValueError("定时任务已达到 12 条上限")
+                if normalized == "delete" and old_count == 0:
+                    raise ValueError("当前没有可删除的定时任务")
+                client.write_single_register(SCHEDULE_OPERATION_ADDRESS, operations[normalized])
+                after = self._refresh_schedule_from_client(device_id, slot, client)
+                expected_count = old_count + (1 if normalized == "add" else -1)
+                if int(after[1]) != expected_count:
+                    raise ModbusError("定时任务数量回读不一致，请确认下位机已升级到支持任务增删的 V7 固件")
+            finally:
+                client.close()
+
+        timestamp = _iso(_now())
+        with self._lock:
+            slot["event_seq"] += 1
+            slot["events"].append({
+                "id": slot["event_seq"],
+                "ts": timestamp,
+                "type": f"schedule_{normalized}",
+                "message": "已暂存新增定时任务" if normalized == "add" else "已暂存删除定时任务",
+                "details": {"taskCount": expected_count},
+            })
+        return self._schedule_result(slot)
+
+    def stage_schedule_task(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        slot = self._get_device_slot_required(device_id)
+        if not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+
+        task_number = _safe_int(payload.get("taskNumber"), 0)
+        month = _safe_int(payload.get("month"), 0)
+        day = _safe_int(payload.get("day"), 0)
+        hour = _safe_int(payload.get("hour"), -1)
+        minute = _safe_int(payload.get("minute"), -1)
+        duration_days = _safe_int(payload.get("durationDays"), 0)
+        if task_number < 1 or task_number > SCHEDULE_MAX_TASKS:
+            raise ValueError("定时任务序号必须在 1–12 之间")
+        try:
+            datetime(2000, month, day, hour, minute)
+        except ValueError as exc:
+            raise ValueError("开始日期或时间无效") from exc
+        if duration_days < 1 or duration_days > 3650:
+            raise ValueError("持续时间必须在 1–3650 天之间")
+
+        highs = [float(value) for value in payload.get("humidityHigh", [])]
+        lows = [float(value) for value in payload.get("humidityLow", [])]
+        if len(highs) != 3 or len(lows) != 3:
+            raise ValueError("必须提供三路湿度上下限")
+        for index, (low, high) in enumerate(zip(lows, highs), start=1):
+            if low < 0 or high > 100 or low >= high:
+                raise ValueError(f"温湿度 {index} 必须满足 0 ≤ 下限 < 上限 ≤ 100")
+
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        with self._io_lock:
+            self._close_runner_client_for_port(port_key)
+            client = self._open_manual_client(device, device_id)
+            try:
+                current = self._refresh_schedule_from_client(device_id, slot, client)
+                if task_number > int(current[1]):
+                    raise ValueError(f"任务 {task_number} 尚未配置")
+                if int(current[0]) != task_number:
+                    client.write_single_register(SCHEDULE_BASE_ADDRESS, task_number)
+                    current = self._refresh_schedule_from_client(device_id, slot, client)
+
+                words = list(current[:SCHEDULE_DATA_WORD_COUNT])
+                words[0] = task_number
+                words[2] = 1 if bool(payload.get("enabled")) else 0
+                words[3] = month
+                words[4] = day
+                words[5] = hour
+                words[6] = minute
+                words[7:9] = encode_words(duration_days, "uint32")
+                words[9] = 1 if bool(payload.get("humidityOverrideEnabled")) else 0
+                for sensor, value in enumerate(highs):
+                    offset = 10 + sensor * 2
+                    words[offset:offset + 2] = encode_words(value, "float32")
+                for sensor, value in enumerate(lows):
+                    offset = 16 + sensor * 2
+                    words[offset:offset + 2] = encode_words(value, "float32")
+
+                client.write_multiple_registers(SCHEDULE_BASE_ADDRESS, words)
+                readback = client.read_holding_registers(
+                    SCHEDULE_BASE_ADDRESS, SCHEDULE_DATA_WORD_COUNT
+                )
+                if list(readback) != words:
+                    raise ModbusError("定时任务配置回读不一致")
+                self._refresh_schedule_from_client(device_id, slot, client)
+            finally:
+                client.close()
+
+        timestamp = _iso(_now())
+        with self._lock:
+            slot["event_seq"] += 1
+            slot["events"].append({
+                "id": slot["event_seq"],
+                "ts": timestamp,
+                "type": "schedule_staged",
+                "message": f"定时任务 {task_number} 已暂存",
+                "details": {"taskNumber": task_number},
+            })
+        return self._schedule_result(slot)
+
+    def _refresh_schedule_from_client(
+        self,
+        device_id: str,
+        slot: dict[str, Any],
+        client: LiveModbusClient,
+    ) -> list[int]:
+        command = next(
+            (
+                item for item in self._default_polling_commands
+                if int(item.get("address") or -1) == SCHEDULE_BASE_ADDRESS
+                and int(item.get("functionCode") or 0) == 3
+            ),
+            None,
+        )
+        if command is None:
+            raise RuntimeError("缺少定时任务固定轮询块")
+        block = self._command_to_block(command)
+        values = [int(value) & 0xFFFF for value in self._read_block(client, block)]
+        if len(values) != SCHEDULE_WINDOW_WORD_COUNT:
+            raise ModbusError("定时任务响应长度错误")
+        self._apply_block_values(device_id, slot, block, values)
+        return values
+
+    def _schedule_result(self, slot: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            rows = [
+                self._catalog_item_with_value(item, slot["values"])
+                for item in self._catalog
+                if item.get("group") == "schedule"
+                and item.get("id") != "holding.schedule.operation"
+            ]
+        return {"ok": True, "staged": True, "config": rows}
 
     def sync_rtc_from_epoch(self, device_id: str, epoch_seconds: Any,
                             timezone_offset_minutes: Any = 0) -> dict[str, Any]:

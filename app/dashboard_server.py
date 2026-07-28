@@ -172,6 +172,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 return self._json(service.poll_slow_group(str(body.get("deviceId") or "")))
             if method == "POST" and path == "/api/config/stage":
                 return self._json(service.stage_config_value(str(body.get("deviceId") or ""), str(body.get("itemId") or ""), body.get("value")))
+            if method == "POST" and path == "/api/config/schedule/select":
+                return self._json(service.select_schedule_task(
+                    str(body.get("deviceId") or ""), body.get("taskNumber"),
+                ))
+            if method == "POST" and path == "/api/config/schedule/mutate":
+                return self._json(service.mutate_schedule_tasks(
+                    str(body.get("deviceId") or ""), str(body.get("action") or ""),
+                ))
+            if method == "POST" and path == "/api/config/schedule/update":
+                return self._json(service.stage_schedule_task(
+                    str(body.get("deviceId") or ""), body,
+                ))
             if method == "POST" and path == "/api/config/transaction":
                 return self._json(service.execute_config_transaction(str(body.get("deviceId") or ""), str(body.get("action") or "")))
             if method == "POST" and path == "/api/system/rtc/sync":
