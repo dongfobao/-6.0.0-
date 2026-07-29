@@ -15,6 +15,7 @@ CONFIG_STATUS_COUNT = 5
 CONFIG_COMMAND_ADDRESS = 3
 COMMAND_COMMIT = 0xC6A6
 COMMAND_DISCARD = 0xD15C
+ERROR_SAVE_PENDING = 5
 
 
 class RegisterClient(Protocol):
@@ -114,7 +115,7 @@ class V9ConfigTransaction:
         deadline = time.monotonic() + self.commit_timeout_seconds
         while True:
             status = self.read_status()
-            if status.error:
+            if status.error not in (0, ERROR_SAVE_PENDING):
                 raise ConfigTransactionError(f"配置提交失败，错误码: {status.error}")
             generation_advanced = status.generation != before.generation
             commit_succeeded = bool(status.state & 0x0004)

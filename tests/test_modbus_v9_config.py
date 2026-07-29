@@ -6,7 +6,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from modbus_v9_config import COMMAND_COMMIT, COMMAND_DISCARD, ConfigTransactionError, V9ConfigTransaction
+from modbus_v9_config import (
+    COMMAND_COMMIT,
+    COMMAND_DISCARD,
+    ERROR_SAVE_PENDING,
+    ConfigTransactionError,
+    V9ConfigTransaction,
+)
 
 
 class FakeClient:
@@ -93,6 +99,47 @@ class ModbusV9ConfigTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ConfigTransactionError, "错误码: 3"):
             transaction.commit()
+
+    def test_commit_waits_while_save_is_pending(self) -> None:
+        class PendingClient(FakeClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.commit_started = False
+                self.pending_status_reads = 0
+
+            def write_multiple_registers(self, address: int, values: list[int]) -> None:
+                self.writes.append((address, list(values)))
+                for offset, value in enumerate(values):
+                    self.words[address + offset] = value
+                if address == 3 and values == [COMMAND_COMMIT]:
+                    self.commit_started = True
+                    self.words[1] = 0x0003
+                    self.words[3] = 0
+                    self.words[4] = ERROR_SAVE_PENDING
+
+            def read_holding_registers(self, address: int, count: int) -> list[int]:
+                result = super().read_holding_registers(address, count)
+                if (
+                    self.commit_started
+                    and address == 0
+                    and count == 5
+                    and self.words[4] == ERROR_SAVE_PENDING
+                ):
+                    self.pending_status_reads += 1
+                    self.words[1] = 0x0005
+                    self.words[2] += 1
+                    self.words[4] = 0
+                return result
+
+        client = PendingClient()
+        status = V9ConfigTransaction(
+            client, commit_timeout_seconds=0.1, poll_interval_seconds=0
+        ).commit()
+
+        self.assertEqual(client.pending_status_reads, 1)
+        self.assertEqual(status.error, 0)
+        self.assertEqual(status.generation, 10)
+        self.assertTrue(status.state & 0x0004)
 
     def test_baudrate_rejects_nonstandard_value(self) -> None:
         client = FakeClient()
