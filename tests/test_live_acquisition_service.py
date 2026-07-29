@@ -1,7 +1,9 @@
+import json
 import threading
 import time
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -11,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 import live_acquisition_service
-from live_acquisition_service import LiveAcquisitionService
+from live_acquisition_service import HISTORY_ARCHIVE_MAX_POINTS, LiveAcquisitionService
 from live_modbus_client import ModbusError
 
 
@@ -31,7 +33,7 @@ class SlowStopService(LiveAcquisitionService):
 
 
 class LiveAcquisitionServiceTests(unittest.TestCase):
-    def test_protocol_mismatch_stops_v7_decoding(self):
+    def test_protocol_mismatch_stops_v9_decoding(self):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
         command = next(item for item in service._default_polling_commands if item["address"] == 0 and item["functionCode"] == 4)
@@ -230,7 +232,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(calls[0][0], 103)
         self.assertEqual(calls[0][1], [0x4148, 0x0000])
 
-    def test_stage_config_value_uses_v7_transaction_and_readback(self):
+    def test_stage_config_value_uses_v9_transaction_and_readback(self):
         class ConfigClient:
             def __init__(self):
                 self.words = {}
@@ -271,7 +273,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
             def read_holding_registers(self, address, count):
                 self.assert_address(address)
-                words = [0] * 23
+                words = [0] * 29
                 words[0] = self.selected
                 words[1] = 3
                 words[2] = 1
@@ -307,7 +309,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
                 self.selected = 1
                 self.windows = {}
                 for task_number in (1, 2, 3):
-                    words = [0] * 23
+                    words = [0] * 29
                     words[0] = task_number
                     words[1] = 3
                     words[3] = task_number
@@ -342,8 +344,9 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             "durationDays": 6,
             "enabled": True,
             "humidityOverrideEnabled": True,
-            "humidityLow": [40, 41, 42],
-            "humidityHigh": [50, 51, 52],
+            "humidityStartThreshold": [50, 51, 52],
+            "humidityFallingStopThreshold": [40, 41, 42],
+            "humidityPeakDropThreshold": [5, 6, 7],
         }
 
         with patch.object(service, "_open_manual_client", return_value=client):
@@ -352,37 +355,85 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(len(client.full_writes), 1)
         address, words = client.full_writes[0]
         self.assertEqual(address, 720)
-        self.assertEqual(len(words), 22)
+        self.assertEqual(len(words), 28)
         self.assertEqual(words[:10], [2, 3, 1, 10, 8, 9, 30, 0, 6, 1])
         by_id = {item["id"]: item for item in result["config"]}
         self.assertEqual(by_id["holding.schedule.start_month"]["currentValue"], 10)
-        self.assertAlmostEqual(by_id["holding.schedule.humidity_high_3"]["currentValue"], 52.0)
+        self.assertAlmostEqual(
+            by_id["holding.schedule.humidity_start_threshold_3"]["currentValue"],
+            52.0,
+        )
+        self.assertAlmostEqual(
+            by_id["holding.schedule.humidity_peak_drop_threshold_3"]["currentValue"],
+            7.0,
+        )
 
-    def test_legacy_seconds_time_registers_are_presented_and_written_in_declared_units(self):
+    def test_v9_time_registers_are_used_directly_in_declared_units(self):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
-        slot["values"]["holding.flow.no_change_alarm_days"] = {"value": 86400, "ts": "2026-07-20 12:00:00"}
-        slot["values"]["holding.control.close_delay_hours"] = {"value": 28800, "ts": "2026-07-20 12:00:00"}
+        slot["values"]["holding.flow.no_change_alarm_days"] = {
+            "value": 1,
+            "ts": "2026-07-20 12:00:00",
+        }
         item = service._catalog_by_id["holding.flow.no_change_alarm_days"]
 
         row = service._catalog_item_with_value(item, slot["values"])
-        wire_item, wire_value = service._config_value_to_wire(item, 2, slot["values"])
 
         self.assertEqual(row["currentValue"], 1)
-        self.assertEqual(row["wireValue"], 86400)
-        self.assertTrue(row["legacySecondsWireFormat"])
-        self.assertEqual(wire_value, 172800)
-        self.assertNotIn("maximum", wire_item)
+        self.assertNotIn("legacySecondsWireFormat", row)
+        self.assertNotIn("wireValue", row)
+
+    def test_v9_dehumidification_block_decodes_mode_and_times_without_scaling(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot(
+            {"id": "dev-a", "name": "A", "address": "COM1"}
+        )
+        command = next(
+            item
+            for item in service._default_polling_commands
+            if item["functionCode"] == 3
+            and item["address"] == 400
+            and item["count"] == 11
+        )
+        block = service._command_to_block(command)
+
+        service._apply_block_values(
+            "dev-a",
+            slot,
+            block,
+            [1, 0, 0, 30, 0, 3, 0, 12, 1, 1, 1],
+        )
+
+        values = slot["values"]
+        self.assertTrue(values["holding.dehumidification.enabled"]["value"])
+        self.assertEqual(values["holding.dehumidification.mode"]["value"], 0)
+        self.assertEqual(
+            values["holding.dehumidification.cycle_interval_days"]["value"], 30
+        )
+        self.assertEqual(
+            values[
+                "holding.dehumidification.post_heating_cooling_hours"
+            ]["value"],
+            3,
+        )
+        self.assertEqual(
+            values["holding.dehumidification.force_close_hours"]["value"], 12
+        )
 
     def test_execute_config_commit_uses_firmware_magic(self):
         calls = []
 
         class ConfigClient:
+            def __init__(self):
+                self.committed = False
+
             def write_single_register(self, address, value):
                 calls.append((address, value))
+                self.committed = True
 
             def read_holding_registers(self, address, count):
-                return [0x0700, 0, 11, 0xC6A6, 0]
+                return [0x0900, 0x0005 if self.committed else 0x0003,
+                        11 if self.committed else 10, 0, 0]
 
             def close(self):
                 pass
@@ -390,12 +441,15 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
         slot["state"]["running"] = True
+        slot["pending_connection_profile"] = {"baudrate": 19200}
 
         with patch.object(service, "_open_manual_client", return_value=ConfigClient()):
             result = service.execute_config_transaction("dev-a", "commit")
 
         self.assertEqual(calls, [(3, 0xC6A6)])
         self.assertEqual(result["status"]["generation"], 11)
+        self.assertTrue(result["restartRequired"])
+        self.assertEqual(result["connectionProfile"], {"baudrate": 19200})
 
     def test_write_value_opens_target_device_client_instead_of_reusing_port_runner(self):
         calls = []
@@ -574,7 +628,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             "slaveId": 2,
             "pollingCommands": [
                 {
-                    "id": "fast",
+                    "id": "v9.fast",
                     "name": "fast",
                     "autoPoll": True,
                     "functionCode": 3,
@@ -806,6 +860,102 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(series["availableDates"], ["2026-07-20"])
         self.assertEqual(series["availableRange"]["start"], "2026-07-20 10:00:00")
         self.assertEqual(series["availableRange"]["end"], "2026-07-20 12:00:00")
+
+    def test_series_downsamples_the_full_requested_range_instead_of_only_the_tail(self):
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        history = service._device_slots["dev-a"]["history"]["pressure"]
+        start = datetime(2026, 7, 20, 10, 0, 0)
+        for offset in range(7201):
+            timestamp = start + timedelta(seconds=offset)
+            history.append({
+                "ts": timestamp.isoformat(sep=" "),
+                "value": float(offset),
+                "epoch": timestamp.timestamp(),
+            })
+
+        series = service.get_series(
+            "dev-a",
+            limit=100,
+            start_at=start.isoformat(sep=" "),
+            end_at=(start + timedelta(seconds=7200)).isoformat(sep=" "),
+        )
+        rows = series["byMetric"]["pressure"]
+
+        self.assertEqual(len(rows), 100)
+        self.assertEqual(rows[0]["value"], 0.0)
+        self.assertEqual(rows[-1]["value"], 7200.0)
+
+    def test_minute_archive_retains_seven_days_and_returns_public_rows(self):
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot = service._device_slots["dev-a"]
+        start = datetime(2026, 7, 1, 0, 0, 0)
+        total_minutes = HISTORY_ARCHIVE_MAX_POINTS + 2
+        for offset in range(total_minutes):
+            timestamp = start + timedelta(minutes=offset)
+            service._append_history_point(
+                slot,
+                "pressure",
+                timestamp.isoformat(sep=" "),
+                timestamp.timestamp(),
+                float(offset),
+            )
+        slot["history"]["pressure"].clear()
+
+        series = service.get_series(
+            "dev-a",
+            limit=2000,
+            start_at=start.isoformat(sep=" "),
+            end_at=(start + timedelta(minutes=total_minutes)).isoformat(sep=" "),
+        )
+        rows = series["byMetric"]["pressure"]
+
+        self.assertEqual(len(slot["history_archive"]["pressure"]), HISTORY_ARCHIVE_MAX_POINTS)
+        self.assertEqual(len(rows), 2000)
+        self.assertEqual(rows[0]["value"], 2.0)
+        self.assertEqual(rows[-1]["value"], float(total_minutes - 1))
+        self.assertNotIn("_sum", rows[0])
+        self.assertNotIn("_count", rows[0])
+
+    def test_recent_session_files_are_restored_for_live_trends(self):
+        service = LiveAcquisitionService()
+        service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot = service._device_slots["dev-a"]
+        with TemporaryDirectory() as temporary_root:
+            session_dir = Path(temporary_root) / "20260720_100000_A"
+            data_dir = session_dir / "data_0"
+            data_dir.mkdir(parents=True)
+            (session_dir / "session_meta.json").write_text(
+                json.dumps({"device": {"id": "dev-a"}}),
+                encoding="utf-8",
+            )
+            details = {
+                "sensor_1.temperature": 21.0,
+                "sensor_2.temperature": 22.0,
+                "sensor_3.temperature": 23.0,
+                "sensor_1.humidity": 51.0,
+                "sensor_2.humidity": 52.0,
+                "sensor_3.humidity": 53.0,
+            }
+            (data_dir / "log_2026_07_20_1000-1100.csv").write_text(
+                f"[2026-07-20 10:30:00],/* 1.25,21.00,2.50,51.00 */ | "
+                f"{json.dumps(details, ensure_ascii=False, separators=(',', ':'))}\n",
+                encoding="utf-8",
+            )
+
+            restored = service._restore_recent_history(
+                slot,
+                Path(temporary_root),
+                "dev-a",
+                datetime(2026, 7, 20, 12, 0, 0),
+            )
+
+        self.assertEqual(restored, 8)
+        self.assertEqual(slot["history"]["pressure"][-1]["value"], 1.25)
+        self.assertEqual(slot["history"]["flow"][-1]["value"], 2.5)
+        self.assertEqual(slot["history"]["sensor_3.temperature"][-1]["value"], 23.0)
+        self.assertEqual(slot["history"]["sensor_3.humidity"][-1]["value"], 53.0)
 
     @staticmethod
     def _lock_context(service):

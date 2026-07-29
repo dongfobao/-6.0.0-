@@ -61,7 +61,7 @@ def build_bootstrap_payload() -> dict[str, Any]:
     devices = load_live_devices(LIVE_DEVICES_PATH)
     service = _service()
     return {
-        "app": {"name": "YLDQ 6.0 远程监控系统", "version": "6.0.0", "protocol": "Modbus V7", "protocolWord": "0x0700"},
+        "app": {"name": "YLDQ 6.0 远程监控系统", "version": "6.0.0", "protocol": "Modbus V9", "protocolWord": "0x0900"},
         "devices": devices,
         "serialPorts": _serial_ports(),
         "catalogSummary": get_register_catalog_summary(),
@@ -109,7 +109,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         service = _service()
         device_id = self._query(query, "deviceId")
         if path == "/api/health":
-            return self._json({"ok": True, "service": "YLDQ 6.0 monitor", "protocol": "7.0"})
+            return self._json({"ok": True, "service": "YLDQ 6.0 monitor", "protocol": "9.0"})
         if path == "/api/bootstrap":
             return self._json(build_bootstrap_payload())
         if path == "/api/devices":
@@ -124,7 +124,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             raw = service.get_snapshot(device_id)
             return self._json(build_monitoring_snapshot(raw, _find_device(devices, device_id)))
         if path == "/api/monitor/series":
-            window_ms = self._query_int(query, "windowMs", 900000, 10000, 86400000)
+            window_ms = self._query_int(query, "windowMs", 900000, 10000, 604800000)
             limit = self._query_int(query, "limit", 600, 10, 2000)
             return self._json(service.get_series(
                 device_id,
@@ -165,7 +165,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 if not requested and devices_payload.get("selectedDeviceId"):
                     requested = {str(devices_payload["selectedDeviceId"])}
                 devices = [item for item in devices_payload.get("devices", []) if not requested or item.get("id") in requested]
-                return self._json(service.start_all(devices, session_root=SESSIONS_DIR, config_snapshot={"protocol": "7.0"}))
+                return self._json(service.start_all(devices, session_root=SESSIONS_DIR, config_snapshot={"protocol": "9.0"}))
             if method == "POST" and path == "/api/acquisition/stop":
                 return self._json(service.stop_all())
             if method == "POST" and path == "/api/config/refresh":

@@ -6,10 +6,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from modbus_v7_codec import V7CodecError, decode_words, encode_words
+from modbus_v9_codec import V9CodecError, decode_words, encode_words
 
 
-class ModbusV7CodecTests(unittest.TestCase):
+class ModbusV9CodecTests(unittest.TestCase):
     def test_big_endian_round_trip(self) -> None:
         for value, data_type in ((-12, "int16"), (0x12345678, "uint32"), (123.5, "float32"), (2**48 + 7, "uint64")):
             decoded = decode_words(encode_words(value, data_type), data_type)
@@ -20,9 +20,9 @@ class ModbusV7CodecTests(unittest.TestCase):
         self.assertEqual(encode_words(False, "bool"), [0])
 
     def test_rejects_bad_length_and_non_finite_float(self) -> None:
-        with self.assertRaises(V7CodecError):
+        with self.assertRaises(V9CodecError):
             decode_words([1], "uint32")
-        with self.assertRaises(V7CodecError):
+        with self.assertRaises(V9CodecError):
             encode_words(float("nan"), "float32")
 
 

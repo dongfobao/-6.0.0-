@@ -1,4 +1,4 @@
-"""Modbus V7 固定轮询计划。
+"""Modbus V9 固定轮询计划。
 
 自动轮询只允许标准寄存器读命令。任意十六进制脚本不进入自动采集链路，避免误写设备。
 """
@@ -13,7 +13,7 @@ from live_register_catalog import get_register_catalog
 
 READ_FUNCTION_AREAS = {2: "discrete_input", 3: "holding_register", 4: "input_register"}
 
-# 地址块按下位机 V7 映射显式定义，避免跨越保留区读取。
+# 地址块按下位机 V9 映射显式定义，避免跨越保留区读取。
 _DEFAULT_BLOCKS = (
     ("standard", 4, 0, 10, True, 250, "系统状态"),
     ("fast", 4, 100, 18, True, 120, "三路温湿度"),
@@ -26,14 +26,18 @@ _DEFAULT_BLOCKS = (
     ("slow", 3, 100, 63, False, 500, "三路温湿度配置"),
     ("slow", 3, 163, 12, False, 500, "三路阈值确认配置"),
     ("slow", 3, 175, 2, False, 500, "RTC 同步事务值"),
+    ("slow", 3, 187, 6, False, 500, "三路峰值回落配置"),
     ("slow", 3, 200, 7, False, 500, "压力配置"),
     ("slow", 3, 220, 9, False, 500, "流量配置"),
-    ("slow", 3, 300, 16, False, 500, "阀门配置"),
-    ("slow", 3, 400, 12, False, 500, "控制配置"),
-    ("slow", 3, 500, 27, False, 500, "输出与告警配置"),
+    ("slow", 3, 300, 6, False, 500, "阀门设置"),
+    ("slow", 3, 400, 11, False, 500, "除湿配置"),
+    ("slow", 3, 420, 8, False, 500, "防冻配置"),
+    ("slow", 3, 430, 3, False, 500, "传感器故障策略"),
+    ("slow", 3, 500, 8, False, 500, "输出配置"),
+    ("slow", 3, 520, 7, False, 500, "告警配置"),
     ("slow", 3, 600, 5, False, 500, "记录配置"),
     ("slow", 3, 700, 4, False, 500, "通信配置"),
-    ("slow", 3, 720, 23, False, 500, "定时任务配置"),
+    ("slow", 3, 720, 29, False, 500, "定时任务配置"),
 )
 
 
@@ -58,7 +62,7 @@ def build_default_polling_commands(catalog: list[dict[str, Any]] | None = None) 
     commands: list[dict[str, Any]] = []
     for group, function_code, address, count, auto_poll, delay_ms, name in _DEFAULT_BLOCKS:
         commands.append({
-            "id": f"v7.{group}.fc{function_code}.{address}.{count}",
+            "id": f"v9.{group}.fc{function_code}.{address}.{count}",
             "name": name,
             "mode": "modbus_read",
             "functionCode": function_code,
@@ -80,7 +84,7 @@ def build_default_polling_commands(catalog: list[dict[str, Any]] | None = None) 
 
 
 def normalize_polling_commands(commands: Any, catalog: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """校验用户保存的轮询计划；非法或旧协议计划直接替换为 V7 默认计划。"""
+    """校验用户保存的轮询计划；非法或非 V9 计划直接替换为默认计划。"""
     defaults = build_default_polling_commands(catalog)
     if not isinstance(commands, list) or not commands:
         return defaults
@@ -98,8 +102,8 @@ def normalize_polling_commands(commands: Any, catalog: list[dict[str, Any]] | No
             return defaults
         if function_code not in READ_FUNCTION_AREAS or address < 0 or not 1 <= count <= 125:
             return defaults
-        command_id = str(command.get("id") or f"v7.custom.{index + 1}").strip()
-        if not command_id or command_id in seen:
+        command_id = str(command.get("id") or f"v9.custom.{index + 1}").strip()
+        if not command_id.startswith("v9.") or command_id in seen:
             return defaults
         seen.add(command_id)
         normalized.append({
@@ -121,19 +125,6 @@ def normalize_polling_commands(commands: Any, catalog: list[dict[str, Any]] | No
             "decodeMode": "catalog",
             "catalogItemIds": [str(value) for value in command.get("catalogItemIds", []) if str(value)],
         })
-    for item in normalized:
-        if (
-            item["functionCode"] == 3
-            and item["address"] == 800
-            and item["count"] == 17
-        ):
-            item["count"] = 21
-            item["requestHex"] = _request_template(3, 800, 21)
-            item["sourceGroup"] = "fast"
-            item["name"] = "运行控制、阀门诊断与动作保护"
-            item["catalogItemIds"] = _item_ids_for_block(
-                list(catalog or get_register_catalog()), 3, 800, 21
-            )
     return normalized or deepcopy(defaults)
 
 

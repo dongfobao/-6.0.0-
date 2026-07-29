@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   bootstrap: null, devices: [], selectedDeviceId: null, snapshot: null,
   series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [], trafficLoading: false,
-  activePage: "overview", refreshTimer: null, trendTimer: null,
+  activePage: "overview", refreshTimer: null, trendTimer: null, trendRequestId: 0,
   trendQuery: {windowMs: 900000, start: null, end: null}, trendViewport: null, trendViewportHistory: [], trendDrag: null, trendSelectionDraft: null, trendShowLabels: false, trendShowKeyPoints: true, trendShowEvents: true, trendYScale: 1,
   configModule: "sensor_1",
 };
@@ -71,7 +71,7 @@ function renderSnapshot(){
   $("pressureStatus").textContent=`状态 ${fmt(s.process.pressureStatus.displayValue)}`;$("breathState").textContent=`呼吸状态 ${fmt(s.process.breathState.displayValue)}`;
   $("sensorCards").innerHTML=s.environmentChannels.map(ch=>`<article class="sensor-card ${ch.readOk.value?"is-online":"is-offline"}"><div class="sensor-card-head"><div><span class="sensor-index">0${ch.channel}</span><h3>温湿度 ${ch.channel}</h3></div><span class="quality-dot ${ch.readOk.value?"ok":""}">${ch.readOk.value?"通信正常":"无有效数据"}</span></div><div class="sensor-values"><div class="sensor-value temperature"><span>温度</span><div><strong>${fmt(ch.temperature.value)}</strong><small>°C</small></div></div><div class="sensor-value humidity"><span>湿度</span><div><strong>${fmt(ch.humidity.value)}</strong><small>%RH</small></div></div></div><div class="sensor-card-foot"><span>传感器状态</span><strong>${esc(fmt(ch.status.displayValue))}</strong></div></article>`).join("");
   $("outputCards").innerHTML=s.outputs.map(out=>`<article class="output-card ${Number(out.state.value)===1?"is-active":""}"><div class="output-card-head"><div class="output-icon">${out.key==="alarm"?"A":"H"}</div><strong>${esc(out.name)}</strong><span class="state-pill ${Number(out.state.value)===1?"on":""}">${esc(fmt(out.state.displayValue))}</span></div><div class="output-details"><div><span>控制模式</span><strong>${esc(fmt(out.mode?.displayValue))}</strong></div><div><span>累计动作</span><strong>${out.count?`${esc(fmt(out.count.value,0))} 次`:"—"}</strong></div></div></article>`).join("");
-  $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card ${Number(v.faultReason.value)?"has-fault":""}"><div class="valve-card-head"><div><span class="valve-index">V${v.channel}</span><strong>${esc(v.name)}</strong></div><span class="state-pill ${Number(v.faultReason.value)?"fault":"ok"}">${Number(v.faultReason.value)?`故障 ${fmt(v.faultReason.value,0)}`:"正常"}</span></div><div class="valve-metrics"><div><span>显示状态</span><strong>${esc(fmt(v.displayState.displayValue))}</strong></div><div><span>执行状态</span><strong>${esc(fmt(v.actuatorState.displayValue))}</strong></div><div><span>位置</span><strong>${fmt(v.position.value,0)}%</strong></div><div><span>电流</span><strong>${fmt(v.currentAdc.value,0)}</strong></div></div><div class="valve-card-foot"><span>控制来源</span><strong>${esc(fmt(v.controlSource.displayValue))}</strong></div></article>`).join("");
+  $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card ${Number(v.faultReason.value)?"has-fault":""}"><div class="valve-card-head"><div><span class="valve-index">V${v.channel}</span><strong>${esc(v.name)}</strong></div><span class="state-pill ${Number(v.faultReason.value)?"fault":"ok"}">${Number(v.faultReason.value)?`故障 ${fmt(v.faultReason.value,0)}`:"正常"}</span></div><div class="valve-metrics"><div><span>显示状态</span><strong>${esc(fmt(v.displayState.displayValue))}</strong></div><div><span>执行状态</span><strong>${esc(fmt(v.actuatorState.displayValue))}</strong></div><div><span>位置</span><strong>${esc(fmt(v.position.displayValue))}</strong></div><div><span>电流</span><strong>${fmt(v.currentAdc.value,0)}</strong></div></div><div class="valve-card-foot"><span>控制来源</span><strong>${esc(fmt(v.controlSource.displayValue))}</strong></div></article>`).join("");
   renderHeatModeControls(s.outputs || []);renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();
 }
 
@@ -84,15 +84,64 @@ function renderTrendToggles(){
 }
 function renderTrendDatePresets(){
   const select=$("trendDatePreset"),current=select.value,dates=state.series.availableDates||[];
-  select.innerHTML='<option value="">选择数据日期</option>'+dates.map(date=>`<option value="${date}" ${date===current?"selected":""}>${date}</option>`).join("");
+  select.innerHTML='<option value="">全部可用日期</option>'+dates.map(date=>`<option value="${date}" ${date===current?"selected":""}>${date}</option>`).join("");
 }
-function selectedTrendRows(){return [...activeTrends].map(key=>({key,rows:(state.series.byMetric?.[key]||[]).map(row=>({...row,epoch:new Date(row.ts).getTime()})).filter(row=>Number.isFinite(row.epoch)&&Number.isFinite(Number(row.value))),meta:TREND_META[key]})).filter(item=>item.rows.length);}
+function trendEpoch(value){
+  if(value===null||value===undefined||value==="")return NaN;
+  if(typeof value==="number")return value;
+  const match=String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+  if(match){
+    const [,year,month,day,hour,minute,second="0",millisecond="0"]=match;
+    return new Date(Number(year),Number(month)-1,Number(day),Number(hour),Number(minute),Number(second),Number(millisecond.padEnd(3,"0"))).getTime();
+  }
+  return new Date(value).getTime();
+}
+function trendQueryBounds(){
+  const start=trendEpoch(state.trendQuery.start),end=trendEpoch(state.trendQuery.end);
+  return {start:Number.isFinite(start)?start:null,end:Number.isFinite(end)?end:null};
+}
+function selectedTrendRows(){
+  const queryBounds=trendQueryBounds();
+  return [...activeTrends].map(key=>({
+    key,
+    rows:(state.series.byMetric?.[key]||[])
+      .map(row=>({...row,epoch:trendEpoch(row.ts)}))
+      .filter(row=>Number.isFinite(row.epoch)&&Number.isFinite(Number(row.value))&&(queryBounds.start===null||row.epoch>=queryBounds.start)&&(queryBounds.end===null||row.epoch<=queryBounds.end)),
+    meta:TREND_META[key],
+  })).filter(item=>item.rows.length);
+}
 function trendBounds(series){const all=series.flatMap(item=>item.rows);if(!all.length)return null;const start=Math.min(...all.map(row=>row.epoch)),end=Math.max(...all.map(row=>row.epoch));return {start,end:end===start?start+1000:end};}
 function clampTrendViewport(viewport,bounds){if(!viewport||!bounds)return bounds;const full=bounds.end-bounds.start,span=Math.max(1000,Math.min(full,viewport.end-viewport.start));const start=Math.max(bounds.start,Math.min(bounds.end-span,viewport.start));return {start,end:start+span};}
 function setTrendViewport(next,remember=true){const bounds=trendBounds(selectedTrendRows());if(!bounds)return;if(remember&&state.trendViewport)state.trendViewportHistory.push({...state.trendViewport});if(state.trendViewportHistory.length>30)state.trendViewportHistory.shift();state.trendViewport=clampTrendViewport(next,bounds);drawTrendChart();}
 function applyTrendWindow(windowMs){state.trendQuery={windowMs,start:null,end:null};state.trendViewport=null;state.trendViewportHistory=[];$("trendStart").value="";$("trendEnd").value="";$("trendDatePreset").value="";$("trendWindow").value=String(windowMs);refreshSeries();}
-async function refreshSeries(){if(!state.selectedDeviceId)return;try{const query=new URLSearchParams({deviceId:state.selectedDeviceId,windowMs:String(state.trendQuery.windowMs),limit:"2000"});if(state.trendQuery.start)query.set("start",state.trendQuery.start);if(state.trendQuery.end)query.set("end",state.trendQuery.end);const [series,eventPayload]=await Promise.all([api(`/api/monitor/series?${query}`),api(`/api/monitor/events?deviceId=${encodeURIComponent(state.selectedDeviceId)}&limit=240`)]);state.series=series;state.events=eventPayload.items||[];renderTrendDatePresets();drawTrendChart();renderTrendLatest();renderTrendRangeText();}catch(error){showNotice(error.message,"error");}}
-function renderTrendRangeText(){const series=selectedTrendRows(),all=trendBounds(series),points=series.reduce((sum,item)=>sum+item.rows.length,0);if(!all){$("trendRangeText").textContent="当前时段暂无数据";return;}const view=state.trendViewport||all;$("trendRangeText").textContent=`${new Date(view.start).toLocaleString("zh-CN",{hour12:false})} 至 ${new Date(view.end).toLocaleString("zh-CN",{hour12:false})} · ${points} 点`;}
+function applyTrendRangeFromInputs(){
+  const startValue=$("trendStart").value,endValue=$("trendEnd").value;
+  if(!startValue||!endValue)return showNotice("请选择完整的开始和结束时间","error");
+  const startEpoch=trendEpoch(startValue),endEpoch=trendEpoch(endValue);
+  if(!Number.isFinite(startEpoch)||!Number.isFinite(endEpoch))return showNotice("时间格式无效，请重新选择","error");
+  if(endEpoch<startEpoch)return showNotice("结束时间不能早于开始时间","error");
+  const start=startValue.replace("T"," "),end=`${endValue.replace("T"," ")}${endValue.length===16?":59.999":""}`;
+  state.trendQuery={windowMs:state.trendQuery.windowMs,start,end};
+  state.trendViewport=null;state.trendViewportHistory=[];state.trendHover=null;
+  $("trendSelectionStats").classList.add("hidden");
+  refreshSeries();
+}
+async function refreshSeries(){
+  if(!state.selectedDeviceId)return;
+  const requestId=++state.trendRequestId,deviceId=state.selectedDeviceId,trendQuery={...state.trendQuery};
+  try{
+    const query=new URLSearchParams({deviceId,windowMs:String(trendQuery.windowMs),limit:"2000"});
+    if(trendQuery.start)query.set("start",trendQuery.start);
+    if(trendQuery.end)query.set("end",trendQuery.end);
+    const [series,eventPayload]=await Promise.all([api(`/api/monitor/series?${query}`),api(`/api/monitor/events?deviceId=${encodeURIComponent(deviceId)}&limit=240`)]);
+    if(requestId!==state.trendRequestId||deviceId!==state.selectedDeviceId)return;
+    state.series=series;state.events=eventPayload.items||[];
+    renderTrendDatePresets();drawTrendChart();renderTrendLatest();renderTrendRangeText();
+  }catch(error){
+    if(requestId===state.trendRequestId)showNotice(error.message,"error");
+  }
+}
+function renderTrendRangeText(){const series=selectedTrendRows(),all=trendBounds(series),points=series.reduce((sum,item)=>sum+item.rows.length,0);if(!all){const query=trendQueryBounds();$("trendRangeText").textContent=query.start!==null&&query.end!==null?`${new Date(query.start).toLocaleString("zh-CN",{hour12:false})} 至 ${new Date(query.end).toLocaleString("zh-CN",{hour12:false})} · 暂无数据`:"当前时段暂无数据";return;}const view=state.trendViewport||all;$("trendRangeText").textContent=`${new Date(view.start).toLocaleString("zh-CN",{hour12:false})} 至 ${new Date(view.end).toLocaleString("zh-CN",{hour12:false})} · ${points} 点`;}
 function trendScale(visible){let low=Math.min(...visible.map(row=>Number(row.value))),high=Math.max(...visible.map(row=>Number(row.value)));if(low===high){const delta=Math.max(1,Math.abs(low)*.05);low-=delta;high+=delta;}const center=(low+high)/2,half=(high-low)*.6*state.trendYScale;return {low:center-half,high:center+half};}
 function drawTrendChart(){
   const canvas=$("trendCanvas"),host=$("trendChartPanel"),toolbar=host.querySelector(".trend-chart-toolbar"),hint=host.querySelector(".trend-chart-hint"),dpr=window.devicePixelRatio||1,width=Math.max(1,host.clientWidth),height=Math.max(1,host.clientHeight-toolbar.offsetHeight-hint.offsetHeight),ctx=canvas.getContext("2d");canvas.width=width*dpr;canvas.height=height*dpr;canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);
@@ -123,7 +172,18 @@ function toggleTrendFullscreen(){const panel=$("trendChartPanel"),active=panel.c
 function exportTrendPng(){const link=document.createElement("a");link.href=$("trendCanvas").toDataURL("image/png");link.download=`YLDQ_曲线_${new Date().toISOString().slice(0,19).replaceAll(':','-')}.png`;link.click();}
 function exportTrendCsv(){const keys=[...activeTrends],timestamps=[...new Set(keys.flatMap(key=>(state.series.byMetric?.[key]||[]).map(row=>row.ts)))].sort(),byTimestamp=new Map(timestamps.map(ts=>[ts,{ts}]));keys.forEach(key=>(state.series.byMetric?.[key]||[]).forEach(row=>{byTimestamp.get(row.ts)[key]=row.value;}));const header=["时间",...keys.map(key=>`${TREND_META[key]?.[0]||key}(${TREND_META[key]?.[2]||""})`)],csv=[header,...timestamps.map(ts=>[ts,...keys.map(key=>byTimestamp.get(ts)[key]??"")])].map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");const blob=new Blob(["\uFEFF",csv],{type:"text/csv;charset=utf-8"}),link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=`YLDQ_曲线_${new Date().toISOString().slice(0,19).replaceAll(':','-')}.csv`;link.click();URL.revokeObjectURL(link.href);}
 function bindTrendWorkbench(){
-  $("trendDatePreset").addEventListener("change",()=>{const date=$("trendDatePreset").value;if(!date)return;$("trendStart").value=`${date}T00:00`;$("trendEnd").value=`${date}T23:59`;$("applyTrendRangeBtn").click();});
+  $("trendDatePreset").addEventListener("change",()=>{
+    const date=$("trendDatePreset").value;
+    if(date){
+      $("trendStart").value=`${date}T00:00`;$("trendEnd").value=`${date}T23:59`;
+    }else{
+      const range=state.series.availableRange;
+      if(!range?.start||!range?.end)return applyTrendWindow(state.trendQuery.windowMs);
+      $("trendStart").value=range.start.replace(" ","T").slice(0,16);
+      $("trendEnd").value=range.end.replace(" ","T").slice(0,16);
+    }
+    applyTrendRangeFromInputs();
+  });
   $("undoTrendZoomBtn").addEventListener("click",undoTrendViewport);$("panLeftTrendBtn").addEventListener("click",()=>panTrend(-.2));$("panRightTrendBtn").addEventListener("click",()=>panTrend(.2));$("tightenTrendYBtn").addEventListener("click",()=>{state.trendYScale=Math.max(.2,state.trendYScale*.8);drawTrendChart();});$("relaxTrendYBtn").addEventListener("click",()=>{state.trendYScale=Math.min(5,state.trendYScale*1.25);drawTrendChart();});$("toggleTrendLabelsBtn").addEventListener("click",()=>{state.trendShowLabels=!state.trendShowLabels;$("toggleTrendLabelsBtn").classList.toggle("active",state.trendShowLabels);drawTrendChart();});$("toggleTrendKeyPointsBtn").addEventListener("click",()=>{state.trendShowKeyPoints=!state.trendShowKeyPoints;$("toggleTrendKeyPointsBtn").classList.toggle("active",state.trendShowKeyPoints);drawTrendChart();});$("toggleTrendEventsBtn").addEventListener("click",()=>{state.trendShowEvents=!state.trendShowEvents;$("toggleTrendEventsBtn").classList.toggle("active",state.trendShowEvents);drawTrendChart();});$("fullscreenTrendBtn").addEventListener("click",toggleTrendFullscreen);$("exportTrendPngBtn").addEventListener("click",exportTrendPng);
   document.addEventListener("keydown",event=>{if(state.activePage!=="trends"||["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName))return;if(event.key==="r"||event.key==="R")resetTrendViewport();else if(event.key==="+")zoomTrend(.75);else if(event.key==="-")zoomTrend(1.3);else if(event.key==="ArrowLeft")panTrend(-.15);else if(event.key==="ArrowRight")panTrend(.15);else if((event.key==="f"||event.key==="F"))toggleTrendFullscreen();else if(event.key==="Escape"&&$("trendChartPanel").classList.contains("chart-fullscreen"))toggleTrendFullscreen();});
 }
@@ -193,8 +253,9 @@ async function writeControl(itemId,value){
 async function refreshParameters(){if(!state.selectedDeviceId){state.parameters=[];return renderConfigTable();}try{const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(state.selectedDeviceId)}`);state.parameters=payload.config||[];renderConfigGroups();renderConfigTable();}catch(error){showNotice(error.message,"error");}}
 const CONFIG_MODULES=[
   ["sensor_1","温湿度 1"],["sensor_2","温湿度 2"],["sensor_3","温湿度 3"],
-  ["pressure","压力传感器"],["flow","流量与呼吸"],["valve","阀门与路由"],
-  ["control","控制策略"],["output","输出设置"],["alarm","告警设置"],
+  ["pressure","压力传感器"],["flow","流量与呼吸"],["valve","阀门设置"],
+  ["dehumidification","除湿控制"],["antifreeze","防冻控制"],
+  ["sensor_fault","传感器故障策略"],["output","输出设置"],["alarm","告警设置"],
   ["logging","数据记录"],["communication","通信设置"],
   ["schedule","定时任务"],
 ];
@@ -245,8 +306,8 @@ function renderScheduleEditor(){
   const hour=Math.max(0,Number(scheduleValue("start_hour",0))),minute=Math.max(0,Number(scheduleValue("start_minute",0)));
   const monthOptions=Array.from({length:12},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===month?"selected":""}>${value} 月</option>`).join("");
   const dayOptions=Array.from({length:scheduleMonthDays(month)},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===day?"selected":""}>${value} 日</option>`).join("");
-  const thresholds=[1,2,3].map(channel=>`<div class="schedule-threshold-row"><strong>温湿度 ${channel}</strong><label>湿度下限（%RH）<input id="scheduleLow${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_low_${channel}`,0))}"></label><label>湿度上限（%RH）<input id="scheduleHigh${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_high_${channel}`,0))}"></label></div>`).join("");
-  editor.innerHTML=`<div class="schedule-editor-head"><div><h3>任务 ${selected}</h3><p>按设备 RTC 每年在所选月日和时刻触发；任务修改先暂存，点击页面上方“提交配置”后永久生效。</p></div><button id="saveScheduleTaskBtn" class="button primary">暂存当前任务</button></div><div class="schedule-form-grid"><label>开始日期（每年）<span class="schedule-date-fields"><select id="scheduleMonth">${monthOptions}</select><select id="scheduleDay">${dayOptions}</select></span></label><label>开始时间<input id="scheduleTime" type="time" value="${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}" required></label><label>持续时间（天）<input id="scheduleDuration" type="number" min="1" max="3650" step="1" value="${esc(scheduleValue("duration_days",4))}"></label><div class="schedule-switches"><label class="check-label"><input id="scheduleEnabled" type="checkbox" ${scheduleValue("enabled",false)?"checked":""}>启用任务</label><label class="check-label"><input id="scheduleOverrideEnabled" type="checkbox" ${scheduleValue("humidity_override_enabled",false)?"checked":""}>启用湿度覆盖</label></div></div><div class="schedule-thresholds"><h4>三路湿度覆盖阈值</h4>${thresholds}</div>`;
+  const thresholds=[1,2,3].map(channel=>`<div class="schedule-threshold-row"><strong>温湿度 ${channel}</strong><label>启动湿度（%RH）<input id="scheduleStart${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_start_threshold_${channel}`,0))}"></label><label>回落停热湿度（%RH）<input id="scheduleFallingStop${channel}" type="number" min="0" max="100" step="0.1" value="${esc(scheduleValue(`humidity_falling_stop_threshold_${channel}`,0))}"></label><label>峰值回落幅度（%RH）<input id="schedulePeakDrop${channel}" type="number" min="0.01" max="100" step="0.01" value="${esc(scheduleValue(`humidity_peak_drop_threshold_${channel}`,1))}"></label></div>`).join("");
+  editor.innerHTML=`<div class="schedule-editor-head"><div><h3>任务 ${selected}</h3><p>按设备 RTC 每年在所选月日和时刻触发；任务修改先暂存，点击页面上方“提交配置”后永久生效。</p></div><button id="saveScheduleTaskBtn" class="button primary">暂存当前任务</button></div><div class="schedule-form-grid"><label>开始日期（每年）<span class="schedule-date-fields"><select id="scheduleMonth">${monthOptions}</select><select id="scheduleDay">${dayOptions}</select></span></label><label>开始时间<input id="scheduleTime" type="time" value="${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}" required></label><label>持续时间（天）<input id="scheduleDuration" type="number" min="1" max="3650" step="1" value="${esc(scheduleValue("duration_days",4))}"></label><div class="schedule-switches"><label class="check-label"><input id="scheduleEnabled" type="checkbox" ${scheduleValue("enabled",false)?"checked":""}>启用任务</label><label class="check-label"><input id="scheduleOverrideEnabled" type="checkbox" ${scheduleValue("humidity_override_enabled",false)?"checked":""}>启用湿度覆盖</label></div></div><div class="schedule-thresholds"><h4>三路湿度覆盖参数</h4>${thresholds}</div>`;
   $("scheduleMonth").addEventListener("change",()=>{
     const daySelect=$("scheduleDay"),previous=Number(daySelect.value),days=scheduleMonthDays($("scheduleMonth").value);
     daySelect.innerHTML=Array.from({length:days},(_,index)=>index+1).map(value=>`<option value="${value}" ${value===Math.min(previous,days)?"selected":""}>${value} 日</option>`).join("");
@@ -255,11 +316,12 @@ function renderScheduleEditor(){
 }
 async function saveScheduleTask(){
   const time=$("scheduleTime").value.split(":").map(Number);
-  const humidityLow=[1,2,3].map(channel=>Number($(`scheduleLow${channel}`).value));
-  const humidityHigh=[1,2,3].map(channel=>Number($(`scheduleHigh${channel}`).value));
+  const humidityStartThreshold=[1,2,3].map(channel=>Number($(`scheduleStart${channel}`).value));
+  const humidityFallingStopThreshold=[1,2,3].map(channel=>Number($(`scheduleFallingStop${channel}`).value));
+  const humidityPeakDropThreshold=[1,2,3].map(channel=>Number($(`schedulePeakDrop${channel}`).value));
   if(time.length!==2||time.some(value=>!Number.isFinite(value)))return showNotice("请选择有效的开始时间","error");
-  if(humidityLow.some((value,index)=>!Number.isFinite(value)||!Number.isFinite(humidityHigh[index])||value<0||humidityHigh[index]>100||value>=humidityHigh[index]))return showNotice("每路湿度必须满足 0 ≤ 下限 < 上限 ≤ 100","error");
-  const payload={deviceId:state.selectedDeviceId,taskNumber:Number(scheduleValue("selected_task",1)),month:Number($("scheduleMonth").value),day:Number($("scheduleDay").value),hour:time[0],minute:time[1],durationDays:Number($("scheduleDuration").value),enabled:$("scheduleEnabled").checked,humidityOverrideEnabled:$("scheduleOverrideEnabled").checked,humidityLow,humidityHigh};
+  if(humidityStartThreshold.some((value,index)=>!Number.isFinite(value)||!Number.isFinite(humidityFallingStopThreshold[index])||value<0||value>100||humidityFallingStopThreshold[index]<0||humidityFallingStopThreshold[index]>100||!Number.isFinite(humidityPeakDropThreshold[index])||humidityPeakDropThreshold[index]<=0||humidityPeakDropThreshold[index]>100))return showNotice("每路启动湿度和回落停热湿度须在 0–100，峰值回落幅度须大于 0 且不超过 100","error");
+  const payload={deviceId:state.selectedDeviceId,taskNumber:Number(scheduleValue("selected_task",1)),month:Number($("scheduleMonth").value),day:Number($("scheduleDay").value),hour:time[0],minute:time[1],durationDays:Number($("scheduleDuration").value),enabled:$("scheduleEnabled").checked,humidityOverrideEnabled:$("scheduleOverrideEnabled").checked,humidityStartThreshold,humidityFallingStopThreshold,humidityPeakDropThreshold};
   try{await api("/api/config/schedule/update",{method:"POST",body:JSON.stringify(payload)});showNotice(`任务 ${payload.taskNumber} 已暂存并完整回读`);await refreshParameters();}
   catch(error){showNotice(error.message,"error");}
 }
@@ -275,7 +337,7 @@ function renderConfigTable(){
 function configEditor(item){const value=item.currentValue??"",unknown=item.currentValue===null||item.currentValue===undefined;if(item.dataType==="bool")return `<select class="config-input" data-config-value="${esc(item.id)}"><option value="" disabled ${unknown?"selected":""}>未读取</option><option value="1" ${value===true||value===1?"selected":""}>启用</option><option value="0" ${value===false||value===0?"selected":""}>关闭</option></select>`;if(item.enumValues&&Object.keys(item.enumValues).length)return `<select class="config-input" data-config-value="${esc(item.id)}"><option value="" disabled ${unknown?"selected":""}>未读取</option>${Object.entries(item.enumValues).map(([v,t])=>`<option value="${v}" ${String(value)===String(v)?"selected":""}>${esc(t)} (${v})</option>`).join("")}</select>`;const min=item.minimum!==undefined?` min="${item.minimum}"`:"",max=item.maximum!==undefined?` max="${item.maximum}"`:"",step=item.step??(item.dataType==='float32'?'0.01':'1');return `<input class="config-input" data-config-value="${esc(item.id)}" type="number" step="${step}"${min}${max} value="${esc(value)}" placeholder="未读取">`;}
 function configRange(item){if(item.minimum===undefined&&item.maximum===undefined)return "";const unit=esc(item.unit||"");return `<br><small>允许范围：${item.minimum??"−∞"}–${item.maximum??"∞"}${unit}</small>`;}
 async function stageConfig(itemId){const input=document.querySelector(`[data-config-value="${CSS.escape(itemId)}"]`);if(!input)return;if(input.validity&&!input.checkValidity())return showNotice(input.validationMessage||"参数超出允许范围","error");try{await api("/api/config/stage",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,itemId,value:input.value})});showNotice("参数已暂存并回读成功");await refreshParameters();}catch(error){showNotice(error.message,"error");}}
-async function configAction(action){try{const result=await api("/api/config/transaction",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,action})});await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});showNotice(action==="commit"?`配置提交成功，代次 ${result.status.generation}`:"已放弃暂存配置");await refreshParameters();}catch(error){showNotice(error.message,"error");}}
+async function configAction(action){try{const result=await api("/api/config/transaction",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,action})});await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});if(action==="commit"&&result.restartRequired){const p=result.connectionProfile||{};const details=[p.slaveId!=null?`地址 ${p.slaveId}`:"",p.baudrate!=null?`波特率 ${p.baudrate}`:"",p.parity!=null?`校验 ${p.parity}`:""].filter(Boolean).join("，");showNotice(`配置已持久化，代次 ${result.status.generation}。通信参数将在设备重启后生效；重启后请同步设备档案${details?`（${details}）`:""}`,"warning");}else{showNotice(action==="commit"?`配置已持久化，代次 ${result.status.generation}`:"已放弃暂存配置");}await refreshParameters();}catch(error){showNotice(error.message,"error");}}
 
 function renderAlarmSummary(){const a=state.snapshot?.alarms;if(!a)return;$("alarmSummary").innerHTML=(a.groups||[]).map((g,i)=>`<article class="alarm-card ${Number(g.value)?"active":""}"><span>告警组 ${i}</span><strong>0x${Number(g.value||0).toString(16).padStart(8,"0").toUpperCase()}</strong><small>${Number(g.value)?"存在活动告警":"无告警"}</small></article>`).join("");}
 async function refreshEvents(){if(!state.selectedDeviceId)return;try{state.events=(await api(`/api/monitor/events?deviceId=${encodeURIComponent(state.selectedDeviceId)}&limit=120`)).items||[];renderEvents();}catch(error){showNotice(error.message,"error");}}
@@ -294,7 +356,7 @@ async function sendDebugFrame(){
 }
 function renderDiagnostics(){const c=state.snapshot?.communication,s=state.snapshot?.session;if(!c)return;$("diagnosticStats").innerHTML=[["通信健康",c.text,""],["连续失败",fmt(c.failureCount.value,0),"次"],["请求总数",fmt(s?.request_count,0),"次"],["最近成功",s?.last_success_at||"--",""]].map(([name,value,unit])=>`<article class="hero-card"><span>${name}</span><strong>${esc(value)}</strong><em>${unit}</em></article>`).join("");}
 
-function renderDevices(){const selected=state.selectedDeviceId;$("deviceCards").innerHTML=state.devices.length?state.devices.map(d=>`<article class="device-card ${d.id===selected?"selected":""}"><div class="card-head"><h3>${esc(d.name)}</h3><span class="state-pill ${d.enabled?'ok':''}">${d.enabled?'已启用':'已禁用'}</span></div><div class="device-meta"><span>端口</span><strong>${esc(d.address)}</strong><span>从站</span><strong>${d.slaveId}</strong><span>串口</span><strong>${d.baudrate} ${d.parity}81</strong><span>协议</span><strong>V7 RTU</strong></div><div class="device-actions"><button class="button small primary" data-select-device="${esc(d.id)}">选择</button><button class="button small secondary" data-edit-device="${esc(d.id)}">编辑</button><button class="button small danger ghost" data-delete-device="${esc(d.id)}">删除</button></div></article>`).join(""):'<div class="empty-state panel">暂无设备，点击“添加设备”开始配置。</div>';
+function renderDevices(){const selected=state.selectedDeviceId;$("deviceCards").innerHTML=state.devices.length?state.devices.map(d=>`<article class="device-card ${d.id===selected?"selected":""}"><div class="card-head"><h3>${esc(d.name)}</h3><span class="state-pill ${d.enabled?'ok':''}">${d.enabled?'已启用':'已禁用'}</span></div><div class="device-meta"><span>端口</span><strong>${esc(d.address)}</strong><span>从站</span><strong>${d.slaveId}</strong><span>串口</span><strong>${d.baudrate} ${d.parity}81</strong><span>协议</span><strong>V9 RTU</strong></div><div class="device-actions"><button class="button small primary" data-select-device="${esc(d.id)}">选择</button><button class="button small secondary" data-edit-device="${esc(d.id)}">编辑</button><button class="button small danger ghost" data-delete-device="${esc(d.id)}">删除</button></div></article>`).join(""):'<div class="empty-state panel">暂无设备，点击“添加设备”开始配置。</div>';
   document.querySelectorAll("[data-select-device]").forEach(b=>b.addEventListener("click",()=>selectDevice(b.dataset.selectDevice)));
   document.querySelectorAll("[data-edit-device]").forEach(b=>b.addEventListener("click",()=>openDeviceDialog(state.devices.find(d=>d.id===b.dataset.editDevice))));
   document.querySelectorAll("[data-delete-device]").forEach(b=>b.addEventListener("click",()=>deleteDevice(b.dataset.deleteDevice)));
@@ -316,7 +378,7 @@ function switchPage(page){state.activePage=page;document.querySelectorAll(".nav-
 function bind(){
   document.querySelectorAll(".nav-item").forEach(n=>n.addEventListener("click",()=>switchPage(n.dataset.page)));
   $("deviceSelect").addEventListener("change",()=>selectDevice($("deviceSelect").value));$("startBtn").addEventListener("click",startMonitoring);$("stopBtn").addEventListener("click",stopMonitoring);
-  $("refreshTrendBtn").addEventListener("click",refreshSeries);$("trendWindow").addEventListener("change",()=>applyTrendWindow(Number($("trendWindow").value)));document.querySelectorAll("[data-trend-window]").forEach(button=>button.addEventListener("click",()=>applyTrendWindow(Number(button.dataset.trendWindow))));$("applyTrendRangeBtn").addEventListener("click",()=>{const start=$("trendStart").value,end=$("trendEnd").value;if(!start||!end)return showNotice("请选择完整的开始和结束时间","error");if(new Date(end)<new Date(start))return showNotice("结束时间不能早于开始时间","error");state.trendQuery={windowMs:state.trendQuery.windowMs,start:start.replace("T"," "),end:end.replace("T"," ")};state.trendViewport=null;state.trendViewportHistory=[];refreshSeries();});$("zoomInTrendBtn").addEventListener("click",()=>zoomTrend(.65));$("zoomOutTrendBtn").addEventListener("click",()=>zoomTrend(1.55));$("resetTrendZoomBtn").addEventListener("click",resetTrendViewport);$("exportTrendBtn").addEventListener("click",exportTrendCsv);setupTrendInteractions();bindTrendWorkbench();window.addEventListener("resize",()=>state.activePage==="trends"&&drawTrendChart());
+  $("refreshTrendBtn").addEventListener("click",refreshSeries);$("trendWindow").addEventListener("change",()=>applyTrendWindow(Number($("trendWindow").value)));document.querySelectorAll("[data-trend-window]").forEach(button=>button.addEventListener("click",()=>applyTrendWindow(Number(button.dataset.trendWindow))));$("applyTrendRangeBtn").addEventListener("click",applyTrendRangeFromInputs);$("zoomInTrendBtn").addEventListener("click",()=>zoomTrend(.65));$("zoomOutTrendBtn").addEventListener("click",()=>zoomTrend(1.55));$("resetTrendZoomBtn").addEventListener("click",resetTrendViewport);$("exportTrendBtn").addEventListener("click",exportTrendCsv);setupTrendInteractions();bindTrendWorkbench();window.addEventListener("resize",()=>state.activePage==="trends"&&drawTrendChart());
   $("resetAllValvesBtn").addEventListener("click",()=>writeControl("holding.runtime.reset",7));
   $("refreshConfigBtn").addEventListener("click",async()=>{try{await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});await refreshParameters();showNotice("参数读取完成");}catch(e){showNotice(e.message,"error");}});
   $("syncRtcBtn").addEventListener("click",async()=>{try{const epoch=Math.floor(Date.now()/1000);await api("/api/system/rtc/sync",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId,epoch})});showNotice("已将电脑当前本地时间写入下位机 RTC");}catch(e){showNotice(e.message,"error");}});

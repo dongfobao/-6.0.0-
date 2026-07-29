@@ -1,6 +1,6 @@
 # YLDQ 6.0 远程监控系统
 
-面向 YLDQ 6.0 下位机的实时监控、可视化、控制和配置软件。通信协议固定为 Modbus V7（协议字 `0x0700`），串口直接传输标准 Modbus RTU ADU，不使用 SLIP，也不兼容旧版寄存器地址。
+面向 YLDQ 6.0 下位机的实时监控、可视化、控制和配置软件。通信协议固定为 Modbus V9（协议字 `0x0900`），串口直接传输标准 Modbus RTU ADU，不使用 SLIP，也不兼容旧版寄存器地址。
 
 ## 功能
 
@@ -33,7 +33,7 @@ cd "E:\project\5.0.0\xishiqi5.0.0\docs\新程序运行数据分析系统"
 
 浏览器访问：`http://127.0.0.1:8765`
 
-进入“设备管理”配置串口和从站地址，选择设备后点击“启动监控”。首次收到数据时会校验 FC04 地址 0 必须等于 `0x0700`。
+进入“设备管理”配置串口和从站地址，选择设备后点击“启动监控”。首次收到数据时会校验 FC04 地址 0 必须等于 `0x0900`。
 
 ## 自动测试
 
@@ -50,9 +50,9 @@ cd "E:\project\5.0.0\xishiqi5.0.0\docs\新程序运行数据分析系统"
 
 - `app/dashboard_server.py`：监控 HTTP API 和静态资源服务
 - `app/live_acquisition_service.py`：多设备采集、控制、配置与记录
-- `app/live_register_catalog.py`：Modbus V7 唯一点表
-- `app/modbus_v7_codec.py`：寄存器类型编解码
-- `app/modbus_v7_config.py`：配置事务
+- `app/live_register_catalog.py`：Modbus V9 唯一点表
+- `app/modbus_v9_codec.py`：寄存器类型编解码
+- `app/modbus_v9_config.py`：配置事务
 - `app/monitoring_projection.py`：界面监控模型
 - `app/web/`：最终监控界面
 - `tests/`：协议、采集、投影和记录测试

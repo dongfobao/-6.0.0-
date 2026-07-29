@@ -6,6 +6,7 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -14,8 +15,8 @@ from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog
 from live_session_recorder import LiveSessionRecorder
-from modbus_v7_codec import decode_words, encode_words
-from modbus_v7_config import V7ConfigTransaction
+from modbus_v9_codec import decode_words, encode_words
+from modbus_v9_config import V9ConfigTransaction
 
 
 HISTORY_POINT_IDS = (
@@ -29,18 +30,18 @@ HISTORY_POINT_IDS = (
     "input_register.flow",
 )
 
-_TIME_CONFIG_UNIT_SECONDS = {
-    "holding.flow.no_change_alarm_days": 86400,
-    "holding.valve_route.route_cycle_days": 86400,
-    "holding.valve_route.force_close_days": 86400,
-    "holding.valve_route.valve_cooling_hours": 3600,
-    "holding.control.close_delay_hours": 3600,
-}
+HISTORY_RAW_MAX_POINTS = 28800
+HISTORY_ARCHIVE_MAX_POINTS = 7 * 24 * 60
+HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
+_ENV_HISTORY_ROW_RE = re.compile(
+    r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\],/\*\s*"
+    r"([-+\d.eE]+),([-+\d.eE]+),([-+\d.eE]+),([-+\d.eE]+),?\s*\*/"
+)
 
 SCHEDULE_BASE_ADDRESS = 720
-SCHEDULE_DATA_WORD_COUNT = 22
-SCHEDULE_WINDOW_WORD_COUNT = 23
-SCHEDULE_OPERATION_ADDRESS = 742
+SCHEDULE_DATA_WORD_COUNT = 28
+SCHEDULE_WINDOW_WORD_COUNT = 29
+SCHEDULE_OPERATION_ADDRESS = 748
 SCHEDULE_MAX_TASKS = 12
 SCHEDULE_OPERATION_ADD = 1
 SCHEDULE_OPERATION_DELETE_SELECTED = 2
@@ -94,11 +95,16 @@ class LiveAcquisitionService:
             "config": deepcopy(device),
             "values": {},
             "history": {
-                point_id.removeprefix("input_register."): deque(maxlen=7200)
+                point_id.removeprefix("input_register."): deque(maxlen=HISTORY_RAW_MAX_POINTS)
+                for point_id in HISTORY_POINT_IDS
+            },
+            "history_archive": {
+                point_id.removeprefix("input_register."): deque(maxlen=HISTORY_ARCHIVE_MAX_POINTS)
                 for point_id in HISTORY_POINT_IDS
             },
             "events": deque(maxlen=240),
             "traffic": deque(maxlen=1000),
+            "pending_connection_profile": {},
             "recorder": None,
             "state": LiveAcquisitionService._empty_device_state(device),
             "event_seq": 0,
@@ -194,6 +200,7 @@ class LiveAcquisitionService:
                 port_key = _device_port_key(device)
                 same_port_count = len(port_groups.get(port_key) or [])
                 session_root_path = Path(session_root or ".")
+                self._restore_recent_history(slot, session_root_path, device_id, started_at)
                 slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
                 slot["state"].update({
                     "running": True,
@@ -394,12 +401,28 @@ class LiveAcquisitionService:
         end_epoch = end_time.timestamp() if end_time is not None else float("inf")
         capped_limit = max(1, min(limit, 2000))
         with self._lock:
-            all_epochs = sorted({float(row["epoch"]) for rows in slot["history"].values() for row in rows})
+            history_archive = slot.get("history_archive") or {}
+            all_epochs = sorted({
+                float(row["epoch"])
+                for history_name in ("history", "history_archive")
+                for rows in (slot.get(history_name) or {}).values()
+                for row in rows
+            })
             available_dates = sorted({datetime.fromtimestamp(epoch).strftime("%Y-%m-%d") for epoch in all_epochs}, reverse=True)
             by_metric: dict[str, list[dict[str, Any]]] = {}
             for key, rows in slot["history"].items():
-                filtered = [dict(row) for row in rows if cutoff <= row["epoch"] <= end_epoch]
-                by_metric[key] = filtered[-capped_limit:]
+                raw_rows = list(rows)
+                raw_start = float(raw_rows[0]["epoch"]) if raw_rows else float("inf")
+                archive_rows = [
+                    row for row in history_archive.get(key, ())
+                    if float(row["epoch"]) < raw_start
+                ]
+                filtered = [
+                    self._public_history_row(row)
+                    for row in (*archive_rows, *raw_rows)
+                    if cutoff <= float(row["epoch"]) <= end_epoch
+                ]
+                by_metric[key] = self._downsample_history_rows(filtered, capped_limit)
 
             aggregated: dict[str, dict[str, Any]] = {}
             for metric_key, rows in by_metric.items():
@@ -423,6 +446,122 @@ class LiveAcquisitionService:
                     "end": _iso(end_time) if end_time is not None else None,
                 },
             }
+
+    @staticmethod
+    def _public_history_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in row.items() if not str(key).startswith("_")}
+
+    @staticmethod
+    def _downsample_history_rows(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        if len(rows) <= limit:
+            return rows
+        if limit <= 1:
+            return [rows[-1]]
+        first_epoch = float(rows[0]["epoch"])
+        last_epoch = float(rows[-1]["epoch"])
+        if last_epoch <= first_epoch:
+            step = (len(rows) - 1) / (limit - 1)
+            return [rows[round(index * step)] for index in range(limit)]
+        bucket_width = (last_epoch - first_epoch) / (limit - 1)
+        selected = [rows[0]]
+        next_boundary = first_epoch + bucket_width
+        candidate = rows[1]
+        for row in rows[1:-1]:
+            candidate = row
+            if float(row["epoch"]) >= next_boundary:
+                selected.append(candidate)
+                next_boundary = first_epoch + bucket_width * len(selected)
+                if len(selected) >= limit - 1:
+                    break
+        selected.append(rows[-1])
+        return selected[:limit - 1] + [rows[-1]] if len(selected) > limit else selected
+
+    @staticmethod
+    def _append_history_point(
+        slot: dict[str, Any],
+        metric_key: str,
+        timestamp: str,
+        epoch: float,
+        value: Any,
+    ) -> None:
+        row = {"ts": timestamp, "value": value, "epoch": epoch}
+        if slot["history"][metric_key] and float(slot["history"][metric_key][-1]["epoch"]) == epoch:
+            slot["history"][metric_key][-1] = row
+            return
+        slot["history"][metric_key].append(row)
+        archive = slot["history_archive"][metric_key]
+        bucket_epoch = int(epoch // 60) * 60
+        numeric_value = float(value)
+        if archive and int(float(archive[-1]["epoch"])) == bucket_epoch:
+            bucket = archive[-1]
+            bucket["_sum"] = float(bucket.get("_sum", bucket["value"])) + numeric_value
+            bucket["_count"] = int(bucket.get("_count", 1)) + 1
+            bucket["value"] = bucket["_sum"] / bucket["_count"]
+            return
+        archive.append({
+            "ts": _iso(datetime.fromtimestamp(bucket_epoch)),
+            "value": numeric_value,
+            "epoch": float(bucket_epoch),
+            "_sum": numeric_value,
+            "_count": 1,
+        })
+
+    def _restore_recent_history(
+        self,
+        slot: dict[str, Any],
+        session_root: Path,
+        device_id: str,
+        now: datetime,
+    ) -> int:
+        if not session_root.exists():
+            return 0
+        cutoff = now.timestamp() - HISTORY_RETENTION_SECONDS
+        restored = 0
+        meta_paths = sorted(session_root.glob("*/session_meta.json"))
+        for meta_path in meta_paths:
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str((meta.get("device") or {}).get("id") or "") != device_id:
+                continue
+            for data_path in sorted(meta_path.parent.glob("data_0/log_*.csv")):
+                try:
+                    with data_path.open("r", encoding="utf-8") as handle:
+                        for line in handle:
+                            match = _ENV_HISTORY_ROW_RE.match(line.strip())
+                            if match is None:
+                                continue
+                            timestamp = match.group(1)
+                            parsed = _parse_iso(timestamp)
+                            if parsed is None:
+                                continue
+                            epoch = parsed.timestamp()
+                            if epoch < cutoff or epoch > now.timestamp() + 60:
+                                continue
+                            values: dict[str, float] = {
+                                "pressure": float(match.group(2)),
+                                "sensor_1.temperature": float(match.group(3)),
+                                "flow": float(match.group(4)),
+                                "sensor_1.humidity": float(match.group(5)),
+                            }
+                            if "|" in line:
+                                try:
+                                    details = json.loads(line.split("|", 1)[1].strip())
+                                except (TypeError, ValueError):
+                                    details = {}
+                                for key in (
+                                    "sensor_1.temperature", "sensor_2.temperature", "sensor_3.temperature",
+                                    "sensor_1.humidity", "sensor_2.humidity", "sensor_3.humidity",
+                                ):
+                                    if key in details:
+                                        values[key] = float(details[key])
+                            for metric_key, value in values.items():
+                                self._append_history_point(slot, metric_key, timestamp, epoch, value)
+                                restored += 1
+                except OSError:
+                    continue
+        return restored
 
     def get_events(self, device_id: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
         slot = self._get_device_slot(device_id)
@@ -482,14 +621,13 @@ class LiveAcquisitionService:
             raise ValueError("设备采集会话尚未运行")
 
         device = deepcopy(slot["config"])
-        V7ConfigTransaction._validate_value_range(item, value)
-        wire_item, wire_value = self._config_value_to_wire(item, value, slot["values"])
+        V9ConfigTransaction._validate_value_range(item, value)
         port_key = _device_port_key(device)
         with self._io_lock:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                words = V7ConfigTransaction(client).stage_value(wire_item, wire_value)
+                words = V9ConfigTransaction(client).stage_value(item, value)
                 decoded = decode_words(words, str(item["dataType"]))
             finally:
                 client.close()
@@ -497,12 +635,29 @@ class LiveAcquisitionService:
         timestamp = _iso(_now())
         with self._lock:
             slot["values"][item_id] = {"value": decoded, "ts": timestamp}
+            connection_field = {
+                "holding.communication.slave_id": "slaveId",
+                "holding.communication.baudrate": "baudrate",
+                "holding.communication.parity": "parity",
+            }.get(item_id)
+            if connection_field is not None:
+                connection_value = decoded
+                if connection_field == "parity":
+                    connection_value = {0: "N", 1: "O", 2: "E"}[int(decoded)]
+                slot["pending_connection_profile"][connection_field] = connection_value
             slot["event_seq"] += 1
             slot["events"].append({
                 "id": slot["event_seq"], "ts": timestamp, "type": "config_staged",
                 "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
             })
-        return {"ok": True, "itemId": item_id, "value": self._config_value_from_wire(item, decoded, slot["values"]), "wireValue": decoded, "words": words, "staged": True}
+        return {
+            "ok": True,
+            "itemId": item_id,
+            "value": decoded,
+            "wireValue": decoded,
+            "words": words,
+            "staged": True,
+        }
 
     def select_schedule_task(self, device_id: str, task_number: Any) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
@@ -558,7 +713,7 @@ class LiveAcquisitionService:
                 after = self._refresh_schedule_from_client(device_id, slot, client)
                 expected_count = old_count + (1 if normalized == "add" else -1)
                 if int(after[1]) != expected_count:
-                    raise ModbusError("定时任务数量回读不一致，请确认下位机已升级到支持任务增删的 V7 固件")
+                    raise ModbusError("定时任务数量回读不一致，请确认下位机运行 Modbus V9 固件")
             finally:
                 client.close()
 
@@ -594,13 +749,34 @@ class LiveAcquisitionService:
         if duration_days < 1 or duration_days > 3650:
             raise ValueError("持续时间必须在 1–3650 天之间")
 
-        highs = [float(value) for value in payload.get("humidityHigh", [])]
-        lows = [float(value) for value in payload.get("humidityLow", [])]
-        if len(highs) != 3 or len(lows) != 3:
-            raise ValueError("必须提供三路湿度上下限")
-        for index, (low, high) in enumerate(zip(lows, highs), start=1):
-            if low < 0 or high > 100 or low >= high:
-                raise ValueError(f"温湿度 {index} 必须满足 0 ≤ 下限 < 上限 ≤ 100")
+        start_thresholds = [
+            float(value) for value in payload.get("humidityStartThreshold", [])
+        ]
+        falling_stop_thresholds = [
+            float(value)
+            for value in payload.get("humidityFallingStopThreshold", [])
+        ]
+        peak_drop_thresholds = [
+            float(value) for value in payload.get("humidityPeakDropThreshold", [])
+        ]
+        if (
+            len(start_thresholds) != 3
+            or len(falling_stop_thresholds) != 3
+            or len(peak_drop_thresholds) != 3
+        ):
+            raise ValueError("必须提供三路启动湿度、回落停热湿度和峰值回落幅度")
+        for index, (start, falling_stop, peak_drop) in enumerate(
+            zip(
+                start_thresholds,
+                falling_stop_thresholds,
+                peak_drop_thresholds,
+            ),
+            start=1,
+        ):
+            if not 0 <= start <= 100 or not 0 <= falling_stop <= 100:
+                raise ValueError(f"温湿度 {index} 的湿度阈值必须在 0–100 %RH")
+            if not 0 < peak_drop <= 100:
+                raise ValueError(f"温湿度 {index} 的峰值回落幅度必须在 0–100 %RH")
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
@@ -624,11 +800,14 @@ class LiveAcquisitionService:
                 words[6] = minute
                 words[7:9] = encode_words(duration_days, "uint32")
                 words[9] = 1 if bool(payload.get("humidityOverrideEnabled")) else 0
-                for sensor, value in enumerate(highs):
+                for sensor, value in enumerate(start_thresholds):
                     offset = 10 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
-                for sensor, value in enumerate(lows):
+                for sensor, value in enumerate(falling_stop_thresholds):
                     offset = 16 + sensor * 2
+                    words[offset:offset + 2] = encode_words(value, "float32")
+                for sensor, value in enumerate(peak_drop_thresholds):
+                    offset = 22 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
 
                 client.write_multiple_registers(SCHEDULE_BASE_ADDRESS, words)
@@ -714,7 +893,7 @@ class LiveAcquisitionService:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                transaction = V7ConfigTransaction(client)
+                transaction = V9ConfigTransaction(client)
                 status = transaction.commit() if normalized_action == "commit" else transaction.discard()
             finally:
                 client.close()
@@ -722,13 +901,31 @@ class LiveAcquisitionService:
         payload = asdict(status)
         timestamp = _iso(_now())
         with self._lock:
+            connection_profile = dict(slot.get("pending_connection_profile") or {})
+            restart_required = normalized_action == "commit" and bool(connection_profile)
+            if normalized_action in {"commit", "discard"}:
+                slot["pending_connection_profile"] = {}
             slot["event_seq"] += 1
             slot["events"].append({
                 "id": slot["event_seq"], "ts": timestamp, "type": f"config_{normalized_action}",
-                "message": "配置已提交" if normalized_action == "commit" else "配置暂存已放弃",
-                "details": payload,
+                "message": (
+                    "配置已提交；通信参数将在设备重启后生效"
+                    if restart_required
+                    else ("配置已提交" if normalized_action == "commit" else "配置暂存已放弃")
+                ),
+                "details": {
+                    **payload,
+                    "restartRequired": restart_required,
+                    "connectionProfile": connection_profile,
+                },
             })
-        return {"ok": True, "action": normalized_action, "status": payload}
+        return {
+            "ok": True,
+            "action": normalized_action,
+            "status": payload,
+            "restartRequired": restart_required,
+            "connectionProfile": connection_profile,
+        }
 
     def _close_runner_client_for_port(self, port_key: str) -> None:
         client = None
@@ -920,47 +1117,10 @@ class LiveAcquisitionService:
     def _catalog_item_with_value(self, item: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         row = dict(item)
         cached = values.get(item["id"]) or {}
-        wire_value = cached.get("value")
-        row["currentValue"] = self._config_value_from_wire(item, wire_value, values)
+        row["currentValue"] = cached.get("value")
         row["value"] = row["currentValue"]
-        if item.get("id") in _TIME_CONFIG_UNIT_SECONDS:
-            row["wireValue"] = wire_value
-            row["legacySecondsWireFormat"] = self._uses_legacy_seconds_wire_format(values)
         row["updatedAt"] = cached.get("ts")
         return row
-
-    def _uses_legacy_seconds_wire_format(self, values: dict[str, Any]) -> bool:
-        """旧下位机虽标记为 V7，但仍以秒传输天/小时配置；以量程外原始值识别。"""
-        for point_id in _TIME_CONFIG_UNIT_SECONDS:
-            raw_value = (values.get(point_id) or {}).get("value")
-            maximum = (self._catalog_by_id.get(point_id) or {}).get("maximum")
-            if raw_value is None or maximum is None:
-                continue
-            try:
-                if int(raw_value) > int(maximum):
-                    return True
-            except (TypeError, ValueError):
-                continue
-        return False
-
-    def _config_value_from_wire(self, item: dict[str, Any], wire_value: Any, values: dict[str, Any]) -> Any:
-        scale = _TIME_CONFIG_UNIT_SECONDS.get(str(item.get("id") or ""))
-        if wire_value is None or scale is None or not self._uses_legacy_seconds_wire_format(values):
-            return wire_value
-        converted = int(wire_value) / scale
-        return int(converted) if converted.is_integer() else converted
-
-    def _config_value_to_wire(self, item: dict[str, Any], value: Any, values: dict[str, Any]) -> tuple[dict[str, Any], Any]:
-        scale = _TIME_CONFIG_UNIT_SECONDS.get(str(item.get("id") or ""))
-        if scale is None or not self._uses_legacy_seconds_wire_format(values):
-            return item, value
-        number = float(value)
-        if not number.is_integer():
-            raise ValueError(f"{item.get('name', item.get('id'))} 只能填写整数{item.get('unit', '')}")
-        wire_item = dict(item)
-        wire_item.pop("minimum", None)
-        wire_item.pop("maximum", None)
-        return wire_item, int(number) * scale
 
     @staticmethod
     def _catalog_item_without_value(item: dict[str, Any]) -> dict[str, Any]:
@@ -1391,11 +1551,7 @@ class LiveAcquisitionService:
                 if item_id.startswith("input_register."):
                     metric_key = item_id.split(".", 1)[1]
                     if metric_key in slot["history"] and decoded is not None:
-                        slot["history"][metric_key].append({
-                            "ts": timestamp,
-                            "value": decoded,
-                            "epoch": epoch,
-                        })
+                        self._append_history_point(slot, metric_key, timestamp, epoch, decoded)
             self._save_to_recorder(slot, device_id, timestamp)
 
     def _save_to_recorder(self, slot: dict[str, Any], device_id: str, timestamp: str) -> None:
@@ -1585,10 +1741,3 @@ _SERVICE_SINGLETON = LiveAcquisitionService()
 
 def get_live_acquisition_service() -> LiveAcquisitionService:
     return _SERVICE_SINGLETON
-_TIME_CONFIG_UNIT_SECONDS = {
-    "holding.flow.no_change_alarm_days": 86400,
-    "holding.valve_route.route_cycle_days": 86400,
-    "holding.valve_route.force_close_days": 86400,
-    "holding.valve_route.valve_cooling_hours": 3600,
-    "holding.control.close_delay_hours": 3600,
-}

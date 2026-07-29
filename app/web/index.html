@@ -24,7 +24,7 @@
         <button class="nav-item" data-page="diagnostics">通信诊断</button>
         <button class="nav-item" data-page="devices">设备管理</button>
       </nav>
-      <div class="protocol-card"><span>通信协议</span><strong>Modbus V7</strong><small>裸 RTU · 0x0700</small></div>
+      <div class="protocol-card"><span>通信协议</span><strong>Modbus V9</strong><small>裸 RTU · 0x0900</small></div>
     </aside>
 
     <main class="workspace">
@@ -124,7 +124,7 @@
 
       <section class="page" data-page-view="configuration">
         <div class="config-toolbar panel">
-          <div><h3>V7 配置事务</h3><p>修改先暂存并回读；确认后提交，或放弃全部暂存。</p></div>
+          <div><h3>V9 配置事务</h3><p>修改先暂存并回读；确认后提交，或放弃全部暂存。</p></div>
           <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="syncRtcBtn" class="button secondary" title="将当前电脑时间强制写入下位机 RTC">同步电脑时间</button><button id="remoteResetBtn" class="button danger" title="设备将立即重启，通信会短暂中断">远程重启复位</button><button id="discardConfigBtn" class="button secondary">放弃暂存</button><button id="commitConfigBtn" class="button primary">提交配置</button></div>
         </div>
         <div class="filter-row"><input id="configSearch" type="search" placeholder="搜索参数名称或点 ID"></div>

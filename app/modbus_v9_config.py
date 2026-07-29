@@ -1,12 +1,13 @@
-"""V7 配置暂存、校验与提交事务。"""
+"""V9 配置暂存、校验与提交事务。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Protocol
 
 from live_register_catalog import PROTOCOL_VERSION_WORD
-from modbus_v7_codec import encode_words
+from modbus_v9_codec import encode_words
 
 
 CONFIG_STATUS_ADDRESS = 0
@@ -39,9 +40,17 @@ class ConfigStatus:
         return self.protocol_word == PROTOCOL_VERSION_WORD
 
 
-class V7ConfigTransaction:
-    def __init__(self, client: RegisterClient) -> None:
+class V9ConfigTransaction:
+    def __init__(
+        self,
+        client: RegisterClient,
+        *,
+        commit_timeout_seconds: float = 20.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> None:
         self.client = client
+        self.commit_timeout_seconds = max(0.1, float(commit_timeout_seconds))
+        self.poll_interval_seconds = max(0.0, float(poll_interval_seconds))
 
     def read_status(self) -> ConfigStatus:
         words = self.client.read_holding_registers(CONFIG_STATUS_ADDRESS, CONFIG_STATUS_COUNT)
@@ -75,13 +84,21 @@ class V7ConfigTransaction:
     def _validate_value_range(item: dict[str, Any], value: Any) -> None:
         minimum = item.get("minimum")
         maximum = item.get("maximum")
-        if minimum is None and maximum is None:
+        allowed_values = item.get("allowedValues")
+        if minimum is None and maximum is None and not allowed_values:
             return
         try:
             numeric_value = float(value)
         except (TypeError, ValueError) as exc:
             raise ConfigTransactionError(f"参数不是有效数字: {item.get('id')}") from exc
         unit = str(item.get("unit") or "")
+        if allowed_values and numeric_value not in {
+            float(allowed) for allowed in allowed_values
+        }:
+            choices = "、".join(str(allowed) for allowed in allowed_values)
+            raise ConfigTransactionError(
+                f"{item.get('name', item.get('id'))}只支持: {choices}{unit}"
+            )
         if minimum is not None and numeric_value < float(minimum):
             raise ConfigTransactionError(
                 f"{item.get('name', item.get('id'))}不能小于 {minimum}{unit}"
@@ -92,10 +109,21 @@ class V7ConfigTransaction:
             )
 
     def commit(self) -> ConfigStatus:
-        status = self._command(COMMAND_COMMIT)
-        if status.error:
-            raise ConfigTransactionError(f"配置提交失败，错误码: {status.error}")
-        return status
+        before = self.read_status()
+        self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_COMMIT)
+        deadline = time.monotonic() + self.commit_timeout_seconds
+        while True:
+            status = self.read_status()
+            if status.error:
+                raise ConfigTransactionError(f"配置提交失败，错误码: {status.error}")
+            generation_advanced = status.generation != before.generation
+            commit_succeeded = bool(status.state & 0x0004)
+            staging_dirty = bool(status.state & 0x0002)
+            if generation_advanced and commit_succeeded and not staging_dirty:
+                return status
+            if time.monotonic() >= deadline:
+                raise ConfigTransactionError("配置提交超时，未收到下位机持久化成功确认")
+            time.sleep(self.poll_interval_seconds)
 
     def discard(self) -> ConfigStatus:
         return self._command(COMMAND_DISCARD)

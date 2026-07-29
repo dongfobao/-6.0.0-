@@ -6,7 +6,7 @@
 
 ## 协议约束
 
-- 唯一协议为 Modbus V7，协议字 `0x0700`。
+- 唯一协议为 Modbus V9，协议字 `0x0900`。
 - 串口使用标准裸 Modbus RTU ADU，不使用 SLIP。
 - 支持 FC02、FC03、FC04、FC06、FC16；禁止 FC01、FC05、FC15。
 - 不兼容旧版寄存器地址，不添加旧点 ID、地址别名或迁移分支。
@@ -22,8 +22,8 @@
 - `app/live_modbus_client.py`：标准 Modbus RTU 主站客户端。
 - `app/live_register_catalog.py`：V7 唯一点表。
 - `app/live_polling_commands.py`：固定合法轮询块。
-- `app/modbus_v7_codec.py`：类型编解码。
-- `app/modbus_v7_config.py`：配置事务。
+- `app/modbus_v9_codec.py`：类型编解码。
+- `app/modbus_v9_config.py`：配置事务。
 - `app/monitoring_projection.py`：监控视图模型。
 - `app/web/`：无框架 HTML/CSS/JavaScript 前端。
 

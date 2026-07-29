@@ -6,12 +6,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from modbus_v7_config import COMMAND_COMMIT, COMMAND_DISCARD, ConfigTransactionError, V7ConfigTransaction
+from modbus_v9_config import COMMAND_COMMIT, COMMAND_DISCARD, ConfigTransactionError, V9ConfigTransaction
 
 
 class FakeClient:
     def __init__(self) -> None:
-        self.words = {0: 0x0700, 1: 1, 2: 9, 3: 0, 4: 0}
+        self.words = {0: 0x0900, 1: 1, 2: 9, 3: 0, 4: 0}
         self.writes: list[tuple[int, list[int]]] = []
 
     def read_holding_registers(self, address: int, count: int) -> list[int]:
@@ -24,12 +24,16 @@ class FakeClient:
         self.writes.append((address, list(values)))
         for offset, value in enumerate(values):
             self.words[address + offset] = value
+        if address == 3 and values == [COMMAND_COMMIT]:
+            self.words[1] = 0x0005
+            self.words[2] += 1
+            self.words[3] = 0
 
 
-class ModbusV7ConfigTests(unittest.TestCase):
+class ModbusV9ConfigTests(unittest.TestCase):
     def test_stage_readback_and_commit(self) -> None:
         client = FakeClient()
-        transaction = V7ConfigTransaction(client)
+        transaction = V9ConfigTransaction(client)
         item = {"id": "holding.test", "area": "holding_register", "address": 100,
                 "dataType": "float32", "writable": True}
         words = transaction.stage_value(item, 12.5)
@@ -43,22 +47,22 @@ class ModbusV7ConfigTests(unittest.TestCase):
         client = FakeClient()
         client.words[0] = 0x0600
         with self.assertRaises(ConfigTransactionError):
-            V7ConfigTransaction(client).read_status()
+            V9ConfigTransaction(client).read_status()
 
     def test_runtime_control_cannot_enter_config_transaction(self) -> None:
         client = FakeClient()
         item = {"id": "holding.runtime.remote_heat", "area": "holding_register", "address": 800,
                 "dataType": "bool", "writable": True}
         with self.assertRaises(ConfigTransactionError):
-            V7ConfigTransaction(client).stage_value(item, True)
+            V9ConfigTransaction(client).stage_value(item, True)
 
     def test_new_time_unit_range_is_enforced_before_write(self) -> None:
         client = FakeClient()
         item = {
-            "id": "holding.valve_route.valve_cooling_hours",
-            "name": "停热后阀门冷却延时",
+            "id": "holding.dehumidification.post_heating_cooling_hours",
+            "name": "停热后设备冷却时间",
             "area": "holding_register",
-            "address": 305,
+            "address": 404,
             "dataType": "uint32",
             "unit": "小时",
             "minimum": 0,
@@ -66,11 +70,44 @@ class ModbusV7ConfigTests(unittest.TestCase):
             "writable": True,
         }
         with self.assertRaisesRegex(ConfigTransactionError, "不能大于 8760小时"):
-            V7ConfigTransaction(client).stage_value(item, 8761)
+            V9ConfigTransaction(client).stage_value(item, 8761)
         self.assertEqual(client.writes, [])
 
-        words = V7ConfigTransaction(client).stage_value(item, 24)
-        self.assertEqual(client.read_holding_registers(305, 2), words)
+        words = V9ConfigTransaction(client).stage_value(item, 24)
+        self.assertEqual(client.read_holding_registers(404, 2), words)
+
+    def test_commit_waits_for_persistence_failure(self) -> None:
+        client = FakeClient()
+        original_write = client.write_single_register
+
+        def fail_commit(address: int, value: int) -> None:
+            original_write(address, value)
+            if address == 3 and value == COMMAND_COMMIT:
+                client.words[1] = 0x0003
+                client.words[2] = 9
+                client.words[4] = 3
+
+        client.write_single_register = fail_commit  # type: ignore[method-assign]
+        transaction = V9ConfigTransaction(
+            client, commit_timeout_seconds=0.1, poll_interval_seconds=0
+        )
+        with self.assertRaisesRegex(ConfigTransactionError, "错误码: 3"):
+            transaction.commit()
+
+    def test_baudrate_rejects_nonstandard_value(self) -> None:
+        client = FakeClient()
+        item = {
+            "id": "holding.communication.baudrate",
+            "name": "通信波特率",
+            "area": "holding_register",
+            "address": 701,
+            "dataType": "uint32",
+            "unit": "bit/s",
+            "allowedValues": [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200],
+            "writable": True,
+        }
+        with self.assertRaisesRegex(ConfigTransactionError, "只支持"):
+            V9ConfigTransaction(client).stage_value(item, 12345)
 
 
 if __name__ == "__main__":

@@ -185,7 +185,7 @@
     return { start, end: end + 1000 };
   }
 
-  // ============================ 关键节点提取（V7 日志语义） ============================
+  // ============================ 关键节点提取（V9 日志语义） ============================
   function classifyRunRow(row) {
     const msg = row.message;
     let m = msg.match(/^write\s+holding\.runtime\.valve_(\d)\s*=\s*(\d+)/);

@@ -17,7 +17,7 @@ DEFAULT_POLLING_GROUPS: dict[str, dict[str, Any]] = {
 
 DEFAULT_DEVICE_PROFILE: dict[str, Any] = {
     "name": "New Device",
-    "deviceType": "YLDQ-6.0-Modbus-V7",
+    "deviceType": "YLDQ-6.0-Modbus-V9",
     "protocolType": "modbus",
     "transport": "rtu",
     "address": "COM1",

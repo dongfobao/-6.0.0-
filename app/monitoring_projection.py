@@ -1,4 +1,4 @@
-"""将 V7 点值投影为远程监控界面需要的稳定视图模型。"""
+"""将 V9 点值投影为远程监控界面需要的稳定视图模型。"""
 
 from __future__ import annotations
 
@@ -68,7 +68,9 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     ]
 
     alarm_items = [_take(by_id, point_id) for point_id in (
-        "input_register.alarm.active_low", "input_register.alarm.active_high", "input_register.alarm.latched"
+        "input_register.alarm.error_group_0",
+        "input_register.alarm.error_group_1",
+        "input_register.alarm.error_group_2",
     )]
     alarm_active = any(int(item.get("value") or 0) != 0 for item in alarm_items)
     control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]

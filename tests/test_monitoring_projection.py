@@ -34,9 +34,9 @@ class MonitoringProjectionTests(unittest.TestCase):
 
     def test_alarm_summary_detects_any_nonzero_group(self):
         metrics = [
-            item("input_register.alarm.active_low", 0),
-            item("input_register.alarm.active_high", 4),
-            item("input_register.alarm.latched", 0),
+            item("input_register.alarm.error_group_0", 0),
+            item("input_register.alarm.error_group_1", 4),
+            item("input_register.alarm.error_group_2", 0),
         ]
         result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
         self.assertTrue(result["alarms"]["active"])
