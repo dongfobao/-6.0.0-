@@ -54,6 +54,15 @@
           <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div id="outputCards" class="output-grid"></div></section>
           <section class="overview-section valve-section"><div class="overview-section-head"><div><small>VALVES</small><h3>阀门工作状态</h3></div><p>位置、执行状态、故障和控制来源</p></div><div id="valveCards" class="valve-list"></div></section>
         </div>
+
+        <section class="overview-section heat-plan-section">
+          <div class="overview-section-head"><div><small>HEAT PLAN &amp; STATISTICS</small><h3>运行计划与统计</h3></div><p>加热会话进度、预判峰值与关闭阈值、本轮与累计运行时长</p></div>
+          <div id="heatSessionCards" class="heat-session-grid"></div>
+          <div class="heat-plan-lower">
+            <div id="channelStatsCards" class="channel-stats-grid"></div>
+            <article id="schedulePlanCard" class="schedule-plan-card"></article>
+          </div>
+        </section>
       </section>
 
       <section class="page" data-page-view="trends">

@@ -137,6 +137,31 @@ for channel_index, base_address in enumerate((320, 326, 332), start=1):
     ])
 
 
+_HEAT_SESSION_FLAG_BITS = {0: "会话激活", 1: "预判峰值有效", 2: "关闭阈值有效"}
+for side_index, base_address in enumerate((214, 224), start=1):
+    prefix = f"input_register.heat_session_{side_index}"
+    display = f"加热通道{side_index}"
+    REGISTER_CATALOG.extend([
+        _point(f"{prefix}.session_run_seconds", f"{display}本轮运行时长", "input_register", base_address, "uint32", group="runtime", unit="s", poll_group="fast"),
+        _point(f"{prefix}.start_humidity", f"{display}会话起始湿度", "input_register", base_address + 2, "float32", group="runtime", unit="%RH", poll_group="fast"),
+        _point(f"{prefix}.predicted_peak_humidity", f"{display}预判峰值湿度", "input_register", base_address + 4, "float32", group="runtime", unit="%RH", poll_group="fast"),
+        _point(f"{prefix}.stop_target_humidity", f"{display}关闭阈值", "input_register", base_address + 6, "float32", group="runtime", unit="%RH", poll_group="fast"),
+        _point(f"{prefix}.session_flags", f"{display}会话标志", "input_register", base_address + 8, "bitfield16", group="runtime", poll_group="fast", bit_definitions=_HEAT_SESSION_FLAG_BITS),
+        _point(f"{prefix}.falling_stop_progress", f"{display}停热确认进度", "input_register", base_address + 9, group="runtime", poll_group="fast", notes="低字节当前次数，高字节目标次数"),
+    ])
+
+
+REGISTER_CATALOG.extend([
+    _point("input_register.runtime.htc1_cumulative_seconds", "加热通道1累计运行时长", "input_register", 234, "uint32", group="runtime", unit="s", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.runtime.htc2_cumulative_seconds", "加热通道2累计运行时长", "input_register", 236, "uint32", group="runtime", unit="s", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.runtime.antifreeze_cumulative_seconds", "防冻加热累计运行时长", "input_register", 238, "uint32", group="runtime", unit="s", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.valve_1.total_action_count", "阀门1累计动作次数", "input_register", 240, "uint32", group="valve", unit="次", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.valve_2.total_action_count", "阀门2累计动作次数", "input_register", 242, "uint32", group="valve", unit="次", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.valve_3.total_action_count", "阀门3累计动作次数", "input_register", 244, "uint32", group="valve", unit="次", poll_group="fast", notes="易失，掉电清零"),
+    _point("input_register.runtime.antifreeze_run_seconds", "防冻本轮运行时长", "input_register", 246, "uint32", group="runtime", unit="s", poll_group="fast"),
+])
+
+
 REGISTER_CATALOG.extend([
     _point("input_register.alarm.error_group_0", "错误标志组0", "input_register", 400, "uint32", group="alarm"),
     _point("input_register.alarm.error_group_1", "错误标志组1", "input_register", 402, "uint32", group="alarm"),

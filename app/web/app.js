@@ -6,7 +6,7 @@ const state = {
   series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [], trafficLoading: false,
   activePage: "overview", refreshTimer: null, trendTimer: null, trendRequestId: 0,
   trendQuery: {windowMs: 900000, start: null, end: null}, trendViewport: null, trendViewportHistory: [], trendDrag: null, trendSelectionDraft: null, trendShowLabels: false, trendShowKeyPoints: true, trendShowEvents: true, trendYScale: 1,
-  configModule: "sensor_1",
+  configModule: "sensor_1", humidityHistory: {1: [], 2: []},
 };
 
 const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",analysis:"数据分析",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
@@ -64,15 +64,97 @@ function renderAcquisitionStatus(payload){
   setConnection(status?.communication_health||"idle",status?.communication_text||"待采集");
   $("startBtn").disabled=Boolean(status?.running); $("stopBtn").disabled=!payload.global?.running;
 }
-function renderEmptySnapshot(){state.snapshot=null;["pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';$("valveGuardNotice").className="valve-guard-notice hidden";$("valveGuardNotice").textContent="";setConnection("idle","待配置");}
+function renderEmptySnapshot(){state.snapshot=null;["pressureValue","flowValue"].forEach(id=>$(id).textContent="--");$("sensorCards").innerHTML=$("outputCards").innerHTML=$("valveCards").innerHTML='<div class="empty-state">请先添加并选择设备</div>';$("heatSessionCards").innerHTML=$("channelStatsCards").innerHTML="";$("schedulePlanCard").innerHTML="";state.humidityHistory={1:[],2:[]};$("valveGuardNotice").className="valve-guard-notice hidden";$("valveGuardNotice").textContent="";setConnection("idle","待配置");}
 function renderSnapshot(){
   const s=state.snapshot;if(!s)return renderEmptySnapshot();
   $("pressureValue").textContent=fmt(s.process.pressure.value);$("flowValue").textContent=fmt(s.process.flow.value);
   $("pressureStatus").textContent=`状态 ${fmt(s.process.pressureStatus.displayValue)}`;$("breathState").textContent=`呼吸状态 ${fmt(s.process.breathState.displayValue)}`;
   $("sensorCards").innerHTML=s.environmentChannels.map(ch=>`<article class="sensor-card ${ch.readOk.value?"is-online":"is-offline"}"><div class="sensor-card-head"><div><span class="sensor-index">0${ch.channel}</span><h3>温湿度 ${ch.channel}</h3></div><span class="quality-dot ${ch.readOk.value?"ok":""}">${ch.readOk.value?"通信正常":"无有效数据"}</span></div><div class="sensor-values"><div class="sensor-value temperature"><span>温度</span><div><strong>${fmt(ch.temperature.value)}</strong><small>°C</small></div></div><div class="sensor-value humidity"><span>湿度</span><div><strong>${fmt(ch.humidity.value)}</strong><small>%RH</small></div></div></div><div class="sensor-card-foot"><span>传感器状态</span><strong>${esc(fmt(ch.status.displayValue))}</strong></div></article>`).join("");
   $("outputCards").innerHTML=s.outputs.map(out=>`<article class="output-card ${Number(out.state.value)===1?"is-active":""}"><div class="output-card-head"><div class="output-icon">${out.key==="alarm"?"A":"H"}</div><strong>${esc(out.name)}</strong><span class="state-pill ${Number(out.state.value)===1?"on":""}">${esc(fmt(out.state.displayValue))}</span></div><div class="output-details"><div><span>控制模式</span><strong>${esc(fmt(out.mode?.displayValue))}</strong></div><div><span>累计动作</span><strong>${out.count?`${esc(fmt(out.count.value,0))} 次`:"—"}</strong></div></div></article>`).join("");
-  $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card ${Number(v.faultReason.value)?"has-fault":""}"><div class="valve-card-head"><div><span class="valve-index">V${v.channel}</span><strong>${esc(v.name)}</strong></div><span class="state-pill ${Number(v.faultReason.value)?"fault":"ok"}">${Number(v.faultReason.value)?`故障 ${fmt(v.faultReason.value,0)}`:"正常"}</span></div><div class="valve-metrics"><div><span>显示状态</span><strong>${esc(fmt(v.displayState.displayValue))}</strong></div><div><span>执行状态</span><strong>${esc(fmt(v.actuatorState.displayValue))}</strong></div><div><span>位置</span><strong>${esc(fmt(v.position.displayValue))}</strong></div><div><span>电流</span><strong>${fmt(v.currentAdc.value,0)}</strong></div></div><div class="valve-card-foot"><span>控制来源</span><strong>${esc(fmt(v.controlSource.displayValue))}</strong></div></article>`).join("");
-  renderHeatModeControls(s.outputs || []);renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();
+  $("valveCards").innerHTML=s.valves.map(v=>`<article class="valve-card ${Number(v.faultReason.value)?"has-fault":""}"><div class="valve-card-head"><div><span class="valve-index">V${v.channel}</span><strong>${esc(v.name)}</strong></div><span class="state-pill ${Number(v.faultReason.value)?"fault":"ok"}">${Number(v.faultReason.value)?`故障 ${fmt(v.faultReason.value,0)}`:"正常"}</span></div><div class="valve-metrics"><div><span>显示状态</span><strong>${esc(fmt(v.displayState.displayValue))}</strong></div><div><span>执行状态</span><strong>${esc(fmt(v.actuatorState.displayValue))}</strong></div><div><span>位置</span><strong>${esc(fmt(v.position.displayValue))}</strong></div><div><span>电流</span><strong>${fmt(v.currentAdc.value,0)}</strong></div></div><div class="valve-card-foot"><span>控制来源</span><strong>${esc(fmt(v.controlSource.displayValue))}</strong><span>累计动作</span><strong>${v.totalActionCount?`${fmt(v.totalActionCount.value,0)} 次`:"--"}</strong></div></article>`).join("");
+  renderHeatModeControls(s.outputs || []);renderValveControls(s.runtimeValves || []);renderAlarmSummary();renderDiagnostics();renderHeatPlan(s);
+}
+
+function fmtDuration(seconds){
+  if(seconds===null||seconds===undefined||seconds==="")return "--";
+  const total=Number(seconds);
+  if(!Number.isFinite(total)||total<=0)return "00:00:00";
+  const s=Math.floor(total%60),m=Math.floor(total/60%60),h=Math.floor(total/3600%24),d=Math.floor(total/86400);
+  const hms=`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  return d>0?`${d}天 ${hms}`:hms;
+}
+function recordHumidityHistory(s){
+  const now=Date.now();
+  [1,2].forEach(side=>{
+    const value=Number(s.environmentChannels?.[side-1]?.humidity?.value);
+    const list=state.humidityHistory[side]||(state.humidityHistory[side]=[]);
+    if(Number.isFinite(value)){
+      const last=list.at(-1);
+      if(!last||now-last.t>=4000)list.push({t:now,v:value});
+    }
+    while(list.length&&now-list[0].t>15*60*1000)list.shift();
+  });
+}
+function estimateStopEta(side,stopTarget){
+  const list=state.humidityHistory[side]||[];
+  if(!Number.isFinite(stopTarget)||list.length<10)return null;
+  const n=list.length,t0=list[0].t;
+  let sumT=0,sumV=0;list.forEach(p=>{sumT+=(p.t-t0)/1000;sumV+=p.v;});
+  const meanT=sumT/n,meanV=sumV/n;
+  let cov=0,varT=0;list.forEach(p=>{const dt=(p.t-t0)/1000-meanT;cov+=dt*(p.v-meanV);varT+=dt*dt;});
+  if(varT<=0)return null;
+  const slope=cov/varT;
+  const current=list.at(-1).v;
+  if(slope>=-0.0001||current<=stopTarget)return null;
+  const etaSeconds=(current-stopTarget)/(-slope);
+  if(!Number.isFinite(etaSeconds)||etaSeconds<=0||etaSeconds>7*86400)return null;
+  return etaSeconds;
+}
+function renderHeatPlan(s){
+  const sessions=s.heatSessions||[];
+  recordHumidityHistory(s);
+  $("heatSessionCards").innerHTML=sessions.map(session=>{
+    const side=session.channel;
+    const current=Number(s.environmentChannels?.[side-1]?.humidity?.value);
+    const peak=session.peakValid?Number(session.predictedPeakHumidity?.value):NaN;
+    const stopTarget=session.stopTargetValid?Number(session.stopTargetHumidity?.value):NaN;
+    const start=Number(session.startHumidity?.value);
+    const progress=Number(session.fallingStopProgress?.value)||0;
+    const confirmCount=progress&0xFF,confirmTarget=(progress>>8)&0xFF;
+    const eta=session.sessionActive&&session.stopTargetValid?estimateStopEta(side,stopTarget):null;
+    const active=session.sessionActive;
+    const marks=[start,current,peak,stopTarget].filter(Number.isFinite);
+    let bar="";
+    if(marks.length>=2){
+      const low=Math.min(...marks),high=Math.max(...marks),span=Math.max(1,high-low);
+      const pos=v=>Math.max(0,Math.min(100,(v-low)/span*100));
+      const marker=(v,cls,label)=>Number.isFinite(v)?`<i class="humidity-marker ${cls}" style="left:${pos(v)}%" title="${label} ${fmt(v)} %RH"><em>${label}</em></i>`:"";
+      bar=`<div class="humidity-track"><div class="humidity-track-line"></div>${marker(start,"start","起始")}${marker(current,"current","当前")}${marker(peak,"peak","预判峰值")}${marker(stopTarget,"stop","关闭阈值")}</div>`;
+    }
+    return `<article class="heat-session-card ${active?"is-active":""}"><div class="heat-session-head"><div><span class="sensor-index">H${side}</span><h3>加热通道${side} 会话</h3></div><span class="state-pill ${active?"on":""}">${active?"加热会话中":"空闲"}</span></div>${bar}<div class="heat-session-details"><div><span>本轮运行</span><strong>${fmtDuration(session.runSeconds?.value)}</strong></div><div><span>起始湿度</span><strong>${Number.isFinite(start)?`${fmt(start)} %RH`:"--"}</strong></div><div><span>预判峰值</span><strong>${session.peakValid?`${fmt(peak)} %RH`:"--"}</strong></div><div><span>关闭阈值</span><strong>${session.stopTargetValid?`${fmt(stopTarget)} %RH`:"--"}</strong></div><div><span>当前湿度</span><strong>${Number.isFinite(current)?`${fmt(current)} %RH`:"--"}</strong></div><div><span>停热确认</span><strong>${confirmTarget?`${confirmCount}/${confirmTarget} 次`:"--"}</strong></div><div><span>预计剩余</span><strong>${eta!==null?fmtDuration(eta):"--"}</strong></div><div><span>预计关闭</span><strong>${eta!==null?new Date(Date.now()+eta*1000).toLocaleTimeString("zh-CN",{hour12:false}):"--"}</strong></div></div></article>`;
+  }).join("")||'<div class="empty-state">暂无加热会话数据</div>';
+  $("channelStatsCards").innerHTML=(s.channelStats||[]).map(stat=>{
+    const output=(s.outputs||[]).find(o=>o.key===stat.key);
+    return `<article class="channel-stat-card"><h4>${esc(stat.name)}</h4><div><span>本轮运行</span><strong>${fmtDuration(stat.runSeconds?.value)}</strong></div><div><span>累计运行</span><strong>${fmtDuration(stat.cumulativeSeconds?.value)}</strong></div><div><span>累计打开</span><strong>${output?.count?`${fmt(output.count.value,0)} 次`:"--"}</strong></div></article>`;
+  }).join("");
+  $("schedulePlanCard").innerHTML=renderSchedulePlan(s.schedulePlan);
+}
+function renderSchedulePlan(plan){
+  if(!plan)return "";
+  const count=Number(plan.taskCount?.value);
+  const month=Number(plan.startMonth?.value)||0;
+  const selected=Number(plan.selectedTask?.value)||0;
+  const enabled=Number(plan.enabled?.value)===1;
+  const overrideOn=Number(plan.humidityOverrideEnabled?.value)===1;
+  let windowText="未设置开始时间";
+  if(month>0){
+    const day=Number(plan.startDay?.value)||1,hour=Number(plan.startHour?.value)||0,minute=Number(plan.startMinute?.value)||0,days=Number(plan.durationDays?.value)||0;
+    const startDate=new Date(new Date().getFullYear(),month-1,day,hour,minute);
+    const endDate=new Date(startDate.getTime()+days*86400000);
+    const fmtDT=d=>d.toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
+    windowText=`${fmtDT(startDate)} 开 → ${fmtDT(endDate)} 关`;
+  }
+  return `<div class="schedule-plan-head"><div><span class="sensor-index">S</span><h3>定时任务计划</h3></div><span class="state-pill ${Number.isFinite(count)&&count>0?"on":""}">已配置 ${Number.isFinite(count)?count:"--"}/12</span></div><div class="schedule-plan-body"><div><span>当前查看任务</span><strong>${selected?`任务 ${selected}`:"--"}</strong></div><div><span>任务状态</span><strong>${selected?(enabled?"启用":"停用"):"--"}</strong></div><div><span>计划窗口</span><strong>${selected?windowText:"--"}</strong></div><div><span>湿度覆盖</span><strong>${selected?(overrideOn?"启用":"关闭"):"--"}</strong></div></div><p class="schedule-plan-hint">窗口由任务开始时间与持续天数推算；任务通过覆盖湿度阈值间接控制加热，完整列表见「参数配置 → 定时任务」。</p>`;
 }
 
 const TREND_PRESETS={environment:["sensor_1.temperature","sensor_1.humidity","sensor_2.temperature","sensor_2.humidity","sensor_3.temperature","sensor_3.humidity"],process:["pressure","flow"],all:Object.keys(TREND_META)};

@@ -26,6 +26,7 @@ class LivePollingCommandsTests(unittest.TestCase):
             {
                 (4, 100, 18),
                 (4, 200, 14),
+                (4, 214, 36),
                 (4, 300, 38),
                 (4, 0, 10),
                 (4, 400, 6),

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+
+def _finite_or_none(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _display_value(item: dict[str, Any]) -> Any:
@@ -14,6 +21,9 @@ def _display_value(item: dict[str, Any]) -> Any:
 
 
 def _project_item(item: dict[str, Any]) -> dict[str, Any]:
+    current = item.get("currentValue")
+    if isinstance(current, float) and not math.isfinite(current):
+        item = dict(item, currentValue=None)
     return {
         "id": item.get("id"),
         "name": item.get("name"),
@@ -58,7 +68,38 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "faultReason": _take(by_id, f"{prefix}.fault_reason"),
             "currentAdc": _take(by_id, f"{prefix}.current_adc"),
             "controlSource": _take(by_id, f"{prefix}.control_source"),
+            "totalActionCount": _take(by_id, f"{prefix}.total_action_count"),
         })
+
+    heat_sessions = []
+    for side in range(1, 3):
+        prefix = f"input_register.heat_session_{side}"
+        flags_item = _take(by_id, f"{prefix}.session_flags")
+        flags_value = int(flags_item.get("value") or 0)
+        heat_sessions.append({
+            "channel": side,
+            "runSeconds": _take(by_id, f"{prefix}.session_run_seconds"),
+            "startHumidity": _take(by_id, f"{prefix}.start_humidity"),
+            "predictedPeakHumidity": _take(by_id, f"{prefix}.predicted_peak_humidity"),
+            "stopTargetHumidity": _take(by_id, f"{prefix}.stop_target_humidity"),
+            "flags": flags_item,
+            "sessionActive": bool(flags_value & 0x1),
+            "peakValid": bool(flags_value & 0x2),
+            "stopTargetValid": bool(flags_value & 0x4),
+            "fallingStopProgress": _take(by_id, f"{prefix}.falling_stop_progress"),
+        })
+
+    channel_stats = [
+        {"key": "htc1", "name": "加热通道1",
+         "cumulativeSeconds": _take(by_id, "input_register.runtime.htc1_cumulative_seconds"),
+         "runSeconds": heat_sessions[0]["runSeconds"]},
+        {"key": "htc2", "name": "加热通道2",
+         "cumulativeSeconds": _take(by_id, "input_register.runtime.htc2_cumulative_seconds"),
+         "runSeconds": heat_sessions[1]["runSeconds"]},
+        {"key": "antifreeze", "name": "防冻加热",
+         "cumulativeSeconds": _take(by_id, "input_register.runtime.antifreeze_cumulative_seconds"),
+         "runSeconds": _take(by_id, "input_register.runtime.antifreeze_run_seconds")},
+    ]
 
     outputs = [
         {"key": "htc1", "name": "加热通道1", "state": _take(by_id, "input_register.output.htc1_state"), "mode": _take(by_id, "input_register.output.htc1_mode"), "count": _take(by_id, "input_register.output.htc1_open_count")},
@@ -102,6 +143,18 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             controls_by_id, "holding.runtime.valve_action_limit"
         ),
     }
+    schedule_prefix = "holding.schedule"
+    schedule_plan = {
+        "taskCount": _take(controls_by_id, f"{schedule_prefix}.task_count"),
+        "selectedTask": _take(controls_by_id, f"{schedule_prefix}.selected_task"),
+        "enabled": _take(controls_by_id, f"{schedule_prefix}.enabled"),
+        "startMonth": _take(controls_by_id, f"{schedule_prefix}.start_month"),
+        "startDay": _take(controls_by_id, f"{schedule_prefix}.start_day"),
+        "startHour": _take(controls_by_id, f"{schedule_prefix}.start_hour"),
+        "startMinute": _take(controls_by_id, f"{schedule_prefix}.start_minute"),
+        "durationDays": _take(controls_by_id, f"{schedule_prefix}.duration_days"),
+        "humidityOverrideEnabled": _take(controls_by_id, f"{schedule_prefix}.humidity_override_enabled"),
+    }
     session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
     return {
         "deviceId": snapshot.get("deviceId"),
@@ -129,6 +182,9 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "valves": valves,
         "runtimeValves": runtime_valves,
         "valveGuard": valve_guard,
+        "heatSessions": heat_sessions,
+        "channelStats": channel_stats,
+        "schedulePlan": schedule_plan,
         "alarms": {"active": alarm_active, "groups": alarm_items},
         "communication": {
             "online": _take(by_id, "input_register.communication.online"),

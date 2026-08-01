@@ -51,6 +51,7 @@ class LiveSessionRecorder:
         self.breath_dir = self.session_dir / "breath_data"
         self.run_dir = self.session_dir / "run"
         self.traffic_dir = self.session_dir / "traffic"
+        self.heat_dir = self.session_dir / "heat_events"
         self.meta_path = self.session_dir / "session_meta.json"
         self.checkpoint_path = self.session_dir / "checkpoint.json"
         self._current_interval = _interval_key(self.started_at)
@@ -59,6 +60,7 @@ class LiveSessionRecorder:
         self._run_path = self._interval_run_path()
         self._traffic_path = self._interval_traffic_path()
         self._raw_path = self._interval_raw_path()
+        self._heat_path = self._interval_heat_path()
         self.last_env_second: str | None = None
         self.last_breath_state: int | None = None
         self.last_state_change: datetime | None = None
@@ -80,6 +82,9 @@ class LiveSessionRecorder:
 
     def _interval_raw_path(self) -> Path:
         return self.data_dir / f"raw_{self._current_interval}.csv"
+
+    def _interval_heat_path(self) -> Path:
+        return self.heat_dir / f"heat_{self._current_interval}.csv"
 
     @property
     def env_path(self) -> Path:
@@ -124,6 +129,7 @@ class LiveSessionRecorder:
         self._run_path = self._interval_run_path()
         self._traffic_path = self._interval_traffic_path()
         self._raw_path = self._interval_raw_path()
+        self._heat_path = self._interval_heat_path()
         self._env_path.touch()
         self._breath_path.touch()
         self._run_path.touch()
@@ -140,6 +146,7 @@ class LiveSessionRecorder:
                 "breath": str(self._breath_path.relative_to(self.session_dir)),
                 "run": str(self._run_path.relative_to(self.session_dir)),
                 "traffic": str(self._traffic_path.relative_to(self.session_dir)),
+                "heat_events": str(self._heat_path.relative_to(self.session_dir)),
             },
             "format": {
                 "environment": "compatible with ENV_ROW_RE",
@@ -234,9 +241,19 @@ class LiveSessionRecorder:
             level_code = "I"
         self._append_line(self._run_path, f"{level_code}/YLDQ [{_fmt_ts(timestamp)}] {message}\n")
 
+    def record_heat_event(self, timestamp: datetime, channel: str, event: str, detail: str = "") -> None:
+        self._roll_interval(timestamp)
+        self.heat_dir.mkdir(parents=True, exist_ok=True)
+        self._heat_path.touch(exist_ok=True)
+        safe_detail = str(detail or "").replace(",", "，").replace("\n", " ")
+        self._append_line(
+            self._heat_path,
+            f"{_fmt_ts(timestamp)},{channel},{event},{safe_detail}\n",
+        )
+
     def finalize(self, status: str = "stopped") -> None:
         self._write_meta(status=status, ended_at=_fmt_ts(datetime.now()))
-        for p in (self._env_path, self._breath_path, self._run_path, self._traffic_path):
+        for p in (self._env_path, self._breath_path, self._run_path, self._traffic_path, self._heat_path):
             if p.exists():
                 _fsync_path(p)
 
@@ -279,6 +296,7 @@ class LiveSessionRecorder:
             "data_0": ("log_*.csv",),
             "breath_data": ("breath_*.csv",),
             "run": ("*.csv",),
+            "heat_events": ("heat_*.csv",),
         }
         for folder_name, globs in patterns.items():
             src_dir = self.session_dir / folder_name

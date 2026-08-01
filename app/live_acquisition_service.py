@@ -1553,6 +1553,91 @@ class LiveAcquisitionService:
                     if metric_key in slot["history"] and decoded is not None:
                         self._append_history_point(slot, metric_key, timestamp, epoch, decoded)
             self._save_to_recorder(slot, device_id, timestamp)
+            self._record_heat_events(slot, timestamp, update_values)
+
+    def _record_heat_events(self, slot: dict[str, Any], timestamp: str, update_values: dict[str, Any]) -> None:
+        """检测加热/阀门状态沿，向会话写入结构化 heat_events 记录。"""
+        recorder = slot.get("recorder")
+        if recorder is None:
+            return
+        watched = {
+            "input_register.output.htc1_state", "input_register.output.htc2_state",
+            "input_register.output.antifreeze_state",
+            "input_register.heat_session_1.session_flags",
+            "input_register.heat_session_2.session_flags",
+            "input_register.valve_1.display_state",
+            "input_register.valve_2.display_state",
+            "input_register.valve_3.display_state",
+        }
+        if not watched.intersection(update_values):
+            return
+        try:
+            snapshot_ts = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return
+        edges = slot.setdefault("heat_edge_state", {})
+
+        def _emit(channel: str, event: str, detail: str = "") -> None:
+            try:
+                recorder.record_heat_event(snapshot_ts, channel, event, detail)
+            except Exception:
+                pass
+
+        for item_id, channel in (
+            ("input_register.output.htc1_state", "HTC1"),
+            ("input_register.output.htc2_state", "HTC2"),
+            ("input_register.output.antifreeze_state", "防冻"),
+        ):
+            if item_id not in update_values:
+                continue
+            new_value = update_values.get(item_id)
+            old_value = edges.get(item_id)
+            edges[item_id] = new_value
+            if old_value is None or new_value is None:
+                continue
+            if int(old_value) != 1 and int(new_value) == 1:
+                _emit(channel, "加热开启")
+            elif int(old_value) == 1 and int(new_value) != 1:
+                _emit(channel, "加热关闭")
+
+        for side in (1, 2):
+            flags_id = f"input_register.heat_session_{side}.session_flags"
+            if flags_id not in update_values:
+                continue
+            new_flags = update_values.get(flags_id)
+            old_flags = edges.get(flags_id)
+            edges[flags_id] = new_flags
+            if old_flags is None or new_flags is None:
+                continue
+            was_active = bool(int(old_flags) & 0x1)
+            is_active = bool(int(new_flags) & 0x1)
+            if is_active and not was_active:
+                start = (slot["values"].get(f"input_register.heat_session_{side}.start_humidity") or {}).get("value")
+                detail = f"起始湿度 {start:.1f}%RH" if isinstance(start, (int, float)) else ""
+                _emit(f"HTC{side}", "湿度会话开始", detail)
+            elif was_active and not is_active:
+                peak = (slot["values"].get(f"input_register.heat_session_{side}.predicted_peak_humidity") or {}).get("value")
+                target = (slot["values"].get(f"input_register.heat_session_{side}.stop_target_humidity") or {}).get("value")
+                parts = []
+                if isinstance(peak, (int, float)):
+                    parts.append(f"预判峰值 {peak:.1f}%RH")
+                if isinstance(target, (int, float)):
+                    parts.append(f"关闭阈值 {target:.1f}%RH")
+                _emit(f"HTC{side}", "湿度会话结束", " ".join(parts))
+
+        valve_state_text = {0: "禁用", 1: "原位", 2: "工作位", 3: "运动中", 4: "故障", 5: "未知"}
+        for channel, valve_name in enumerate(("上阀", "左阀", "右阀"), start=1):
+            item_id = f"input_register.valve_{channel}.display_state"
+            if item_id not in update_values:
+                continue
+            new_value = update_values.get(item_id)
+            old_value = edges.get(item_id)
+            edges[item_id] = new_value
+            if old_value is None or new_value is None or int(old_value) == int(new_value):
+                continue
+            old_text = valve_state_text.get(int(old_value), str(old_value))
+            new_text = valve_state_text.get(int(new_value), str(new_value))
+            _emit(valve_name, "阀门状态变化", f"{old_text}→{new_text}")
 
     def _save_to_recorder(self, slot: dict[str, Any], device_id: str, timestamp: str) -> None:
         if slot["recorder"] is None:
