@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
   <link rel="stylesheet" href="/analysis.css">
+  <link rel="stylesheet" href="/sessions.css">
 </head>
 <body>
   <div class="app-shell">
@@ -18,6 +19,7 @@
         <button class="nav-item active" data-page="overview">运行总览</button>
         <button class="nav-item" data-page="trends">实时曲线</button>
         <button class="nav-item" data-page="analysis">数据分析</button>
+        <button class="nav-item" data-page="sessions">运行会话</button>
         <button class="nav-item" data-page="control">远程控制</button>
         <button class="nav-item" data-page="configuration">参数配置</button>
         <button class="nav-item" data-page="alarms">告警事件</button>
@@ -54,15 +56,6 @@
           <section class="overview-section output-section"><div class="overview-section-head"><div><small>OUTPUTS</small><h3>输出工作状态</h3></div><p>实际输出、控制模式和累计次数</p></div><div id="outputCards" class="output-grid"></div></section>
           <section class="overview-section valve-section"><div class="overview-section-head"><div><small>VALVES</small><h3>阀门工作状态</h3></div><p>位置、执行状态、故障和控制来源</p></div><div id="valveCards" class="valve-list"></div></section>
         </div>
-
-        <section class="overview-section heat-plan-section">
-          <div class="overview-section-head"><div><small>HEAT PLAN &amp; STATISTICS</small><h3>运行计划与统计</h3></div><p>加热会话进度、预判峰值与关闭阈值、本轮与累计运行时长</p></div>
-          <div id="heatSessionCards" class="heat-session-grid"></div>
-          <div class="heat-plan-lower">
-            <div id="channelStatsCards" class="channel-stats-grid"></div>
-            <article id="schedulePlanCard" class="schedule-plan-card"></article>
-          </div>
-        </section>
       </section>
 
       <section class="page" data-page-view="trends">
@@ -74,7 +67,7 @@
         </div>
         <div class="panel trend-series-panel"><div class="trend-series-head"><div><h3>显示曲线</h3><p>按业务场景选择，或单独开关任意测点。</p></div><div class="button-row"><button class="button small secondary" data-trend-preset="environment">三路温湿度</button><button class="button small secondary" data-trend-preset="process">压力与流量</button><button class="button small secondary" data-trend-preset="all">全部测点</button></div></div><div id="trendToggles" class="trend-toggles"></div></div>
         <div id="trendChartPanel" class="panel chart-panel trend-chart-panel">
-          <div class="trend-chart-toolbar"><div class="trend-tool-group"><button id="undoTrendZoomBtn" title="返回上一视图">↶ 上一步</button><button id="resetTrendZoomBtn" title="重置视图 (R)">↻ 复位</button></div><div class="trend-tool-group"><button id="panLeftTrendBtn" title="向左平移">←</button><button id="zoomOutTrendBtn" title="缩小时间轴 (-)">时间−</button><button id="zoomInTrendBtn" title="放大时间轴 (+)">时间＋</button><button id="panRightTrendBtn" title="向右平移">→</button></div><div class="trend-tool-group"><button id="tightenTrendYBtn" title="放大纵轴波动">纵轴＋</button><button id="relaxTrendYBtn" title="缩小纵轴波动">纵轴−</button></div><div class="trend-tool-group"><button id="toggleTrendLabelsBtn" title="显示数值标签">数值</button><button id="toggleTrendKeyPointsBtn" class="active" title="显示最小、最大和最新点">关键点</button><button id="toggleTrendEventsBtn" class="active" title="显示设备事件">事件</button><button id="fullscreenTrendBtn" title="全屏 (F)">全屏</button></div><div class="trend-tool-group"><button id="exportTrendPngBtn" title="导出图片">PNG</button><button id="exportTrendBtn" class="primary" title="导出数据">CSV</button></div></div>
+          <div class="trend-chart-toolbar"><div class="trend-tool-group"><button id="undoTrendZoomBtn" title="返回上一视图">↶ 上一步</button><button id="resetTrendZoomBtn" title="重置视图 (R)">↻ 复位</button></div><div class="trend-tool-group"><button id="panLeftTrendBtn" title="向左平移">←</button><button id="zoomOutTrendBtn" title="缩小时间轴 (-)">时间−</button><button id="zoomInTrendBtn" title="放大时间轴 (+)">时间＋</button><button id="panRightTrendBtn" title="向右平移">→</button></div><div class="trend-tool-group"><button id="tightenTrendYBtn" title="放大纵轴波动">纵轴＋</button><button id="relaxTrendYBtn" title="缩小纵轴波动">纵轴−</button></div>           <div class="trend-tool-group"><button id="toggleTrendLabelsBtn" title="显示数值标签">数值</button><button id="toggleTrendKeyPointsBtn" class="active" title="显示最小、最大和最新点">关键点</button><span class="trend-event-filter-group"><button id="toggleTrendEventsBtn" class="active" title="显示设备事件">事件</button><button id="trendEventFilterBtn" class="trend-event-filter-trigger" title="筛选事件类型">▾</button><div id="trendEventFilterDropdown" class="trend-event-filter-dropdown hidden"></div></span><button id="fullscreenTrendBtn" title="全屏 (F)">全屏</button></div><div class="trend-tool-group"><button id="exportTrendPngBtn" title="导出图片">PNG</button><button id="exportTrendBtn" class="primary" title="导出数据">CSV</button></div></div>
           <canvas id="trendCanvas" class="interactive-chart"></canvas><div id="chartEmpty" class="empty-overlay">等待实时数据</div>
           <div class="trend-chart-hint">滚轮缩放 · 拖拽框选时间段 · Shift+拖拽平移 · 悬浮查看精确值 · R/方向键快捷操作</div>
         </div>
@@ -115,6 +108,31 @@
           <div id="analysisEventSummary" class="analysis-event-summary"></div>
           <div id="analysisEventFilters" class="trend-toggles"></div>
           <div id="analysisLogList" class="event-list analysis-log-list"></div>
+        </div>
+      </section>
+
+      <section class="page" data-page-view="sessions">
+        <div class="trend-page-heading"><div><span>RUN SESSION ARCHIVE</span><h2>运行会话记录</h2><p>永久保存的历次采集会话：阀门开闭、加热启停、湿度会话起止等详细事件，随时查阅。</p></div><div class="trend-live-badge offline"><i></i><div><strong>历史归档</strong><small id="sessionsSummaryText">未加载</small></div></div></div>
+        <section class="overview-section heat-plan-section">
+          <div class="overview-section-head"><div><small>LIVE STATS</small><h3>实时统计</h3></div><p>加热会话进度、预判峰值与关闭阈值、本轮与累计运行时长</p></div>
+          <div id="heatSessionCards" class="heat-session-grid"></div>
+          <div class="heat-plan-lower">
+            <div id="channelStatsCards" class="channel-stats-grid"></div>
+            <article id="schedulePlanCard" class="schedule-plan-card"></article>
+          </div>
+        </section>
+        <div class="panel sessions-list-panel">
+          <div class="panel-title"><div><h3>会话列表</h3><p>每次启动监控生成一个会话，按时间倒序排列，点击行查看详情。</p></div><button id="sessionsRefreshBtn" class="button small secondary">刷新</button></div>
+          <div class="table-scroll sessions-table-scroll"><table class="sessions-table"><thead><tr><th>开始时间</th><th>设备</th><th>结束时间</th><th>状态</th><th>时长</th><th>操作</th></tr></thead><tbody id="sessionsTableBody"></tbody></table></div>
+        </div>
+        <div id="sessionsDetailEmpty" class="panel sessions-detail-empty">请选择上方任意会话查看详细事件记录</div>
+        <div id="sessionsDetail" class="sessions-detail hidden">
+          <div class="panel sessions-meta-panel" id="sessionsMetaCard"></div>
+          <div class="panel"><div class="panel-title"><div><h3>通道统计</h3><p>由事件明细配对统计得出</p></div></div><div class="table-scroll"><table class="sessions-table"><thead><tr><th>通道</th><th>类型</th><th>加热开启次数</th><th>累计加热时长</th><th>阀门动作次数</th><th>最近事件</th></tr></thead><tbody id="sessionsStatsBody"></tbody></table></div></div>
+          <div class="panel">
+            <div class="panel-title"><div><h3>事件明细</h3><p id="sessionsEventCount">共 0 条</p></div><div class="button-row"><select id="sessionsChannelFilter"><option value="">全部通道</option></select><select id="sessionsEventFilter"><option value="">全部事件</option></select><button id="sessionsExportBtn" class="button small secondary">导出 CSV</button></div></div>
+            <div class="table-scroll sessions-events-scroll"><table class="sessions-table sessions-events-table"><thead><tr><th>时间</th><th>通道</th><th>事件</th><th>详情</th></tr></thead><tbody id="sessionsEventsBody"></tbody></table></div>
+          </div>
         </div>
       </section>
 
@@ -175,5 +193,6 @@
   </dialog>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
+  <script src="/sessions.js"></script>
 </body>
 </html>

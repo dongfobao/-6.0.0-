@@ -202,6 +202,12 @@ class LiveAcquisitionService:
                 session_root_path = Path(session_root or ".")
                 self._restore_recent_history(slot, session_root_path, device_id, started_at)
                 slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
+                try:
+                    slot["recorder"].record_heat_event(
+                        _now(), "系统", "采集开始", f"设备 {device.get('name') or device_id} 开始监控记录"
+                    )
+                except Exception:
+                    pass
                 slot["state"].update({
                     "running": True,
                     "device_id": device_id,
@@ -286,6 +292,10 @@ class LiveAcquisitionService:
                 })
                 slot["event_seq"] += 1
                 if slot["recorder"] is not None:
+                    try:
+                        slot["recorder"].record_heat_event(_now(), "系统", "采集停止", "上位机停止监控记录")
+                    except Exception:
+                        pass
                     slot["recorder"].finalize(status="stopped")
 
             self._port_runners.clear()
@@ -567,9 +577,11 @@ class LiveAcquisitionService:
         slot = self._get_device_slot(device_id)
         if slot is None:
             return []
-        capped_limit = max(1, min(limit, 240))
+        capped_limit = max(1, min(limit, 500))
         with self._lock:
-            return [dict(item) for item in list(slot["events"])[-capped_limit:]]
+            all_events = [dict(item) for item in list(slot["events"])]
+            meaningful = [ev for ev in all_events if ev.get("type") != "read_success"]
+            return meaningful[-capped_limit:]
 
     def get_command_traffic(self, device_id: str | None = None, limit: int = 160) -> list[dict[str, Any]]:
         capped_limit = max(1, min(limit, 1000))
@@ -1413,14 +1425,6 @@ class LiveAcquisitionService:
             slot["state"]["consecutive_error_count"] = 0
             slot["state"]["last_snapshot_at"] = _iso(now)
             self._recompute_sample_counts(slot)
-            slot["event_seq"] += 1
-            slot["events"].append({
-                "id": slot["event_seq"],
-                "ts": _iso(now),
-                "type": "read_success",
-                "message": f"polled {command.get('name') or command.get('id') or 'command'}",
-                "details": {"commandId": command.get("id"), "blockCount": successful_blocks},
-            })
 
     def _next_traffic_id(self) -> int:
         self._traffic_id += 1
@@ -1461,14 +1465,6 @@ class LiveAcquisitionService:
                 slot["state"]["consecutive_error_count"] = 0
                 slot["state"]["last_snapshot_at"] = _iso(now)
                 self._recompute_sample_counts(slot)
-                slot["event_seq"] += 1
-                slot["events"].append({
-                    "id": slot["event_seq"],
-                    "ts": _iso(now),
-                    "type": "read_success",
-                    "message": f"polled {group['key']} ({successful_blocks} blocks)",
-                    "details": {"group": group["key"], "blockCount": successful_blocks},
-                })
 
     def _poll_command(
         self,
@@ -1582,6 +1578,14 @@ class LiveAcquisitionService:
                 recorder.record_heat_event(snapshot_ts, channel, event, detail)
             except Exception:
                 pass
+            slot["event_seq"] += 1
+            slot["events"].append({
+                "id": slot["event_seq"],
+                "ts": timestamp,
+                "type": "heat_event",
+                "message": f"{channel} {event}",
+                "details": {"channel": channel, "event": event, "detail": detail},
+            })
 
         for item_id, channel in (
             ("input_register.output.htc1_state", "HTC1"),
@@ -1596,9 +1600,9 @@ class LiveAcquisitionService:
             if old_value is None or new_value is None:
                 continue
             if int(old_value) != 1 and int(new_value) == 1:
-                _emit(channel, "加热开启")
+                _emit(channel, "加热开启", f"状态 {int(old_value)}→{int(new_value)}")
             elif int(old_value) == 1 and int(new_value) != 1:
-                _emit(channel, "加热关闭")
+                _emit(channel, "加热关闭", f"状态 {int(old_value)}→{int(new_value)}")
 
         for side in (1, 2):
             flags_id = f"input_register.heat_session_{side}.session_flags"
@@ -1763,14 +1767,6 @@ class LiveAcquisitionService:
             slot["state"]["last_error_at"] = None
             slot["state"]["consecutive_error_count"] = 0
             slot["state"]["last_snapshot_at"] = _iso(now)
-            slot["event_seq"] += 1
-            slot["events"].append({
-                "id": slot["event_seq"],
-                "ts": _iso(now),
-                "type": "read_success",
-                "message": f"manual poll parameters ({len(parameter_commands)} commands)",
-                "details": {"group": "parameters", "blockCount": len(parameter_commands)},
-            })
         return {
             "ok": True,
             "message": f"polled {len(parameter_commands)} parameter commands",

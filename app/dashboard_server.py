@@ -19,6 +19,7 @@ from live_device_store import (
 from live_polling_commands import build_default_polling_commands
 from live_register_catalog import get_register_catalog, get_register_catalog_summary
 from monitoring_projection import build_monitoring_snapshot
+from session_archive import get_session_detail, list_sessions
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -134,13 +135,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 end_at=self._query(query, "end"),
             ))
         if path == "/api/monitor/events":
-            return self._json({"items": service.get_events(device_id, self._query_int(query, "limit", 100, 1, 240))})
+            return self._json({"items": service.get_events(device_id, self._query_int(query, "limit", 100, 1, 500))})
         if path == "/api/monitor/traffic":
             return self._json({"items": service.get_command_traffic(device_id, self._query_int(query, "limit", 120, 1, 1000))})
         if path == "/api/config/parameters":
             return self._json(service.get_parameters(device_id))
         if path == "/api/session/meta":
             return self._json(service.get_session_meta(device_id))
+        if path == "/api/sessions/list":
+            active_ids = set(str(item) for item in (service.get_status().get("device_ids") or []))
+            return self._json(list_sessions(SESSIONS_DIR, device_id=device_id, active_device_ids=active_ids))
+        if path == "/api/sessions/detail":
+            active_ids = set(str(item) for item in (service.get_status().get("device_ids") or []))
+            return self._json(get_session_detail(SESSIONS_DIR, self._query(query, "name") or "", active_device_ids=active_ids))
         self.send_error(HTTPStatus.NOT_FOUND, "API not found")
 
     def _handle_mutation(self, method: str) -> None:
