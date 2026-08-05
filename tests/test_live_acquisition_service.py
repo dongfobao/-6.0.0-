@@ -70,7 +70,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertAlmostEqual(slot["values"]["input_register.sensor_1.humidity"]["value"], 41.7, places=1)
         self.assertEqual(slot["values"]["input_register.sensor_1.status"]["value"], 1)
 
-    def test_restarting_waits_for_old_poller_before_new_session(self):
+    def test_adding_device_waits_for_old_poller_before_merged_session(self):
         service = SlowStopService()
         service.start_all([{"id": "old", "name": "old", "address": "COM1", "enabled": True}])
         time.sleep(0.2)
@@ -80,8 +80,8 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
 
         status = service.get_status()
         self.assertTrue(status["running"])
-        self.assertEqual(status["device_ids"], ["new"])
-        self.assertEqual(service.started_device_ids, ["old", "new"])
+        self.assertEqual(status["device_ids"], ["old", "new"])
+        self.assertEqual(service.started_device_ids, ["old", "old", "new"])
 
         service.stop_all()
 
@@ -956,6 +956,81 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(slot["history"]["flow"][-1]["value"], 2.5)
         self.assertEqual(slot["history"]["sensor_3.temperature"][-1]["value"], 23.0)
         self.assertEqual(slot["history"]["sensor_3.humidity"][-1]["value"], 53.0)
+
+    def test_start_all_keeps_existing_devices_on_affected_ports(self):
+        service = LiveAcquisitionService()
+        try:
+            service.start_all([
+                {"id": "dev-a", "name": "A", "address": "COM1", "enabled": True},
+                {"id": "dev-b", "name": "B", "address": "COM7", "enabled": True},
+            ])
+            service.start_all([{"id": "dev-c", "name": "C", "address": "COM1", "enabled": True}])
+
+            status = service.get_status()
+            self.assertEqual(sorted(status["device_ids"]), ["dev-a", "dev-b", "dev-c"])
+            self.assertEqual(service._port_runners["COM1"]["device_ids"], ["dev-a", "dev-c"])
+            self.assertEqual(service._port_runners["COM7"]["device_ids"], ["dev-b"])
+            self.assertTrue(service._device_slots["dev-a"]["state"]["running"])
+            self.assertTrue(service._device_slots["dev-b"]["state"]["running"])
+            self.assertTrue(service._device_slots["dev-c"]["state"]["running"])
+        finally:
+            service.stop_all()
+
+    def test_stop_devices_keeps_remaining_devices_on_same_port(self):
+        service = LiveAcquisitionService()
+        try:
+            service.start_all([
+                {"id": "dev-1", "name": "D1", "address": "COM1", "enabled": True},
+                {"id": "dev-2", "name": "D2", "address": "COM1", "enabled": True},
+            ])
+
+            service.stop_devices(["dev-1"])
+
+            status = service.get_status()
+            self.assertEqual(status["device_ids"], ["dev-2"])
+            self.assertEqual(service._port_runners["COM1"]["device_ids"], ["dev-2"])
+            self.assertFalse(service._device_slots["dev-1"]["state"]["running"])
+            self.assertTrue(service._device_slots["dev-2"]["state"]["running"])
+        finally:
+            service.stop_all()
+
+    def test_stop_devices_without_targets_keeps_everything_running(self):
+        service = LiveAcquisitionService()
+        try:
+            service.start_all([{"id": "dev-a", "name": "A", "address": "COM1", "enabled": True}])
+
+            service.stop_devices([])
+
+            status = service.get_status()
+            self.assertEqual(status["device_ids"], ["dev-a"])
+            self.assertTrue(service._device_slots["dev-a"]["state"]["running"])
+        finally:
+            service.stop_all()
+
+    def test_stop_port_runners_keeps_unfinished_runner_registered(self):
+        class UnfinishedThread:
+            def is_alive(self):
+                return True
+
+            def join(self, timeout):
+                return None
+
+        service = LiveAcquisitionService()
+        runner = {
+            "thread": UnfinishedThread(),
+            "stop_event": threading.Event(),
+            "client": None,
+            "device_ids": ["dev-a"],
+            "finalize_on_exit": True,
+        }
+        service._port_runners["COM1"] = runner
+
+        with self.assertRaisesRegex(RuntimeError, "拒绝重建串口"):
+            service._stop_port_runners({"COM1"})
+
+        self.assertIs(service._port_runners["COM1"], runner)
+        self.assertFalse(runner["finalize_on_exit"])
+        service._port_runners.clear()
 
     @staticmethod
     def _lock_context(service):

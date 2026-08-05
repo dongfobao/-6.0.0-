@@ -33,10 +33,14 @@
       <header class="topbar">
         <div><h1 id="pageTitle">运行总览</h1><p id="clockText">--</p></div>
         <div class="top-actions">
-          <select id="deviceSelect" aria-label="当前设备"></select>
+          <select id="deviceSelect" aria-label="当前显示设备" title="选择要查看数据的设备（显示/查询始终为单台）"></select>
           <span id="connectionBadge" class="status-badge idle"><i></i><span>待采集</span></span>
-          <button id="startBtn" class="button primary">启动监控</button>
-          <button id="stopBtn" class="button danger ghost">停止</button>
+          <span class="monitor-device-group">
+            <button id="monitorDeviceBtn" class="button secondary" type="button" title="勾选需要同时采集记录的设备；同串口多台设备会顺序轮询并分别保存会话">采集设备 ▾</button>
+            <div id="monitorDeviceDropdown" class="monitor-device-dropdown hidden"></div>
+          </span>
+          <button id="startBtn" class="button primary" title="启动勾选设备的采集">启动监控</button>
+          <button id="stopBtn" class="button danger ghost" title="停止勾选设备的采集">停止</button>
         </div>
       </header>
       <div id="notice" class="notice hidden"></div>

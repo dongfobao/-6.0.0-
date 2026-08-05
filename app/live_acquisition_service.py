@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Iterable
 
 from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
@@ -176,7 +176,6 @@ class LiveAcquisitionService:
         session_root: Path | str | None = None,
         config_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.stop_all()
         enabled_devices = [d for d in devices if bool(d.get("enabled", True))]
         if not enabled_devices:
             raise ValueError("no enabled devices to start")
@@ -186,123 +185,225 @@ class LiveAcquisitionService:
             device_id = str(device.get("id") or "")
             if not device_id:
                 continue
-            port_key = _device_port_key(device)
-            port_groups.setdefault(port_key, []).append(device)
+            port_groups.setdefault(_device_port_key(device), []).append(device)
+
+        # 重建受影响的串口时，保留其中原本仍在采集的设备。设备配置若变更
+        # 串口，还必须同时重建旧串口，避免同一设备被两个轮询线程同时采集。
+        requested_ids = {str(device.get("id")) for device in enabled_devices}
+        with self._lock:
+            active_port_by_device = {
+                str(device_id): port_key
+                for port_key, runner in self._port_runners.items()
+                for device_id in (runner.get("device_ids") or [])
+            }
+        affected_ports = set(port_groups)
+        affected_ports.update(
+            active_port_by_device[device_id]
+            for device_id in requested_ids
+            if device_id in active_port_by_device
+        )
+        previous = self._stop_port_runners(affected_ports)
 
         with self._lock:
-            self._device_slots.clear()
-            self._port_runners.clear()
             started_at = _now()
+            for port_key in affected_ports:
+                requested_devices = port_groups.get(port_key, [])
+                merged_devices: dict[str, dict[str, Any]] = {}
+                for old_device_id in previous.get(port_key, []):
+                    # 已请求的设备会按最新配置添加到目标串口，不能留在旧串口。
+                    if old_device_id in requested_ids:
+                        continue
+                    old_slot = self._device_slots.get(old_device_id)
+                    if old_slot is not None and old_slot["state"].get("running"):
+                        merged_devices[old_device_id] = deepcopy(old_slot["config"])
+                for device in requested_devices:
+                    merged_devices[str(device.get("id"))] = device
+                port_devices = list(merged_devices.values())
+                if not port_devices:
+                    continue
 
-            for device in enabled_devices:
-                device_id = str(device.get("id") or "")
-                slot = self._ensure_device_slot(device)
-                port_key = _device_port_key(device)
-                same_port_count = len(port_groups.get(port_key) or [])
+                same_port_count = len(port_devices)
                 session_root_path = Path(session_root or ".")
-                self._restore_recent_history(slot, session_root_path, device_id, started_at)
-                slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
-                try:
-                    slot["recorder"].record_heat_event(
-                        _now(), "系统", "采集开始", f"设备 {device.get('name') or device_id} 开始监控记录"
-                    )
-                except Exception:
-                    pass
-                slot["state"].update({
-                    "running": True,
-                    "device_id": device_id,
-                    "device_name": device.get("name"),
-                    "started_at": _iso(started_at),
-                    "session_dir": str(slot["recorder"].session_dir),
-                    "status_stale_after_ms": self._estimate_status_stale_after_ms(device, same_port_count),
-                    "communication_health": "starting",
-                    "communication_text": "等待首次数据",
-                })
-                slot["events"].append({
-                    "id": slot["event_seq"] + 1,
-                    "ts": _iso(_now()),
-                    "type": "session_started",
-                    "message": f"session started for {device.get('name') or device_id}",
-                    "details": {"device_id": device_id},
-                })
-                slot["event_seq"] += 1
+                for device in port_devices:
+                    device_id = str(device.get("id") or "")
+                    slot = self._device_slots.get(device_id)
+                    if slot is not None and slot["state"].get("running"):
+                        slot["config"] = deepcopy(device)
+                        slot["state"].update({
+                            "device_name": device.get("name"),
+                            "status_stale_after_ms": self._estimate_status_stale_after_ms(device, same_port_count),
+                        })
+                        continue
 
-            for port_key, port_devices in port_groups.items():
-                stop_event = threading.Event()
-                runner: dict[str, Any] = {
-                    "thread": None,
-                    "stop_event": stop_event,
-                    "client": None,
-                    "device_ids": [str(d.get("id")) for d in port_devices],
-                    "device_index": 0,
-                    "port_key": port_key,
-                }
-                self._port_runners[port_key] = runner
+                    self._device_slots[device_id] = self._empty_device_slot(device)
+                    slot = self._device_slots[device_id]
+                    self._restore_recent_history(slot, session_root_path, device_id, started_at)
+                    slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
+                    try:
+                        slot["recorder"].record_heat_event(
+                            _now(), "系统", "采集开始", f"设备 {device.get('name') or device_id} 开始监控记录"
+                        )
+                    except Exception:
+                        pass
+                    slot["state"].update({
+                        "running": True,
+                        "device_id": device_id,
+                        "device_name": device.get("name"),
+                        "started_at": _iso(started_at),
+                        "session_dir": str(slot["recorder"].session_dir),
+                        "status_stale_after_ms": self._estimate_status_stale_after_ms(device, same_port_count),
+                        "communication_health": "starting",
+                        "communication_text": "等待首次数据",
+                    })
+                    slot["events"].append({
+                        "id": slot["event_seq"] + 1,
+                        "ts": _iso(_now()),
+                        "type": "session_started",
+                        "message": f"session started for {device.get('name') or device_id}",
+                        "details": {"device_id": device_id},
+                    })
+                    slot["event_seq"] += 1
+                self._start_port_runner(port_key, port_devices)
 
-            for port_key, port_devices in port_groups.items():
-                runner = self._port_runners[port_key]
-                runner["thread"] = threading.Thread(
-                    target=self._run_port_loop,
-                    args=(port_key, port_devices, runner["stop_event"]),
-                    name=f"live-acq-{port_key}",
-                    daemon=True,
-                )
-                runner["thread"].start()
-
-            device_ids = [str(d.get("id")) for d in enabled_devices]
-            self._global_state = {
-                "running": True,
-                "device_count": len(enabled_devices),
-                "device_ids": device_ids,
-            }
+            self._refresh_global_state()
             return deepcopy(self._global_state)
 
     def stop_all(self) -> dict[str, Any]:
-        runners: dict[str, dict[str, Any]] = {}
         with self._lock:
-            runners = dict(self._port_runners)
+            port_keys = set(self._port_runners)
+        self._stop_port_runners(port_keys)
+        with self._lock:
+            for device_id in list(self._device_slots):
+                self._finalize_device_session(device_id)
+            self._refresh_global_state()
+            return deepcopy(self._global_state)
 
-        for port_key, runner in runners.items():
-            runner["stop_event"].set()
+    def stop_devices(self, device_ids: Iterable[str]) -> dict[str, Any]:
+        """只停止勾选的设备；同串口上未勾选的设备继续采集。"""
+        targets = {str(value) for value in device_ids if str(value)}
+        if not targets:
+            return self.get_status()
+        with self._lock:
+            affected_ports = {
+                port_key
+                for port_key, runner in self._port_runners.items()
+                if targets.intersection(str(item) for item in (runner.get("device_ids") or []))
+            }
+        previous = self._stop_port_runners(affected_ports)
+        with self._lock:
+            for device_id in targets:
+                self._finalize_device_session(device_id)
+            for port_key, old_device_ids in previous.items():
+                remaining = [
+                    old_id
+                    for old_id in old_device_ids
+                    if old_id not in targets
+                    and old_id in self._device_slots
+                    and self._device_slots[old_id]["state"].get("running")
+                ]
+                if not remaining:
+                    continue
+                devices = [deepcopy(self._device_slots[old_id]["config"]) for old_id in remaining]
+                self._start_port_runner(port_key, devices)
+            self._refresh_global_state()
+            return deepcopy(self._global_state)
 
-        for port_key, runner in runners.items():
+    def _start_port_runner(self, port_key: str, devices: list[dict[str, Any]]) -> None:
+        """在指定串口上启动轮询线程，调用方需持有 self._lock。"""
+        stop_event = threading.Event()
+        runner: dict[str, Any] = {
+            "thread": None,
+            "stop_event": stop_event,
+            "client": None,
+            "device_ids": [str(d.get("id")) for d in devices],
+            "device_index": 0,
+            "port_key": port_key,
+            "finalize_on_exit": True,
+        }
+        self._port_runners[port_key] = runner
+        runner["thread"] = threading.Thread(
+            target=self._run_port_loop,
+            args=(port_key, devices, stop_event),
+            name=f"live-acq-{port_key}",
+            daemon=True,
+        )
+        runner["thread"].start()
+
+    def _stop_port_runners(self, port_keys: set[str]) -> dict[str, list[str]]:
+        """停止指定串口的轮询线程并关闭串口客户端，返回各串口原设备列表。
+
+        线程退出时不自动归档会话（finalize_on_exit=False），由调用方按设备决定。
+        """
+        with self._lock:
+            runners = {
+                port_key: self._port_runners[port_key]
+                for port_key in port_keys
+                if port_key in self._port_runners
+            }
+            previous = {
+                port_key: [str(item) for item in (runner.get("device_ids") or [])]
+                for port_key, runner in runners.items()
+            }
+            for runner in runners.values():
+                runner["finalize_on_exit"] = False
+                runner["stop_event"].set()
+        for runner in runners.values():
+            client = runner.get("client")
+            if client is not None:
+                try:
+                    # 先关闭串口以打断可能阻塞的读操作，再等待轮询线程退出。
+                    with self._io_lock:
+                        client.close()
+                except Exception:
+                    pass
             thread = runner.get("thread")
             if thread is not None and thread.is_alive():
                 thread.join(timeout=10.0)
-
+        unfinished = [
+            port_key
+            for port_key, runner in runners.items()
+            if (thread := runner.get("thread")) is not None and thread.is_alive()
+        ]
+        if unfinished:
+            raise RuntimeError(f"轮询线程未在限定时间内退出，拒绝重建串口: {', '.join(unfinished)}")
         with self._lock:
             for port_key, runner in runners.items():
-                thread = runner.get("thread")
-                if thread is not None and thread.is_alive():
-                    continue
-                client = runner.get("client")
-                if client is not None:
-                    try:
-                        client.close()
-                    except Exception:
-                        pass
+                self._port_runners.pop(port_key, None)
+        return previous
 
-            for device_id, slot in list(self._device_slots.items()):
-                slot["state"]["running"] = False
-                slot["events"].append({
-                    "id": slot["event_seq"] + 1,
-                    "ts": _iso(_now()),
-                    "type": "session_stopped",
-                    "message": "session stopped by api",
-                })
-                slot["event_seq"] += 1
-                if slot["recorder"] is not None:
-                    try:
-                        slot["recorder"].record_heat_event(_now(), "系统", "采集停止", "上位机停止监控记录")
-                    except Exception:
-                        pass
-                    slot["recorder"].finalize(status="stopped")
+    def _finalize_device_session(self, device_id: str) -> None:
+        """结束指定设备的采集会话并归档记录器，调用方需持有 self._lock。"""
+        slot = self._device_slots.get(device_id)
+        if slot is None or not slot["state"].get("running"):
+            return
+        slot["state"]["running"] = False
+        slot["events"].append({
+            "id": slot["event_seq"] + 1,
+            "ts": _iso(_now()),
+            "type": "session_stopped",
+            "message": "session stopped by api",
+        })
+        slot["event_seq"] += 1
+        recorder = slot.get("recorder")
+        if recorder is not None:
+            try:
+                recorder.record_heat_event(_now(), "系统", "采集停止", "上位机停止监控记录")
+            except Exception:
+                pass
+            recorder.finalize(status="stopped")
 
-            self._port_runners.clear()
-            self._global_state["running"] = False
-            self._global_state["device_count"] = 0
-            self._global_state["device_ids"] = []
-            return deepcopy(self._global_state)
+    def _refresh_global_state(self) -> None:
+        """根据各设备槽位的运行状态重建全局状态，调用方需持有 self._lock。"""
+        running_ids = [
+            device_id
+            for device_id, slot in self._device_slots.items()
+            if slot["state"].get("running")
+        ]
+        self._global_state = {
+            "running": bool(running_ids),
+            "device_count": len(running_ids),
+            "device_ids": running_ids,
+        }
 
     def get_status(self) -> dict[str, Any]:
         with self._lock:
@@ -1352,11 +1453,13 @@ class LiveAcquisitionService:
                 client.close()
             with self._lock:
                 runner = self._port_runners.get(port_key)
-                if runner is not None:
+                finalize_on_exit = True
+                if runner is not None and runner.get("stop_event") is stop_event:
                     runner["client"] = None
+                    finalize_on_exit = bool(runner.get("finalize_on_exit", True))
                 for device_id in device_ids:
                     slot = self._device_slots.get(device_id)
-                    if slot is not None:
+                    if slot is not None and finalize_on_exit:
                         slot["state"]["running"] = False
                         if slot["recorder"] is not None:
                             slot["recorder"].finalize(status="stopped")

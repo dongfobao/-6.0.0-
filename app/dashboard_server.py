@@ -174,6 +174,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 devices = [item for item in devices_payload.get("devices", []) if not requested or item.get("id") in requested]
                 return self._json(service.start_all(devices, session_root=SESSIONS_DIR, config_snapshot={"protocol": "9.0"}))
             if method == "POST" and path == "/api/acquisition/stop":
+                requested = {str(value) for value in body.get("deviceIds", []) if str(value)}
+                if requested:
+                    return self._json(service.stop_devices(requested))
                 return self._json(service.stop_all())
             if method == "POST" and path == "/api/config/refresh":
                 return self._json(service.poll_slow_group(str(body.get("deviceId") or "")))
