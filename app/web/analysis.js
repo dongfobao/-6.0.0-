@@ -5,7 +5,6 @@
   // 旧版上位机会话仅保存前四列，并可在尾部追加 JSON 扩展字段。
   const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*,?\/\*\s*(.*?)\s*\*\/(?:\s*\|\s*(\{.*\}))?\s*$/;
   const RUN_ROW_RE = /^([AIDEWV])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
-  const MAX_RUN_ROWS = 2000;
 
   const METRICS = [
     { key: "pressure", name: "压力", unit: "kPa", color: "#a78bfa" },
@@ -88,13 +87,17 @@
     const name = file.name;
     if (/session_meta\.json$/i.test(name)) return "meta";
     if (/checkpoint\.json$/i.test(name)) return "checkpoint";
-    if (/config\.json$/i.test(name)) return "config";
+    if (/^config(?:_v\d+)?\.json$/i.test(name)) return "config";
     if (/^heat_.*\.csv$/i.test(name) || /(^|\/)heat_events\//i.test(path)) return "heat";
     if (/^traffic_.*\.csv$/i.test(name) || /(^|\/)traffic\//i.test(path)) return "traffic";
+    // 下位机导出的 run/log_N.csv 是 EasyLogger 原始运行日志；不能按文件名误判为环境 CSV。
+    if (/(^|\/)run\//i.test(path) && /^log_\d+\.csv$/i.test(name)) return "firmware";
+    if (/(^|\/)run\//i.test(path)) return "run";
+    if (/^log_\d+\.csv$/i.test(name)) return "firmware";
     if (/^log_.*\.csv$/i.test(name) || /(^|\/)data_\d+\//i.test(path)) return "env";
     if (/^breath_.*\.csv$/i.test(name) || /(^|\/)breath_data\//i.test(path)) return "breath";
     if (/^serial_output\.log(?:\.\d+)?$/i.test(name) || /(^|\/)logs?\//i.test(path) || /\.log(?:\.\d+)?$/i.test(name)) return "firmware";
-    if (/\.csv$/i.test(name) || /(^|\/)run\//i.test(path)) return "run";
+    if (/\.csv$/i.test(name)) return "run";
     return "other";
   }
 
@@ -217,7 +220,6 @@
     source.firmwareRows.sort((a, b) => (Number.isFinite(a.ts) ? a.ts : Infinity) - (Number.isFinite(b.ts) ? b.ts : Infinity));
     source.heatRows.sort((a, b) => a.ts - b.ts);
     source.trafficRows.sort((a, b) => a.ts - b.ts);
-    if (source.runRows.length > MAX_RUN_ROWS) source.runRows = source.runRows.slice(-MAX_RUN_ROWS);
     ui.events = buildEvents();
     const bounds = computeBounds();
     ui.imported = Number.isFinite(bounds.start);
@@ -316,7 +318,7 @@
     else if (/modbus|uart|rs485|tcp|network|lwip|lte|wapi|iec\d*|通信|网络|远程/.test(lower)) type = "communication";
     else if (/config|json|参数|配置/.test(lower)) type = "config";
     else if (/fatfs|sd.?card|storage|file|日志|存储|文件/.test(lower)) type = "storage";
-    else if (/watchdog|wdg|stack|fatal|assert|看门狗|堆栈|致命|复位/.test(lower)) type = "safety";
+    else if (/watchdog|wdg|stack|fatal|assert|reset|hardfault|cfsr|hfsr|看门狗|堆栈|致命|复位/.test(lower)) type = "safety";
     else if (row.level === "A" || row.level === "E" || /failed|error|timeout|失败|错误|超时/.test(lower)) type = "alarm";
     const title = msg.length > 70 ? `${msg.slice(0, 70)}…` : msg;
     return { type, title, detail: msg, level: row.level || "U", module: row.tag || "SERIAL" };
@@ -675,10 +677,7 @@
     ctx.strokeStyle = "rgba(140,162,183,.48)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(12, y); ctx.lineTo(width - 12, y); ctx.stroke();
     ctx.fillStyle = "#8ca2b7"; ctx.font = "10px 'Segoe UI',sans-serif"; ctx.fillText(`日志时间线 ${events.length} 条`, 16, y - 5);
-    const limit = 260;
-    const step = Math.max(1, Math.ceil(events.length / limit));
-    events.forEach((event, index) => {
-      if (index % step) return;
+    sampleEventsForCanvas(events, 260).forEach((event) => {
       const meta = EVENT_TYPES[event.type] || EVENT_TYPES.system;
       const x = xOf(event.ts);
       ctx.fillStyle = meta.color;
@@ -701,15 +700,19 @@
       return padT + plotH - ((v - min) / (max - min)) * plotH;
     };
     const labelLimit = 24;
-    breath.forEach((e, i) => {
-      if (breath.length > 400 && i % Math.ceil(breath.length / 400)) return;
+    sampleEventsForCanvas(breath, 400).forEach((e) => {
       const x = xOf(e.ts);
       ctx.fillStyle = EVENT_TYPES.breath.color;
       ctx.globalAlpha = 0.5;
       ctx.beginPath(); ctx.arc(x, padT + plotH - 3, 2.4, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
     });
-    major.forEach((e, i) => {
+    const drawnMajor = sampleEventsForCanvas(major, 300);
+    if (ui.selectedEvent) {
+      const selected = major.find((event) => event.id === ui.selectedEvent.id);
+      if (selected && !drawnMajor.some((drawn) => drawn.id === selected.id)) drawnMajor.push(selected);
+    }
+    drawnMajor.forEach((e, i) => {
       const x = xOf(e.ts);
       const meta = EVENT_TYPES[e.type] || EVENT_TYPES.system;
       const selected = ui.selectedEvent && ui.selectedEvent.id === e.id;
@@ -726,7 +729,7 @@
       ctx.strokeStyle = "#07111f";
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      if (major.length <= labelLimit) {
+      if (drawnMajor.length <= labelLimit) {
         ctx.fillStyle = meta.color;
         ctx.font = "10px 'Segoe UI',sans-serif";
         const label = e.title.length > 14 ? `${e.title.slice(0, 14)}…` : e.title;
@@ -734,6 +737,12 @@
         ctx.fillText(label, Math.min(x + 5, innerWidthOfChart() - 90), ly);
       }
     });
+  }
+
+  function sampleEventsForCanvas(events, limit) {
+    if (events.length <= limit) return events;
+    const step = Math.ceil(events.length / limit);
+    return events.filter((_, index) => index % step === 0);
   }
 
   function innerWidthOfChart() {
