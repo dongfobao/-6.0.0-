@@ -754,7 +754,7 @@
     if (!ui.imported) return;
     const { start, end } = ui.view;
     const span = end - start;
-    const minSpan = 10000, maxSpan = (ui.bounds.end - ui.bounds.start) * 1.2;
+    const minSpan = 10000, maxSpan = ui.bounds.end - ui.bounds.start;
     let newSpan = Math.min(maxSpan, Math.max(minSpan, span * factor));
     const anchor = start + span * fraction;
     ui.view = clampView(anchor - newSpan * fraction, anchor + newSpan * (1 - fraction));
@@ -948,14 +948,22 @@
 
   function exportCsv() {
     if (!ui.imported) return;
-    const rows = source.envRows.filter((r) => r.ts >= ui.view.start && r.ts <= ui.view.end);
     const metrics = METRICS.filter((metric) => ui.activeMetrics.has(metric.key));
+    const byTimestamp = new Map();
+    metrics.forEach((metric) => {
+      seriesRows(metric.key).filter((row) => row.ts >= ui.view.start && row.ts <= ui.view.end).forEach((row) => {
+        const combined = byTimestamp.get(row.ts) || { ts: row.ts };
+        combined[metric.key] = row[metric.key];
+        byTimestamp.set(row.ts, combined);
+      });
+    });
+    const rows = [...byTimestamp.values()].sort((a, b) => a.ts - b.ts);
     const lines = [["time", ...metrics.map((metric) => `${metric.name}(${metric.unit})`)].join(",")];
     rows.forEach((row) => lines.push([fmtTime(row.ts), ...metrics.map((metric) => row[metric.key] ?? "")].join(",")));
     lines.push("");
-    lines.push("event_time,event_type,event_title,event_detail");
+    lines.push("event_time,event_type,event_level,event_module,event_title,event_detail");
     filteredEvents().filter((e) => e.ts >= ui.view.start && e.ts <= ui.view.end)
-      .forEach((e) => lines.push(`${fmtTime(e.ts)},${EVENT_TYPES[e.type].name},"${e.title.replace(/"/g, '""')}","${e.detail.replace(/"/g, '""')}"`));
+      .forEach((e) => lines.push(`${fmtTime(e.ts)},${EVENT_TYPES[e.type].name},${LOG_LEVELS[e.level || "U"].name},"${String(e.module || "").replace(/"/g, '""')}","${e.title.replace(/"/g, '""')}","${e.detail.replace(/"/g, '""')}"`));
     const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
