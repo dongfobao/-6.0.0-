@@ -1,7 +1,9 @@
 ﻿"use strict";
 (() => {
   // ============================ 数据格式（与 live_session_recorder 落盘格式一致） ============================
-  const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\],\/\*\s*([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),?\s*\*\//;
+  // 下位机 SensorLogger: [time],/* 压力,温度1,流量,湿度1,温度2,湿度2,温度3,湿度3 */
+  // 旧版上位机会话仅保存前四列，并可在尾部追加 JSON 扩展字段。
+  const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*,?\/\*\s*(.*?)\s*\*\/(?:\s*\|\s*(\{.*\}))?\s*$/;
   const RUN_ROW_RE = /^([AIDEWV])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
   const MAX_RUN_ROWS = 2000;
 
@@ -47,7 +49,7 @@
   const source = { envRows: [], breathRows: [], runRows: [], firmwareRows: [], heatRows: [], trafficRows: [], config: null, meta: null, checkpoint: null };
   const ui = {
     imported: false,
-    activeMetrics: new Set(["pressure", "flow", "sensor_1.temperature", "sensor_1.humidity"]),
+    activeMetrics: new Set(METRICS.map((metric) => metric.key)),
     events: [],
     typeFilter: new Set(Object.keys(EVENT_TYPES)),
     levelFilter: new Set(Object.keys(LOG_LEVELS)),
@@ -101,10 +103,27 @@
     for (const line of text.split(/\r?\n/)) {
       const m = ENV_ROW_RE.exec(line.trim());
       if (!m) continue;
-      const row = { ts: parseTs(m[1]), pressure: +m[2], "sensor_1.temperature": +m[3], flow: +m[4], "sensor_1.humidity": +m[5] };
-      const extension = line.trim().match(/\|\s*(\{.*\})\s*$/);
-      if (extension) {
-        try { Object.assign(row, JSON.parse(extension[1])); } catch (_) { /* 保持旧格式兼容 */ }
+      const ts = parseTs(m[1]);
+      if (!Number.isFinite(ts)) continue;
+      const values = m[2].split(",").map((value) => Number(value.trim()));
+      if (values.length < 4 || values.slice(0, 4).some((value) => !Number.isFinite(value))) continue;
+      const row = {
+        ts,
+        pressure: values[0],
+        "sensor_1.temperature": values[1],
+        flow: values[2],
+        "sensor_1.humidity": values[3],
+      };
+      // 固件 v6 当前完整格式有 10 项：第 5、6 项是第一路的兼容副本，
+      // 第二、三路分别位于第 7、8 项和第 9、10 项；8 项旧格式则连续存放三路。
+      const optionalIndex = values.length >= 10
+        ? [["sensor_2.temperature", 6], ["sensor_2.humidity", 7], ["sensor_3.temperature", 8], ["sensor_3.humidity", 9]]
+        : [["sensor_2.temperature", 4], ["sensor_2.humidity", 5], ["sensor_3.temperature", 6], ["sensor_3.humidity", 7]];
+      optionalIndex.forEach(([field, index]) => {
+        if (Number.isFinite(values[index])) row[field] = values[index];
+      });
+      if (m[3]) {
+        try { Object.assign(row, JSON.parse(m[3])); } catch (_) { /* 损坏的扩展字段不影响基础曲线 */ }
       }
       rows.push(row);
     }
