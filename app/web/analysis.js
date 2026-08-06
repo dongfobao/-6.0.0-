@@ -215,6 +215,11 @@
     renderToggles();
     renderEventFilters();
     renderLogPanel();
+    if (ui.events.length) {
+      ui.logOpen = true;
+      $("analysisLogPanel").classList.remove("hidden");
+      $("analysisLogBtn").classList.add("active");
+    }
     renderStats();
     draw();
   }
@@ -231,6 +236,7 @@
     source.checkpoint = null;
     ui.events = [];
     ui.imported = false;
+    ui.logOpen = false;
     ui.selectedEvent = null;
     ui.hoverX = null;
     ui.viewHistory = [];
@@ -948,6 +954,8 @@
       $("analysisRangeText").textContent = "未导入数据";
       $("analysisLogList").innerHTML = "";
       $("analysisEventSummary").innerHTML = "";
+      $("analysisLogPanel").classList.add("hidden");
+      $("analysisLogBtn").classList.remove("active");
       renderDatePresets();
       renderToggles();
       renderStats();
