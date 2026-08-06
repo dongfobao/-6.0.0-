@@ -138,14 +138,14 @@ def _summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _build_session_index(session_dir: Path, meta: dict[str, Any], active_device_ids: set[str] | None = None) -> dict[str, Any]:
+def _build_session_index(session_dir: Path, meta: dict[str, Any], active_session_names: set[str] | None = None) -> dict[str, Any]:
     started = _parse_ts(meta.get("started_at"))
     ended = _parse_ts(meta.get("ended_at"))
     raw_status = str(meta.get("status") or "unknown")
     device = meta.get("device") if isinstance(meta.get("device"), dict) else {}
     device_id = str(device.get("id") or "")
     recording = raw_status == "recording"
-    if recording and active_device_ids is not None and device_id and device_id not in active_device_ids:
+    if recording and active_session_names is not None and session_dir.name not in active_session_names:
         raw_status = "stopped"
     duration_seconds: float | None = None
     if started is not None:
@@ -165,7 +165,7 @@ def _build_session_index(session_dir: Path, meta: dict[str, Any], active_device_
     }
 
 
-def list_sessions(sessions_root: Path | str, device_id: str | None = None, active_device_ids: set[str] | None = None) -> dict[str, Any]:
+def list_sessions(sessions_root: Path | str, device_id: str | None = None, active_session_names: set[str] | None = None) -> dict[str, Any]:
     root = Path(sessions_root)
     items: list[dict[str, Any]] = []
     if root.exists():
@@ -175,8 +175,8 @@ def list_sessions(sessions_root: Path | str, device_id: str | None = None, activ
             meta = _read_meta(child)
             if not meta:
                 continue
-            entry = _build_session_index(child, meta, active_device_ids=active_device_ids)
-            if device_id and entry["deviceId"] and entry["deviceId"] != str(device_id):
+            entry = _build_session_index(child, meta, active_session_names=active_session_names)
+            if device_id and entry["deviceId"] != str(device_id):
                 continue
             items.append(entry)
     items.sort(key=lambda item: item["_sort"], reverse=True)
@@ -185,7 +185,7 @@ def list_sessions(sessions_root: Path | str, device_id: str | None = None, activ
     return {"items": items, "total": len(items)}
 
 
-def get_session_detail(sessions_root: Path | str, name: str, active_device_ids: set[str] | None = None) -> dict[str, Any]:
+def get_session_detail(sessions_root: Path | str, name: str, active_session_names: set[str] | None = None) -> dict[str, Any]:
     root = Path(sessions_root).resolve()
     safe_name = Path(str(name or "")).name
     if not safe_name or safe_name != str(name or ""):
@@ -196,7 +196,7 @@ def get_session_detail(sessions_root: Path | str, name: str, active_device_ids: 
     meta = _read_meta(session_dir)
     if not meta:
         raise KeyError(f"会话缺少元数据: {safe_name}")
-    index = _build_session_index(session_dir, meta, active_device_ids=active_device_ids)
+    index = _build_session_index(session_dir, meta, active_session_names=active_session_names)
     index.pop("_sort", None)
     events = _iter_heat_events(session_dir)
     summary = _summarize_events(events)

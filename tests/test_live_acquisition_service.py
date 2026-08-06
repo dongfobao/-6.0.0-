@@ -368,6 +368,25 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             7.0,
         )
 
+    def test_stage_schedule_task_rejects_february_twenty_ninth(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+        payload = {
+            "taskNumber": 1,
+            "month": 2,
+            "day": 29,
+            "hour": 10,
+            "minute": 30,
+            "durationDays": 1,
+            "humidityStartThreshold": [50, 50, 50],
+            "humidityFallingStopThreshold": [45, 45, 45],
+            "humidityPeakDropThreshold": [1, 1, 1],
+        }
+
+        with self.assertRaises(ValueError):
+            service.stage_schedule_task("dev-a", payload)
+
     def test_v9_time_registers_are_used_directly_in_declared_units(self):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
@@ -620,22 +639,15 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             def read_holding_registers(self, address, count):
                 raise ModbusError("crc mismatch")
 
+            def read_input_registers(self, address, count):
+                raise ModbusError("crc mismatch")
+
         service = LiveAcquisitionService()
         device = {
             "id": "dev-a",
             "name": "A",
             "address": "COM1",
             "slaveId": 2,
-            "pollingCommands": [
-                {
-                    "id": "v9.fast",
-                    "name": "fast",
-                    "autoPoll": True,
-                    "functionCode": 3,
-                    "address": 1,
-                    "count": 1,
-                }
-            ],
         }
         service._ensure_device_slot(device)
         service._port_runners["COM1"] = {"client": None, "device_ids": ["dev-a"], "device_index": 0}
@@ -654,7 +666,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             stopper.join()
 
         state = service._device_slots["dev-a"]["state"]
-        self.assertEqual(state["last_error"], "read failed for fast: crc mismatch")
+        self.assertEqual(state["last_error"], "read failed for 系统状态: crc mismatch")
         self.assertEqual(state["consecutive_error_count"], 1)
 
     def test_clear_command_traffic_resets_global_log(self):

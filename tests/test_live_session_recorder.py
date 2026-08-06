@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from live_session_recorder import LiveSessionRecorder
+from session_archive import list_sessions
 
 
 class LiveSessionRecorderTests(unittest.TestCase):
@@ -106,6 +107,28 @@ class LiveSessionRecorderTests(unittest.TestCase):
             content = recorder.traffic_path.read_text(encoding="utf-8")
             self.assertIn('"traceId": 2', content)
             self.assertNotIn('"traceId": 1', content)
+
+    def test_same_second_sessions_get_distinct_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            first = LiveSessionRecorder(root, {"id": "dev-1", "name": "设备A"})
+            second = LiveSessionRecorder(root, {"id": "dev-1", "name": "设备A"})
+
+            self.assertNotEqual(first.session_dir, second.session_dir)
+            self.assertTrue(first.meta_path.exists())
+            self.assertTrue(second.meta_path.exists())
+
+    def test_archive_marks_only_current_session_as_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            stale = LiveSessionRecorder(root, {"id": "dev-1", "name": "设备A"})
+            current = LiveSessionRecorder(root, {"id": "dev-1", "name": "设备A"})
+
+            result = list_sessions(root, active_session_names={current.session_dir.name})
+            statuses = {item["name"]: item["status"] for item in result["items"]}
+
+            self.assertEqual(statuses[current.session_dir.name], "recording")
+            self.assertEqual(statuses[stale.session_dir.name], "stopped")
 
 
 if __name__ == "__main__":

@@ -856,7 +856,8 @@ class LiveAcquisitionService:
         if task_number < 1 or task_number > SCHEDULE_MAX_TASKS:
             raise ValueError("定时任务序号必须在 1–12 之间")
         try:
-            datetime(2000, month, day, hour, minute)
+            # 定时任务按每年重复执行，不能接受仅闰年存在的 2 月 29 日。
+            datetime(2001, month, day, hour, minute)
         except ValueError as exc:
             raise ValueError("开始日期或时间无效") from exc
         if duration_days < 1 or duration_days > 3650:

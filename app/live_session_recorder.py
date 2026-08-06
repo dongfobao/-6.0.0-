@@ -46,7 +46,7 @@ class LiveSessionRecorder:
         self.config_snapshot = dict(config_snapshot or {})
         self.started_at = datetime.now()
         session_name = f"{self.started_at.strftime('%Y%m%d_%H%M%S')}_{_slug(device.get('name') or device.get('id') or 'device')}"
-        self.session_dir = self.sessions_root / session_name
+        self.session_dir = self._reserve_session_dir(session_name)
         self.data_dir = self.session_dir / "data_0"
         self.breath_dir = self.session_dir / "breath_data"
         self.run_dir = self.session_dir / "run"
@@ -67,6 +67,18 @@ class LiveSessionRecorder:
         self.last_written_snapshot: dict[str, Any] | None = None
         self._last_checkpoint_epoch = 0.0
         self._prepare()
+
+    def _reserve_session_dir(self, session_name: str) -> Path:
+        """原子地预留会话目录，避免同秒启动覆盖已有会话。"""
+        counter = 0
+        while True:
+            suffix = "" if counter == 0 else f"_{counter:02d}"
+            candidate = self.sessions_root / f"{session_name}{suffix}"
+            try:
+                candidate.mkdir(parents=True, exist_ok=False)
+                return candidate
+            except FileExistsError:
+                counter += 1
 
     def _interval_env_path(self) -> Path:
         return self.data_dir / f"log_{self._current_interval}.csv"

@@ -117,6 +117,17 @@ class LivePollingCommandsTests(unittest.TestCase):
         )
         self.assertTrue(all(item["id"].startswith("v9.") for item in raw_commands))
 
+        arbitrary_v9_read = normalize_polling_commands([
+            {
+                "id": "v9.custom.fc3.1.1",
+                "mode": "modbus_read",
+                "functionCode": 3,
+                "address": 1,
+                "count": 1,
+            }
+        ])
+        self.assertEqual(arbitrary_v9_read, build_default_polling_commands())
+
     def test_device_defaults_to_v9_profile(self) -> None:
         device = _normalize_device_payload(
             {"name": "A", "address": "COM1", "slaveId": 1}

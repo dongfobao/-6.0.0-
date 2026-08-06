@@ -87,7 +87,31 @@ def build_default_polling_commands(catalog: list[dict[str, Any]] | None = None) 
 def normalize_polling_commands(commands: Any, catalog: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """校验用户保存的轮询计划；非法或非 V9 计划直接替换为默认计划。"""
     defaults = build_default_polling_commands(catalog)
-    if not isinstance(commands, list) or not commands:
+    if not isinstance(commands, list) or len(commands) != len(defaults):
+        return defaults
+
+    # 轮询块是 V9 协议的一部分：只接受点表明确声明的完整固定集合，
+    # 不允许借设备配置插入对保留地址或未定义区域的任意读请求。
+    expected_blocks = {
+        (int(item["functionCode"]), int(item["address"]), int(item["count"]))
+        for item in defaults
+    }
+    provided_blocks: set[tuple[int, int, int]] = set()
+    for command in commands:
+        if not isinstance(command, dict):
+            return defaults
+        try:
+            block = (
+                int(command.get("functionCode")),
+                int(command.get("address")),
+                int(command.get("count")),
+            )
+        except (TypeError, ValueError):
+            return defaults
+        if block not in expected_blocks or block in provided_blocks:
+            return defaults
+        provided_blocks.add(block)
+    if provided_blocks != expected_blocks:
         return defaults
 
     normalized: list[dict[str, Any]] = []

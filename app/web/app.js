@@ -460,7 +460,7 @@ async function mutateScheduleTasks(action){
   }catch(error){showNotice(error.message,"error");}
 }
 function scheduleValue(key,fallback=""){return state.parameters.find(item=>item.id===`holding.schedule.${key}`)?.currentValue??fallback;}
-function scheduleMonthDays(month){return new Date(2000,Number(month)||1,0).getDate();}
+function scheduleMonthDays(month){return new Date(2001,Number(month)||1,0).getDate();}
 function renderScheduleEditor(){
   const editor=$("scheduleEditor");
   if(state.configModule!=="schedule"){editor.classList.add("hidden");editor.innerHTML="";return;}

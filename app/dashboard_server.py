@@ -143,11 +143,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/session/meta":
             return self._json(service.get_session_meta(device_id))
         if path == "/api/sessions/list":
-            active_ids = set(str(item) for item in (service.get_status().get("device_ids") or []))
-            return self._json(list_sessions(SESSIONS_DIR, device_id=device_id, active_device_ids=active_ids))
+            statuses = service.get_device_status()
+            active_names = {
+                Path(str(status.get("session_dir"))).name
+                for status in statuses.values()
+                if status.get("running") and status.get("session_dir")
+            }
+            return self._json(list_sessions(SESSIONS_DIR, device_id=device_id, active_session_names=active_names))
         if path == "/api/sessions/detail":
-            active_ids = set(str(item) for item in (service.get_status().get("device_ids") or []))
-            return self._json(get_session_detail(SESSIONS_DIR, self._query(query, "name") or "", active_device_ids=active_ids))
+            statuses = service.get_device_status()
+            active_names = {
+                Path(str(status.get("session_dir"))).name
+                for status in statuses.values()
+                if status.get("running") and status.get("session_dir")
+            }
+            return self._json(get_session_detail(SESSIONS_DIR, self._query(query, "name") or "", active_session_names=active_names))
         self.send_error(HTTPStatus.NOT_FOUND, "API not found")
 
     def _handle_mutation(self, method: str) -> None:
