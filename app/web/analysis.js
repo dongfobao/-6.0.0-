@@ -2,7 +2,7 @@
 (() => {
   // ============================ 数据格式（与 live_session_recorder 落盘格式一致） ============================
   const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\],\/\*\s*([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),?\s*\*\//;
-  const RUN_ROW_RE = /^([IWE])\/YLDQ\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(.*)$/;
+  const RUN_ROW_RE = /^([AIDEWV])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
   const MAX_RUN_ROWS = 2000;
 
   const METRICS = [
@@ -19,9 +19,22 @@
   const EVENT_TYPES = {
     valve: { name: "阀门", color: "#38bdf8" },
     heat: { name: "加热", color: "#fb923c" },
+    humidity: { name: "湿度会话", color: "#818cf8" },
     breath: { name: "呼吸", color: "#2dd4bf" },
+    sensor: { name: "传感器", color: "#60a5fa" },
     alarm: { name: "告警/错误", color: "#f87171" },
+    communication: { name: "通信异常", color: "#facc15" },
+    config: { name: "配置", color: "#a78bfa" },
+    storage: { name: "存储/日志", color: "#34d399" },
+    safety: { name: "安全/看门狗", color: "#fb7185" },
     system: { name: "系统", color: "#a78bfa" },
+  };
+
+  const LOG_LEVELS = {
+    A: { name: "断言", color: "#dc2626" }, E: { name: "错误", color: "#f87171" },
+    W: { name: "警告", color: "#facc15" }, I: { name: "信息", color: "#38bdf8" },
+    D: { name: "调试", color: "#94a3b8" }, V: { name: "详细", color: "#64748b" },
+    U: { name: "未分级", color: "#94a3b8" },
   };
 
   const VALVE_NAMES = { 1: "上阀", 2: "左阀", 3: "右阀" };
@@ -31,12 +44,13 @@
   const BREATH_STATES = { 0: "呼气开始", 1: "吸气开始", 2: "呼吸停止", 3: "低流速告警", 4: "高流速告警" };
 
   const $ = (id) => document.getElementById(id);
-  const source = { envRows: [], breathRows: [], runRows: [], config: null, meta: null };
+  const source = { envRows: [], breathRows: [], runRows: [], firmwareRows: [], heatRows: [], trafficRows: [], config: null, meta: null, checkpoint: null };
   const ui = {
     imported: false,
     activeMetrics: new Set(["pressure", "flow", "sensor_1.temperature", "sensor_1.humidity"]),
     events: [],
-    typeFilter: new Set(["valve", "heat", "alarm"]),
+    typeFilter: new Set(Object.keys(EVENT_TYPES)),
+    levelFilter: new Set(Object.keys(LOG_LEVELS)),
     showEvents: true,
     logOpen: false,
     view: { start: 0, end: 0 },
@@ -71,9 +85,13 @@
     const path = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
     const name = file.name;
     if (/session_meta\.json$/i.test(name)) return "meta";
+    if (/checkpoint\.json$/i.test(name)) return "checkpoint";
     if (/config\.json$/i.test(name)) return "config";
+    if (/^heat_.*\.csv$/i.test(name) || /(^|\/)heat_events\//i.test(path)) return "heat";
+    if (/^traffic_.*\.csv$/i.test(name) || /(^|\/)traffic\//i.test(path)) return "traffic";
     if (/^log_.*\.csv$/i.test(name) || /(^|\/)data_\d+\//i.test(path)) return "env";
     if (/^breath_.*\.csv$/i.test(name) || /(^|\/)breath_data\//i.test(path)) return "breath";
+    if (/^serial_output\.log(?:\.\d+)?$/i.test(name) || /(^|\/)logs?\//i.test(path) || /\.log(?:\.\d+)?$/i.test(name)) return "firmware";
     if (/\.csv$/i.test(name) || /(^|\/)run\//i.test(path)) return "run";
     return "other";
   }
@@ -108,9 +126,45 @@
   function parseRunText(text) {
     const rows = [];
     for (const line of text.split(/\r?\n/)) {
-      const m = RUN_ROW_RE.exec(line.trim());
+      const m = RUN_ROW_RE.exec(line.trim().replace(/\x1b\[[0-9;]*m/g, ""));
       if (!m) continue;
-      rows.push({ ts: parseTs(m[2]), level: m[1], message: m[3] });
+      rows.push({ ts: parseTs(m[3]), level: m[1], tag: m[2], message: m[4] });
+    }
+    return rows;
+  }
+
+  function parseFirmwareText(text) {
+    const rows = [];
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim().replace(/\x1b\[[0-9;]*m/g, "");
+      if (!line || line.startsWith("#") || /^={5,}$/.test(line)) continue;
+      const parsed = parseRunText(line);
+      if (parsed.length) { rows.push(...parsed); continue; }
+      rows.push({ ts: NaN, level: "U", tag: "SERIAL", message: line });
+    }
+    return rows;
+  }
+
+  function parseHeatText(text) {
+    const rows = [];
+    for (const line of text.split(/\r?\n/)) {
+      const parts = line.trim().split(",", 4);
+      if (parts.length < 3) continue;
+      const ts = parseTs(parts[0]);
+      if (!Number.isFinite(ts)) continue;
+      rows.push({ ts, channel: parts[1], event: parts[2], detail: parts[3] || "" });
+    }
+    return rows;
+  }
+
+  function parseTrafficText(text) {
+    const rows = [];
+    for (const line of text.split(/\r?\n/)) {
+      try {
+        const entry = JSON.parse(line);
+        const ts = parseTs(entry.replyAt || entry.sentAt || "");
+        if (Number.isFinite(ts)) rows.push({ ...entry, ts });
+      } catch (_) { /* 跳过损坏的诊断记录 */ }
     }
     return rows;
   }
@@ -119,7 +173,7 @@
     const files = Array.from(fileList || []);
     if (!files.length) return;
     resetData();
-    const counts = { env: 0, breath: 0, run: 0, config: 0, meta: 0, other: 0 };
+    const counts = { env: 0, breath: 0, run: 0, firmware: 0, heat: 0, traffic: 0, config: 0, meta: 0, checkpoint: 0, other: 0 };
     for (const file of files) {
       const kind = classifyFile(file);
       counts[kind] += 1;
@@ -128,8 +182,12 @@
         if (kind === "env") source.envRows.push(...parseEnvText(text));
         else if (kind === "breath") source.breathRows.push(...parseBreathText(text));
         else if (kind === "run") source.runRows.push(...parseRunText(text));
+        else if (kind === "firmware") source.firmwareRows.push(...parseFirmwareText(text));
+        else if (kind === "heat") source.heatRows.push(...parseHeatText(text));
+        else if (kind === "traffic") source.trafficRows.push(...parseTrafficText(text));
         else if (kind === "config") source.config = JSON.parse(text);
         else if (kind === "meta") source.meta = JSON.parse(text);
+        else if (kind === "checkpoint") source.checkpoint = JSON.parse(text);
       } catch (err) {
         console.warn("解析文件失败", file.name, err);
       }
@@ -137,6 +195,9 @@
     source.envRows.sort((a, b) => a.ts - b.ts);
     source.breathRows.sort((a, b) => a.ts - b.ts);
     source.runRows.sort((a, b) => a.ts - b.ts);
+    source.firmwareRows.sort((a, b) => (Number.isFinite(a.ts) ? a.ts : Infinity) - (Number.isFinite(b.ts) ? b.ts : Infinity));
+    source.heatRows.sort((a, b) => a.ts - b.ts);
+    source.trafficRows.sort((a, b) => a.ts - b.ts);
     if (source.runRows.length > MAX_RUN_ROWS) source.runRows = source.runRows.slice(-MAX_RUN_ROWS);
     ui.events = buildEvents();
     const bounds = computeBounds();
@@ -162,8 +223,12 @@
     source.envRows = [];
     source.breathRows = [];
     source.runRows = [];
+    source.firmwareRows = [];
+    source.heatRows = [];
+    source.trafficRows = [];
     source.config = null;
     source.meta = null;
+    source.checkpoint = null;
     ui.events = [];
     ui.imported = false;
     ui.selectedEvent = null;
@@ -179,7 +244,11 @@
       start = Math.min(start, rows[0].ts);
       end = Math.max(end, rows[rows.length - 1].ts);
     };
-    feed(source.envRows); feed(source.breathRows); feed(source.runRows);
+    feed(source.envRows); feed(source.breathRows); feed(source.runRows); feed(source.firmwareRows.filter((row) => Number.isFinite(row.ts))); feed(source.heatRows); feed(source.trafficRows);
+    [source.meta?.started_at, source.meta?.ended_at, source.checkpoint?.updated_at].forEach((text) => {
+      const ts = parseTs(text || "");
+      if (Number.isFinite(ts)) { start = Math.min(start, ts); end = Math.max(end, ts); }
+    });
     if (!Number.isFinite(start)) return { start: NaN, end: NaN };
     if (end - start < 60000) end = start + 60000;
     return { start, end: end + 1000 };
@@ -192,43 +261,74 @@
     if (m) {
       const valve = VALVE_NAMES[m[1]] || `阀门${m[1]}`;
       const action = VALVE_ACTIONS[m[2]] || `命令${m[2]}`;
-      return { type: "valve", title: `${valve} ${action}`, detail: msg };
+      return { type: "valve", title: `${valve} ${action}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
     }
     m = msg.match(/^write\s+holding\.runtime\.(htc1_mode|htc2_mode|antifreeze_mode)\s*=\s*(\d+)/);
     if (m) {
       const name = HEAT_NAMES[m[1]] || m[1];
       const mode = HEAT_MODES[m[2]] || `模式${m[2]}`;
-      return { type: "heat", title: `${name} ${mode}`, detail: msg };
+      return { type: "heat", title: `${name} ${mode}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
     }
     m = msg.match(/^write\s+holding\.runtime\.remote_heat\s*=\s*(\w+)/);
     if (m) {
       const on = /^(true|1)$/i.test(m[1]);
-      return { type: "heat", title: `远程加热${on ? "启用" : "关闭"}`, detail: msg };
+      return { type: "heat", title: `远程加热${on ? "启用" : "关闭"}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
     }
     m = msg.match(/^write\s+holding\.runtime\.reset\s*=\s*(\d+)/);
-    if (m) return { type: "system", title: `阀门故障复位（${m[1]}）`, detail: msg };
+    if (m) return { type: "system", title: `阀门故障复位（${m[1]}）`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
     m = msg.match(/^write\s+(\S+)\s*=\s*(\S+)/);
-    if (m) return { type: "system", title: `参数写入 ${m[1]} = ${m[2]}`, detail: msg };
-    if (row.level === "E" || /failed|error|crc|timeout/i.test(msg)) {
-      return { type: "alarm", title: msg.length > 70 ? `${msg.slice(0, 70)}…` : msg, detail: msg };
+    if (m) {
+      const runtime = m[1].startsWith("holding.runtime.");
+      return { type: runtime ? "system" : "config", title: `${runtime ? "运行控制" : "参数暂存"} ${m[1]} = ${m[2]}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
     }
-    if (row.level === "W") return { type: "alarm", title: msg.length > 70 ? `${msg.slice(0, 70)}…` : msg, detail: msg };
-    return { type: "system", title: msg.length > 70 ? `${msg.slice(0, 70)}…` : msg, detail: msg };
+    const lower = `${row.tag || ""} ${msg}`.toLowerCase();
+    let type = "system";
+    if (/valve|阀门|阀位/.test(lower)) type = "valve";
+    else if (/heat|heating|htc|加热|防冻/.test(lower)) type = "heat";
+    else if (/humid|sht|湿度/.test(lower)) type = "humidity";
+    else if (/breath|呼吸/.test(lower)) type = "breath";
+    else if (/pressure|flow|sensor|i2c|adc|crc|压力|流量|传感器/.test(lower)) type = "sensor";
+    else if (/modbus|uart|rs485|tcp|network|lwip|lte|wapi|iec\d*|通信|网络|远程/.test(lower)) type = "communication";
+    else if (/config|json|参数|配置/.test(lower)) type = "config";
+    else if (/fatfs|sd.?card|storage|file|日志|存储|文件/.test(lower)) type = "storage";
+    else if (/watchdog|wdg|stack|fatal|assert|看门狗|堆栈|致命|复位/.test(lower)) type = "safety";
+    else if (row.level === "A" || row.level === "E" || /failed|error|timeout|失败|错误|超时/.test(lower)) type = "alarm";
+    const title = msg.length > 70 ? `${msg.slice(0, 70)}…` : msg;
+    return { type, title, detail: msg, level: row.level || "U", module: row.tag || "SERIAL" };
   }
 
   function buildEvents() {
     const events = [];
+    const meta = source.meta || {};
+    const deviceName = meta.device?.name || meta.device?.id || "设备";
+    const startedAt = parseTs(meta.started_at || "");
+    if (Number.isFinite(startedAt)) events.push({ id: "session-start", ts: startedAt, type: "system", title: "采集会话开始", detail: `${deviceName} 开始记录`, level: "I", module: "会话", sourceType: "meta" });
+    const endedAt = parseTs(meta.ended_at || "");
+    if (Number.isFinite(endedAt)) events.push({ id: "session-stop", ts: endedAt, type: "system", title: "采集会话结束", detail: `${deviceName} 会话状态：${meta.status || "unknown"}`, level: "I", module: "会话", sourceType: "meta" });
     source.runRows.forEach((row, index) => {
       const info = classifyRunRow(row);
-      events.push({ id: `run-${index}`, ts: row.ts, type: info.type, title: info.title, detail: info.detail, sourceType: "run" });
+      events.push({ id: `run-${index}`, ts: row.ts, type: info.type, title: info.title, detail: info.detail, level: info.level, module: info.module, sourceType: "run" });
+    });
+    source.firmwareRows.forEach((row, index) => {
+      const info = classifyRunRow(row);
+      events.push({ id: `firmware-${index}`, ts: row.ts, type: info.type, title: info.title, detail: info.detail, level: info.level, module: info.module, sourceType: "firmware" });
+    });
+    source.heatRows.forEach((row, index) => {
+      const event = row.event || "事件";
+      const type = /阀门/.test(event) ? "valve" : /湿度会话/.test(event) ? "humidity" : /加热/.test(event) ? "heat" : "system";
+      events.push({ id: `heat-${index}`, ts: row.ts, type, title: `${row.channel} ${event}`, detail: row.detail, level: "I", module: "上位机", sourceType: "heat" });
+    });
+    source.trafficRows.forEach((row, index) => {
+      const detail = [row.requestSummary, row.responseSummary, row.error].filter(Boolean).join(" · ");
+      events.push({ id: `traffic-${index}`, ts: row.ts, type: "communication", title: `通信${row.status === "no_response" ? "无响应" : "异常"}`, detail: detail || `状态 ${row.status || "unknown"}`, level: "W", module: "上位机", sourceType: "traffic" });
     });
     source.breathRows.forEach((row, index) => {
       if (row.rhythm !== 1 && row.state !== 3 && row.state !== 4) return;
       const title = BREATH_STATES[row.state] || `呼吸状态${row.state}`;
       const type = row.state >= 3 ? "alarm" : "breath";
-      events.push({ id: `breath-${index}`, ts: row.ts, type, title, detail: `流量 ${row.flow.toFixed(2)} L/min`, sourceType: "breath" });
+      events.push({ id: `breath-${index}`, ts: row.ts, type, title, detail: `流量 ${row.flow.toFixed(2)} L/min`, level: row.state >= 3 ? "W" : "I", module: "上位机", sourceType: "breath" });
     });
-    events.sort((a, b) => a.ts - b.ts);
+    events.sort((a, b) => (Number.isFinite(a.ts) ? a.ts : Infinity) - (Number.isFinite(b.ts) ? b.ts : Infinity));
     return events;
   }
 
@@ -239,13 +339,14 @@
       summaryEl.textContent = "未识别到有效数据，请确认选择的是会话文件夹或数据 CSV 文件。";
     } else {
       const device = source.meta && source.meta.device && source.meta.device.name ? `设备 ${source.meta.device.name} · ` : "";
-      summaryEl.innerHTML = `已导入：${device}时间范围 <strong>${esc(fmtTime(ui.bounds.start))} ~ ${esc(fmtTime(ui.bounds.end))}</strong> · 环境 ${source.envRows.length} 行 · 呼吸 ${source.breathRows.length} 行 · 日志 ${source.runRows.length} 行 · 关键节点 <strong>${ui.events.length}</strong> 个`;
+      const untimed = source.firmwareRows.filter((row) => !Number.isFinite(row.ts)).length;
+      summaryEl.innerHTML = `已导入：${device}时间范围 <strong>${esc(fmtTime(ui.bounds.start))} ~ ${esc(fmtTime(ui.bounds.end))}</strong> · 下位机日志 ${source.firmwareRows.length} 行 · 上位机运行日志 ${source.runRows.length} 行 · 环境 ${source.envRows.length} 行 · 热事件 ${source.heatRows.length} 条 · 通信异常 ${source.trafficRows.length} 条 · 分类事件 <strong>${ui.events.length}</strong> 个${untimed ? ` · 无设备时间 ${untimed} 行（仅列表统计）` : ""}`;
       $("analysisRangeText").textContent = `${fmtShort(ui.bounds.start)} ~ ${fmtShort(ui.bounds.end)}`;
     }
     const chips = [];
     const push = (label, count, warn) => chips.push(`<span class="analysis-chip${warn ? " warn" : ""}">${label}<strong>${count}</strong></span>`);
-    push("环境文件", counts.env); push("呼吸文件", counts.breath); push("日志文件", counts.run);
-    push("配置/元数据", counts.config + counts.meta);
+    push("环境文件", counts.env); push("呼吸文件", counts.breath); push("下位机日志", counts.firmware); push("上位机运行日志", counts.run); push("热事件", counts.heat); push("通信诊断", counts.traffic);
+    push("配置快照", counts.config); push("会话元数据", counts.meta); push("采集检查点", counts.checkpoint);
     if (counts.other) push("忽略文件", counts.other, true);
     $("analysisRecognition").innerHTML = chips.join("");
   }
@@ -270,7 +371,11 @@
     const select = $("analysisDatePreset");
     if (!ui.imported) { select.innerHTML = '<option value="">全部已导入日期</option>'; return; }
     const days = new Map();
-    [source.envRows, source.breathRows, source.runRows].flat().forEach((row) => {
+    const lifecycleRows = [source.meta?.started_at, source.meta?.ended_at, source.checkpoint?.updated_at]
+      .map((text) => ({ ts: parseTs(text || "") }))
+      .filter((row) => Number.isFinite(row.ts));
+    [source.envRows, source.breathRows, source.runRows, source.firmwareRows, source.heatRows, source.trafficRows, lifecycleRows].flat().forEach((row) => {
+      if (!Number.isFinite(row.ts)) return;
       const key = fmtTime(row.ts).slice(0, 10);
       if (!days.has(key)) days.set(key, row.ts);
     });
@@ -313,25 +418,50 @@
         draw();
       });
     });
+    $("analysisLevelFilters").innerHTML = Object.entries(LOG_LEVELS).map(([key, meta]) => {
+      const checked = ui.levelFilter.has(key) ? "checked" : "";
+      return `<label class="trend-toggle"><input type="checkbox" data-log-level="${key}" ${checked}><i style="width:10px;height:10px;border-radius:3px;background:${meta.color};display:inline-block"></i>${meta.name}</label>`;
+    }).join("");
+    $("analysisLevelFilters").querySelectorAll("input").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) ui.levelFilter.add(input.dataset.logLevel);
+        else ui.levelFilter.delete(input.dataset.logLevel);
+        renderLogPanel(); renderStats(); draw();
+      });
+    });
   }
 
   function filteredEvents() {
-    return ui.events.filter((e) => ui.typeFilter.has(e.type));
+    return ui.events.filter((e) => ui.typeFilter.has(e.type) && ui.levelFilter.has(e.level || "U"));
   }
 
   function renderLogPanel() {
     const events = filteredEvents();
     const counts = {};
+    const levelCounts = {};
+    const moduleCounts = {};
     ui.events.forEach((e) => { counts[e.type] = (counts[e.type] || 0) + 1; });
+    ui.events.forEach((e) => {
+      const level = e.level || "U";
+      levelCounts[level] = (levelCounts[level] || 0) + 1;
+      const module = e.module || "未知";
+      moduleCounts[module] = (moduleCounts[module] || 0) + 1;
+    });
     $("analysisEventSummary").innerHTML = Object.entries(EVENT_TYPES).map(([key, meta]) =>
       `<span class="analysis-event-chip"><i style="background:${meta.color}"></i>${meta.name}<strong>${counts[key] || 0}</strong></span>`
+    ).join("") + Object.entries(LOG_LEVELS).map(([key, meta]) =>
+      `<span class="analysis-event-chip"><i style="background:${meta.color}"></i>${meta.name}<strong>${levelCounts[key] || 0}</strong></span>`
+    ).join("") + Object.entries(moduleCounts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([module, count]) =>
+      `<span class="analysis-event-chip">${esc(module)}<strong>${count}</strong></span>`
     ).join("") + `<span class="analysis-event-chip">合计<strong>${ui.events.length}</strong></span>`;
     const list = events.slice(-400).reverse();
     $("analysisLogList").innerHTML = list.length
       ? list.map((e) => {
         const meta = EVENT_TYPES[e.type] || EVENT_TYPES.system;
         const selected = ui.selectedEvent && ui.selectedEvent.id === e.id ? " selected" : "";
-        return `<div class="event-item analysis-log-item${selected}" data-event-id="${e.id}"><time>${fmtTime(e.ts)}</time><span class="event-tag"><i style="background:${meta.color}"></i>${meta.name}</span><div><span class="event-title">${esc(e.title)}</span><span class="event-detail">${esc(e.detail)}</span></div></div>`;
+        const level = LOG_LEVELS[e.level || "U"] || LOG_LEVELS.U;
+        const time = Number.isFinite(e.ts) ? fmtTime(e.ts) : "无设备时间";
+        return `<div class="event-item analysis-log-item${selected}" data-event-id="${e.id}"><time>${time}</time><span class="event-tag"><i style="background:${meta.color}"></i>${meta.name}</span><div><span class="event-title">[${esc(e.module || "未知")}/${level.name}] ${esc(e.title)}</span><span class="event-detail">${esc(e.detail)}</span></div></div>`;
       }).join("")
       : `<div class="empty-state">没有匹配的事件，请调整上方类型筛选或先导入数据。</div>`;
     $("analysisLogList").querySelectorAll(".analysis-log-item").forEach((item) => {
@@ -343,6 +473,7 @@
     const event = ui.events.find((e) => e.id === eventId);
     if (!event) return;
     ui.selectedEvent = event;
+    if (!Number.isFinite(event.ts)) { renderLogPanel(); return; }
     const span = ui.view.end - ui.view.start;
     const inView = event.ts >= ui.view.start && event.ts <= ui.view.end;
     if (!inView) {
@@ -376,8 +507,9 @@
     });
     const inView = filteredEvents().filter((e) => e.ts >= ui.view.start && e.ts <= ui.view.end);
     const keyCount = inView.filter((e) => e.type === "valve" || e.type === "heat").length;
-    const alarmCount = inView.filter((e) => e.type === "alarm").length;
-    items.push(`<div class="latest-item"><span>当前视图关键节点</span><strong>${inView.length}</strong><small>阀门/加热 ${keyCount} · 告警 ${alarmCount}</small></div>`);
+    const warningCount = inView.filter((e) => e.level === "W").length;
+    const errorCount = inView.filter((e) => e.level === "E" || e.level === "A").length;
+    items.push(`<div class="latest-item"><span>当前视图分类事件</span><strong>${inView.length}</strong><small>阀门/加热 ${keyCount} · 警告 ${warningCount} · 错误/断言 ${errorCount}</small></div>`);
     host.innerHTML = items.join("") || `<div class="empty-state" style="grid-column:1/-1">当前视图范围内没有数据</div>`;
   }
 

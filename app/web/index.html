@@ -81,14 +81,14 @@
       </section>
 
       <section class="page" data-page-view="analysis">
-        <div class="trend-page-heading"><div><span>OFFLINE DATA ANALYSIS</span><h2>数据分析</h2><p>导入实时采集会话文件夹，回放环境曲线，并对日志关键节点（阀门动作、加热启停、告警等）进行标注分析。</p></div><div class="trend-live-badge offline"><i></i><div><strong>离线分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
+        <div class="trend-page-heading"><div><span>SESSION LOG ANALYSIS</span><h2>会话日志与曲线分析</h2><p>同时分析下位机 EasyLogger（SD 卡或串口）与上位机 Modbus V9 采集会话：环境、呼吸、运行日志、热事件、通信异常、配置快照、会话元数据和检查点。</p></div><div class="trend-live-badge offline"><i></i><div><strong>会话分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
         <div class="panel analysis-import-panel">
           <div class="analysis-import-actions">
             <button id="analysisImportFolderBtn" class="button primary">导入会话文件夹</button>
             <button id="analysisImportFilesBtn" class="button secondary">导入数据文件</button>
             <button id="analysisClearBtn" class="button secondary">清空</button>
           </div>
-          <p class="analysis-import-hint">推荐直接选择“实时采集会话”下的整个会话文件夹；也可以单独选择 data_0/log_*.csv（环境量）、breath_data/breath_*.csv（呼吸记录）、run/*.csv（运行日志）、config.json / session_meta.json，文件可以不全。</p>
+          <p class="analysis-import-hint">可直接选择下位机 SD 卡导出的 logs/ 文件夹或 serial_output.log（含轮转文件）：按 EasyLogger 的级别、标签、设备时间解析，分类统计并显示。也可同时导入实时采集会话中的 data_0、breath_data、run、heat_events、traffic、config.json、session_meta.json 和 checkpoint.json；有设备时间的记录可通过筛选器标在曲线上，无设备时间的原始串口行仅参与列表与统计。</p>
           <div id="analysisImportSummary" class="analysis-import-summary">尚未导入数据</div>
           <div id="analysisRecognition" class="analysis-recognition"></div>
           <input id="analysisFolderInput" type="file" webkitdirectory directory multiple hidden>
@@ -108,9 +108,10 @@
         </div>
         <div class="panel trend-stat-panel"><div class="panel-title"><div><h3>当前视图统计</h3><p>最新值、最小值、最大值、平均值与关键节点数量</p></div></div><div id="analysisStats" class="latest-grid"></div></div>
         <div id="analysisLogPanel" class="panel analysis-log-panel hidden">
-          <div class="panel-title"><div><h3>日志显示与分析</h3><p>从运行日志与呼吸记录中提取的关键节点，点击任意条目即可在曲线上定位标注。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
+          <div class="panel-title"><div><h3>日志显示与分析</h3><p>下位机 EasyLogger 日志按业务领域、严重级别和模块统计；筛选器控制带设备时间的曲线事件点，点击条目即可定位。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
           <div id="analysisEventSummary" class="analysis-event-summary"></div>
           <div id="analysisEventFilters" class="trend-toggles"></div>
+          <div id="analysisLevelFilters" class="trend-toggles"></div>
           <div id="analysisLogList" class="event-list analysis-log-list"></div>
         </div>
       </section>
