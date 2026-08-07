@@ -110,7 +110,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValve: null, visualDrainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -348,14 +348,28 @@ function loadCadAssembly() {
     }
     // 旧总装只提供精确的零件坐标和动态锚点；实际显示改为用户提供的新版完整模型。
     gltf.scene.traverse(object => { if (object.isMesh) object.visible = false; });
-    new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=1", replacement => {
+    new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=2", replacement => {
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
-        object.material = cadMaterials.replacement;
-        object.renderOrder = 6;
+        const role = object.userData?.digital_twin_role || "structure";
+        const sourceFile = object.userData?.source_file || "";
+        object.material = role === "outer_shell" ? cadMaterials.glass
+          : role === "desiccant" ? cadMaterials.desiccant
+            : role === "valve_or_sensor" ? cadMaterials.valve
+              : role === "heater_frame" ? cadMaterials.heater
+                : role === "support" ? cadMaterials.support
+                  : cadMaterials.structure;
+        object.renderOrder = role === "outer_shell" ? 5 : role === "desiccant" ? 4 : 7;
+        if (/传感器动.*双向电磁阀/.test(sourceFile)) REAL.visualUpperValve ||= object;
+        if (/新下传感器.*双向电磁阀/.test(sourceFile)) REAL.visualDrainValve ||= object;
       });
       cadModel.add(replacement.scene);
       cadModel.updateMatrixWorld(true);
+      [REAL.visualUpperValve, REAL.visualDrainValve].forEach(object => {
+        if (!object) return;
+        object.userData.baseX = object.position.x;
+        object.userData.baseZ = object.position.z;
+      });
     }, undefined, error => console.warn("新版真实总装模型加载失败。", error));
     host.classList.add("digital-twin-cad-ready");
   }, undefined, error => {
@@ -450,12 +464,16 @@ function animateRealProcess(now, snapshot) {
   const move = value => value === 1 ? .095 : -.095;
   const upperFocus = upper.moving || upper.fault;
   const drainFocus = drain.moving || drain.fault || drain.position === 1;
-  REAL.upperValve.position.x += (REAL.upperValve.userData.baseX + move(upper.position) - REAL.upperValve.position.x) * .14;
-  REAL.drainValve.position.x += (REAL.drainValve.userData.baseX + move(drain.position) - REAL.drainValve.position.x) * .14;
-  REAL.upperValve.position.z += (REAL.upperValve.userData.baseZ + (upperFocus ? .24 : 0) - REAL.upperValve.position.z) * .12;
-  REAL.drainValve.position.z += (REAL.drainValve.userData.baseZ + (drainFocus ? .24 : 0) - REAL.drainValve.position.z) * .12;
-  REAL.upperValve.material = upper.fault ? materials.fault : (upper.moving ? cadMaterials.activeValve : cadMaterials.valve);
-  REAL.drainValve.material = drain.fault ? materials.fault : (drain.moving ? cadMaterials.activeValve : cadMaterials.valve);
+  [REAL.upperValve, REAL.visualUpperValve].filter(Boolean).forEach(mesh => {
+    mesh.position.x += (mesh.userData.baseX + move(upper.position) - mesh.position.x) * .14;
+    mesh.position.z += (mesh.userData.baseZ + (upperFocus ? .24 : 0) - mesh.position.z) * .12;
+    mesh.material = upper.fault ? materials.fault : (upper.moving ? cadMaterials.activeValve : cadMaterials.valve);
+  });
+  [REAL.drainValve, REAL.visualDrainValve].filter(Boolean).forEach(mesh => {
+    mesh.position.x += (mesh.userData.baseX + move(drain.position) - mesh.position.x) * .14;
+    mesh.position.z += (mesh.userData.baseZ + (drainFocus ? .24 : 0) - mesh.position.z) * .12;
+    mesh.material = drain.fault ? materials.fault : (drain.moving ? cadMaterials.activeValve : cadMaterials.valve);
+  });
   REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.1 : 0;
