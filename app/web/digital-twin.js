@@ -7,7 +7,9 @@ const upperCallout = document.getElementById("twinUpperCallout");
 const heatCallout = document.getElementById("twinHeatCallout");
 const drainCallout = document.getElementById("twinDrainCallout");
 const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue"), breath: document.getElementById("twinBreathValue") };
-const twinLabelAnchors = { t1: new THREE.Vector3(-.82, .65, .10), t2: new THREE.Vector3(.82, .42, .10), t3: new THREE.Vector3(.72, 1.45, .10), pressure: new THREE.Vector3(-.82, -.16, .10), flow: new THREE.Vector3(.82, -.42, .10), breath: new THREE.Vector3(-.72, -1.15, .10) };
+const twinDataInfoNodes = { t1: document.getElementById("twinT1Info"), t2: document.getElementById("twinT2Info"), t3: document.getElementById("twinT3Info"), pressure: document.getElementById("twinPressureInfo"), flow: document.getElementById("twinFlowInfo"), breath: document.getElementById("twinBreathInfo") };
+// 左右传感器标签固定在同一高度；上温湿度、压力与流量均对应传感器仓上方。
+const twinLabelAnchors = { t1: new THREE.Vector3(-.88, .65, .10), t2: new THREE.Vector3(.88, .65, .10), t3: new THREE.Vector3(-1.78, 1.68, .10), pressure: new THREE.Vector3(0, 2.18, .10), flow: new THREE.Vector3(1.78, 1.68, .10), breath: new THREE.Vector3(-.72, -1.15, .10) };
 // 单管设备的左侧温湿度为 T1/传感器 1，对应监控快照的第一路环境通道。
 const LEFT_HUMIDITY_CHANNEL_INDEX = 0;
 
@@ -354,10 +356,13 @@ function update(snapshot) {
   const online = value(snapshot?.communication?.online) === 1;
   const alarm = Boolean(snapshot?.alarms?.active);
   const compact = (point, suffix="") => { const n = value(point); return n === null ? "--" : `${n.toFixed(1)}${suffix}`; };
-  (snapshot?.environmentChannels || []).slice(0, 3).forEach((channel, index) => { const node = twinDataNodes[`t${index + 1}`]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, "%RH")}`; });
+  (snapshot?.environmentChannels || []).slice(0, 3).forEach((channel, index) => { const key = `t${index + 1}`; const node = twinDataNodes[key]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, "%RH")}`; const info = twinDataInfoNodes[key]; if (info) info.textContent = `${channel.channel || index + 1}号传感器 · ${value(channel.readOk) === 1 ? "通信正常" : "无有效数据"} · ${channel.status?.displayValue || "状态--"}`; });
   if (twinDataNodes.pressure) twinDataNodes.pressure.textContent = compact(snapshot?.process?.pressure, " kPa");
+  if (twinDataInfoNodes.pressure) twinDataInfoNodes.pressure.textContent = `压力状态：${snapshot?.process?.pressureStatus?.displayValue || "--"}`;
   if (twinDataNodes.flow) twinDataNodes.flow.textContent = compact(snapshot?.process?.flow, " L/min");
+  if (twinDataInfoNodes.flow) twinDataInfoNodes.flow.textContent = `呼吸状态：${snapshot?.process?.breathState?.displayValue || "--"}`;
   if (twinDataNodes.breath) twinDataNodes.breath.textContent = snapshot?.process?.breathState?.displayValue || "--";
+  if (twinDataInfoNodes.breath) twinDataInfoNodes.breath.textContent = `气流：${compact(snapshot?.process?.flow, " L/min")} · ${online ? "实时采集" : "等待数据"}`;
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
@@ -369,7 +374,7 @@ function update(snapshot) {
 
 function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.0; }
 function resize(){ const width=host.clientWidth,height=host.clientHeight; if(!width||!height)return; renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix(); }
-function positionTwinDataLabels(){ const width=host.clientWidth,height=host.clientHeight;if(!width||!height)return;Object.entries(twinLabelAnchors).forEach(([key,anchor])=>{const node=document.querySelector(`.twin-data-label.${key}`);if(!node)return;const point=rig.localToWorld(anchor.clone()).project(camera);node.style.left=`${Math.max(7,Math.min(93,(point.x*.5+.5)*100))}%`;node.style.top=`${Math.max(9,Math.min(90,(-point.y*.5+.5)*100))}%`;}); }
+function positionTwinDataLabels(){ const width=host.clientWidth,height=host.clientHeight;if(!width||!height)return;let leftSensorTop=null;Object.entries(twinLabelAnchors).forEach(([key,anchor])=>{const node=document.querySelector(`.twin-data-label.${key}`);if(!node)return;const point=rig.localToWorld(anchor.clone()).project(camera);node.style.left=`${Math.max(7,Math.min(93,(point.x*.5+.5)*100))}%`;const top=Math.max(9,Math.min(90,(-point.y*.5+.5)*100));if(key==="t1")leftSensorTop=top;node.style.top=`${key==="t2"&&leftSensorTop!==null?leftSensorTop:top}%`;}); }
 function animateRealProcess(now, snapshot) {
   if (!cadModel.visible || !REAL.upperValve || !REAL.drainValve) return;
   const upper = valveState(snapshot?.valves?.[0]);

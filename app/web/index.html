@@ -56,7 +56,7 @@
               <div class="digital-twin-callouts" aria-hidden="true"><span id="twinUpperCallout" class="upper">上阀工作位 · 气流路径</span><span id="twinHeatCallout" class="heat">HTC1 加热旁路 · 上阀直达油杯</span><span id="twinDrainCallout" class="drain">左排水阀 · 冷凝水</span></div>
               <div class="digital-twin-hint">拖动旋转 · 滚轮缩放 · 双击复位</div>
             </div>
-            <div class="digital-twin-data-labels" aria-label="模型实时数据"><div class="twin-data-label t1"><small>T1 温湿度</small><strong id="twinT1Value">--</strong></div><div class="twin-data-label t2"><small>T2 温湿度</small><strong id="twinT2Value">--</strong></div><div class="twin-data-label t3"><small>T3 温湿度</small><strong id="twinT3Value">--</strong></div><div class="twin-data-label pressure"><small>压力</small><strong id="twinPressureValue">--</strong></div><div class="twin-data-label flow"><small>流量</small><strong id="twinFlowValue">--</strong></div><div class="twin-data-label breath"><small>呼吸过程</small><strong id="twinBreathValue">--</strong></div></div><button id="resetDigitalTwinBtn" class="button small secondary twin-reset" type="button">复位视角</button><dl id="digitalTwinStatus" hidden></dl>
+            <div class="digital-twin-data-labels" aria-label="模型实时数据"><div class="twin-data-label t1"><small>左温湿度</small><strong id="twinT1Value">--</strong><span id="twinT1Info">1号传感器 · 等待数据</span></div><div class="twin-data-label t2"><small>右温湿度</small><strong id="twinT2Value">--</strong><span id="twinT2Info">2号传感器 · 等待数据</span></div><div class="twin-data-label t3"><small>上温湿度</small><strong id="twinT3Value">--</strong><span id="twinT3Info">3号传感器 · 等待数据</span></div><div class="twin-data-label pressure"><small>压力</small><strong id="twinPressureValue">--</strong><span id="twinPressureInfo">压力状态：--</span></div><div class="twin-data-label flow"><small>流量</small><strong id="twinFlowValue">--</strong><span id="twinFlowInfo">呼吸状态：--</span></div><div class="twin-data-label breath"><small>实时过程</small><strong id="twinBreathValue">--</strong><span id="twinBreathInfo">气路状态：--</span></div></div><button id="resetDigitalTwinBtn" class="button small secondary twin-reset" type="button">复位视角</button><dl id="digitalTwinStatus" hidden></dl>
           </div>
         </section>
         <section class="overview-section environment-section twin-source-data">
@@ -211,7 +211,7 @@
   </dialog>
   <script src="/vendor/three.legacy.js"></script>
   <script src="/vendor/GLTFLoader.legacy.js"></script>
-  <script src="/digital-twin.js?v=41"></script>
+  <script src="/digital-twin.js?v=43"></script>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>
