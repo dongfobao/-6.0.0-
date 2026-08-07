@@ -42,6 +42,7 @@ const cadMaterials = {
   valve: new THREE.MeshStandardMaterial({ color: 0x102b42, metalness: .90, roughness: .18 }),
   heater: new THREE.MeshStandardMaterial({ color: 0x743416, metalness: .72, roughness: .30 }),
   support: new THREE.MeshStandardMaterial({ color: 0x6d7781, metalness: .42, roughness: .46 }),
+  replacement: new THREE.MeshPhysicalMaterial({ color: 0x6b9fc1, metalness: .62, roughness: .26, transparent: true, opacity: .48, side: THREE.DoubleSide, depthWrite: false }),
   desiccant: new THREE.MeshStandardMaterial({ color: 0x3f9b78, transparent: true, opacity: .16, metalness: .05, roughness: .64, depthWrite: false }),
   glass: new THREE.MeshPhysicalMaterial({ color: 0x4cc5cf, transparent: true, opacity: .14, metalness: .04, roughness: .08, side: THREE.DoubleSide, depthWrite: false }),
   activeValve: new THREE.MeshStandardMaterial({ color: 0x0d5b86, emissive: 0x0d2c42, emissiveIntensity: .9, metalness: .58, roughness: .28 }),
@@ -176,10 +177,8 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     new THREE.Vector3(bypassPipeX, oil.y + .20, bypassPipeZ),
     oil.clone().add(new THREE.Vector3(.14, 0, .18)),
   ]);
-  const heatBypassHousing = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .052, 12, false), new THREE.MeshStandardMaterial({ color: 0x738394, metalness: .84, roughness: .24, transparent: true, opacity: .48, depthTest: false, depthWrite: false }));
-  const heatBypassTube = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .028, 8, false), new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: .08, depthTest: false, depthWrite: false }));
-  realEffects.add(heatBypassHousing, heatBypassTube);
-  REAL.heatBypassTube = heatBypassTube;
+  // 新版总装已包含真实旁路通气管，只保留管内流动粒子，不再额外绘制管体。
+  REAL.heatBypassTube = null;
   // 中间无硅胶气道使用圆点平流，不使用锥形箭头。
   REAL.airParticles = Array.from({ length: 20 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .94, depthTest: false, depthWrite: false }));
@@ -336,6 +335,17 @@ function loadCadAssembly() {
       const upperGlassNode = REAL.shellMeshes.find(object => /component_52_/.test(`${object.name} ${object.parent?.name || ""}`)) || [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
       buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode);
     }
+    // 旧总装只提供精确的零件坐标和动态锚点；实际显示改为用户提供的新版完整模型。
+    gltf.scene.traverse(object => { if (object.isMesh) object.visible = false; });
+    new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=1", replacement => {
+      replacement.scene.traverse(object => {
+        if (!object.isMesh) return;
+        object.material = cadMaterials.replacement;
+        object.renderOrder = 6;
+      });
+      cadModel.add(replacement.scene);
+      cadModel.updateMatrixWorld(true);
+    }, undefined, error => console.warn("新版真实总装模型加载失败。", error));
     host.classList.add("digital-twin-cad-ready");
   }, undefined, error => {
     console.warn("真实总装模型加载失败，将使用简化数字孪生外观。", error);
