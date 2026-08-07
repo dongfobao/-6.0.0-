@@ -99,7 +99,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], airTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -122,19 +122,32 @@ function addRealHalo(object, color) {
   return helper;
 }
 
-function buildRealProcessEffects(oilCupNode, heaterNode, upperValveNode, drainValveNode) {
-  const oil = centerOf(oilCupNode || drainValveNode);
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode) {
+  const oilCover = centerOf(oilCoverNode || oilCupNode || drainValveNode);
+  const oil = centerOf(oilCupNode || oilCoverNode || drainValveNode);
   const heaterCenter = centerOf(heaterNode || upperValveNode);
   const upper = centerOf(upperValveNode);
+  const sensor = centerOf(sensorNode || upperValveNode);
+  const outlet = centerOf(outletNode || sensorNode || upperValveNode);
   const drain = centerOf(drainValveNode);
   const frontOffset = new THREE.Vector3(0, 0, .16);
-  const airPath = new THREE.CatmullRomCurve3([oil.clone().add(frontOffset), heaterCenter.clone().add(frontOffset), upper.clone().add(frontOffset)]);
+  const airPath = new THREE.CatmullRomCurve3([
+    oilCover.clone().add(frontOffset),
+    oil.clone().add(frontOffset),
+    heaterCenter.clone().add(frontOffset),
+    upper.clone().add(frontOffset),
+    sensor.clone().add(frontOffset),
+    outlet.clone().add(frontOffset),
+  ]);
   const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
-  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 72, .024, 8, false), new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: .48 }));
-  const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .018, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .42 }));
+  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 72, .030, 8, false), new THREE.MeshBasicMaterial({ color: 0xff5f78, transparent: true, opacity: .58, depthTest: false, depthWrite: false }));
+  const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
   realEffects.add(airTubeReal, waterTubeReal);
+  REAL.airTube = airTubeReal;
   REAL.airParticles = Array.from({ length: 26 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.042, 8, 8), materials.air.clone());
+    const dot = new THREE.Mesh(new THREE.ConeGeometry(.046, .14, 8), materials.air.clone());
+    dot.material.depthTest = false;
+    dot.material.depthWrite = false;
     realEffects.add(dot);
     return { dot, path: airPath, offset: index / 26 };
   });
@@ -166,8 +179,11 @@ function loadCadAssembly() {
     return;
   }
   new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe.glb?v=4", gltf => {
+    let oilCoverNode = null;
     let oilCupNode = null;
     let heaterNode = null;
+    let sensorNode = null;
+    let outletNode = null;
     gltf.scene.traverse(object => {
       if (!object.isMesh) return;
       // glTF 的业务属性和零件名在节点上，实际网格是其子对象。
@@ -190,7 +206,10 @@ function loadCadAssembly() {
         REAL.heatMeshes.push(object);
         heaterNode ||= object;
       }
-      if (/component_(52|45)_/.test(nodeName)) oilCupNode ||= object;
+      if (/component_45_/.test(nodeName) && !oilCoverNode) oilCoverNode = object;
+      if (/component_52_/.test(nodeName) && !oilCupNode) oilCupNode = object;
+      if (/component_(23|24|25)_/.test(nodeName) && !sensorNode) sensorNode = object;
+      if (/component_(01|02|18|19)_/.test(nodeName) && !outletNode) outletNode = object;
     });
     cadModel.add(gltf.scene);
     cadModel.visible = true;
@@ -201,7 +220,7 @@ function loadCadAssembly() {
       REAL.upperValve.userData.baseZ = REAL.upperValve.position.z;
       REAL.drainValve.userData.baseX = REAL.drainValve.position.x;
       REAL.drainValve.userData.baseZ = REAL.drainValve.position.z;
-      buildRealProcessEffects(oilCupNode, heaterNode, REAL.upperValve, REAL.drainValve);
+      buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve);
     }
     host.classList.add("digital-twin-cad-ready");
   }, undefined, error => {
@@ -256,7 +275,8 @@ function animateRealProcess(now, snapshot) {
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.1 : 0;
   const activeBreath = breath === 0 || breath === 1;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; dot.visible = activeBreath; dot.position.copy(path.getPointAt(breath === 0 ? p : 1 - p)); });
+  if (REAL.airTube) REAL.airTube.material.opacity = activeBreath ? .78 : .24;
+  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((phase * .46 + offset) % 1)); });
   REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .38 + offset) % 1; puff.visible = heat === 1; puff.position.set(origin.x + .16 * Math.sin((p + offset) * 18), origin.y + p * .92, origin.z + .13 * Math.cos((p + offset) * 13)); puff.scale.setScalar(.70 + p * 1.25); puff.material.opacity = (1 - p) * .52; });
