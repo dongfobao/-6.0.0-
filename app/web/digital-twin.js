@@ -153,13 +153,15 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const insulationCenter = insulationNode ? centerOf(insulationNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, -upperGlassSize.y * .35, 0));
   const upperSilicaCenter = upperSilicaNode ? centerOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
   const upperSilicaBox = upperSilicaNode ? new THREE.Box3().setFromObject(upperSilicaNode) : null;
+  const sensorBox = sensorNode ? new THREE.Box3().setFromObject(sensorNode) : null;
   const upperCoreX = upperSilicaCenter.x;
   const upperCoreZ = upperSilicaCenter.z;
   // 上阀出口是上部干燥剂腔的唯一气源；不再从隔热板位置凭空起流。
   const upperChamber = upper.clone().add(new THREE.Vector3(0, .08, .14));
   const upperGlassTop = upperGlassBox ? upperGlassBox.max.y - .12 : upperSilicaCenter.y;
-  // 汇聚点严格限制在上部硅胶顶板下沿，避免流场覆盖其上的传感器仓。
-  const upperSilicaY = upperSilicaBox ? Math.min(upperGlassTop, upperSilicaBox.max.y + .035) : Math.min(upperGlassTop, sensor.y - .16);
+  // 上部流场上升至传感器仓下方基座，在该基座下沿收敛，不进入传感器仓内部。
+  const sensorBaseY = sensorBox ? sensorBox.min.y - .045 : sensor.y - .16;
+  const upperSilicaY = Math.min(upperGlassTop, Math.max(upperSilicaBox ? upperSilicaBox.max.y + .035 : upperChamber.y, sensorBaseY));
   const upperWallRadius = Math.max(.13, Math.min(upperGlassSize.x, upperGlassSize.z) * .42);
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
