@@ -92,12 +92,14 @@ const steamParticles = Array.from({ length: 18 }, (_, index) => {
   return { puff, offset: index / 18 };
 });
 const cadModel = new THREE.Group();
-cadModel.position.y = -2.394;
+// Blender 导出的 Z 轴与界面 Y 轴相反；翻正后顶部阀门位于设备上方。
+cadModel.position.y = 2.394;
+cadModel.rotation.x = Math.PI;
 cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, heatMeshes: [], airParticles: [], waterParticles: [], steamParticles: [], upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -114,6 +116,8 @@ function addRealHalo(object, color) {
   const size = box.getSize(new THREE.Vector3()).multiplyScalar(1.12);
   const helper = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x, size.y, size.z)), new THREE.LineBasicMaterial({ color, transparent: true, opacity: .72 }));
   helper.position.copy(box.getCenter(new THREE.Vector3()));
+  helper.userData.basePosition = helper.position.clone();
+  helper.userData.source = object;
   realEffects.add(helper);
   return helper;
 }
@@ -126,11 +130,11 @@ function buildRealProcessEffects(oilCupNode, heaterNode, upperValveNode, drainVa
   const frontOffset = new THREE.Vector3(0, 0, .16);
   const airPath = new THREE.CatmullRomCurve3([oil.clone().add(frontOffset), heaterCenter.clone().add(frontOffset), upper.clone().add(frontOffset)]);
   const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
-  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 72, .016, 8, false), new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: .32 }));
-  const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .013, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .28 }));
+  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 72, .024, 8, false), new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: .48 }));
+  const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .018, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .42 }));
   realEffects.add(airTubeReal, waterTubeReal);
   REAL.airParticles = Array.from({ length: 26 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.027, 8, 8), materials.air.clone());
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.042, 8, 8), materials.air.clone());
     realEffects.add(dot);
     return { dot, path: airPath, offset: index / 26 };
   });
@@ -140,9 +144,16 @@ function buildRealProcessEffects(oilCupNode, heaterNode, upperValveNode, drainVa
     return { dot, path: waterPath, offset: index / 16 };
   });
   REAL.steamParticles = Array.from({ length: 20 }, (_, index) => {
-    const puff = new THREE.Mesh(new THREE.SphereGeometry(.045 + (index % 3) * .016, 9, 8), new THREE.MeshBasicMaterial({ color: 0xe0fbff, transparent: true, opacity: .25, depthWrite: false }));
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(.065 + (index % 3) * .022, 9, 8), new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: .52, depthWrite: false }));
     realEffects.add(puff);
     return { puff, origin: heaterCenter.clone(), offset: index / 20 };
+  });
+  REAL.heatWaves = Array.from({ length: 6 }, (_, index) => {
+    const wave = new THREE.Mesh(new THREE.TorusGeometry(.18 + index * .07, .020, 8, 32), new THREE.MeshBasicMaterial({ color: 0xfb923c, transparent: true, opacity: .62, depthWrite: false }));
+    wave.rotation.x = Math.PI / 2;
+    wave.position.copy(heaterCenter);
+    realEffects.add(wave);
+    return { wave, origin: heaterCenter.clone(), offset: index / 6 };
   });
   REAL.upperHalo = addRealHalo(upperValveNode, 0xfb7185);
   REAL.drainHalo = addRealHalo(drainValveNode, 0x4ade80);
@@ -165,6 +176,7 @@ function loadCadAssembly() {
       if (isGlassShell) {
         object.material = cadMaterials.glass;
         object.renderOrder = 5;
+        REAL.shellMeshes.push(object);
         return;
       }
       object.material = /valve_or_sensor/.test(nodeName) ? cadMaterials.valve
@@ -186,7 +198,9 @@ function loadCadAssembly() {
     hideProceduralDevice();
     if (REAL.upperValve && REAL.drainValve) {
       REAL.upperValve.userData.baseX = REAL.upperValve.position.x;
+      REAL.upperValve.userData.baseZ = REAL.upperValve.position.z;
       REAL.drainValve.userData.baseX = REAL.drainValve.position.x;
+      REAL.drainValve.userData.baseZ = REAL.drainValve.position.z;
       buildRealProcessEffects(oilCupNode, heaterNode, REAL.upperValve, REAL.drainValve);
     }
     host.classList.add("digital-twin-cad-ready");
@@ -230,8 +244,12 @@ function animateRealProcess(now, snapshot) {
   const flow = Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 12);
   const phase = now * .001 * (.35 + flow * .16);
   const move = value => value === 1 ? .095 : -.095;
+  const upperFocus = upper.moving || upper.fault;
+  const drainFocus = drain.moving || drain.fault || drain.position === 1;
   REAL.upperValve.position.x += (REAL.upperValve.userData.baseX + move(upper.position) - REAL.upperValve.position.x) * .14;
   REAL.drainValve.position.x += (REAL.drainValve.userData.baseX + move(drain.position) - REAL.drainValve.position.x) * .14;
+  REAL.upperValve.position.z += (REAL.upperValve.userData.baseZ + (upperFocus ? .24 : 0) - REAL.upperValve.position.z) * .12;
+  REAL.drainValve.position.z += (REAL.drainValve.userData.baseZ + (drainFocus ? .24 : 0) - REAL.drainValve.position.z) * .12;
   REAL.upperValve.material = upper.fault ? materials.fault : (upper.moving ? cadMaterials.activeValve : cadMaterials.valve);
   REAL.drainValve.material = drain.fault ? materials.fault : (drain.moving ? cadMaterials.activeValve : cadMaterials.valve);
   REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
@@ -241,7 +259,9 @@ function animateRealProcess(now, snapshot) {
   REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; dot.visible = activeBreath; dot.position.copy(path.getPointAt(breath === 0 ? p : 1 - p)); });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((phase * .46 + offset) % 1)); });
-  REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .38 + offset) % 1; puff.visible = heat === 1; puff.position.set(origin.x + .12 * Math.sin((p + offset) * 18), origin.y + p * .72, origin.z + .10 * Math.cos((p + offset) * 13)); puff.scale.setScalar(.65 + p); puff.material.opacity = (1 - p) * .25; });
+  REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .38 + offset) % 1; puff.visible = heat === 1; puff.position.set(origin.x + .16 * Math.sin((p + offset) * 18), origin.y + p * .92, origin.z + .13 * Math.cos((p + offset) * 13)); puff.scale.setScalar(.70 + p * 1.25); puff.material.opacity = (1 - p) * .52; });
+  REAL.heatWaves.forEach(({ wave, origin, offset }) => { const p = (phase * .8 + offset) % 1; wave.visible = heat === 1; wave.position.set(origin.x, origin.y + p * .54, origin.z); wave.scale.setScalar(.8 + p * 2.2); wave.material.opacity = (1 - p) * .62; });
+  cadMaterials.glass.opacity = (upperFocus || drainFocus) ? .045 : .14;
   REAL.upperHalo.visible = upper.moving || upper.fault;
   REAL.upperHalo.material.color.setHex(upper.fault ? 0xef4444 : 0xfb7185);
   REAL.drainHalo.visible = drain.moving || drainage || drain.fault;
