@@ -38,3 +38,4 @@ _stderr.txt
 
 # 打包过程遗留的 ESM 构建，页面仅使用兼容的经典构建
 app/web/vendor/three.module.js
+_pkg_ver.py
