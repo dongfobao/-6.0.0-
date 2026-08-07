@@ -166,11 +166,11 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     realEffects.add(dot);
     return { dot, path: airPath, offset: index / 12 };
   });
-  REAL.lowerDiffusionParticles = Array.from({ length: 54 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.030 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: .82, depthTest: false, depthWrite: false }));
+  REAL.lowerDiffusionParticles = Array.from({ length: 72 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.018 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: .82, depthTest: false, depthWrite: false }));
     dot.renderOrder = 19;
     realEffects.add(dot);
-    return { dot, origin: oil.clone(), angle: index * 2.399, offset: index / 54 };
+    return { dot, start: coreEntry.clone(), end: coreExit.clone(), angle: index * 2.399, offset: index / 72, radialOffset: (index * .618) % 1 };
   });
   REAL.upperDiffusionParticles = Array.from({ length: 42 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.028 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .78, depthTest: false, depthWrite: false }));
@@ -345,7 +345,7 @@ function animateRealProcess(now, snapshot) {
   if (REAL.sensorTube && normalFlowPath && !airflowActive) REAL.sensorTube.material.opacity = .38;
   const flowDirection = breath === 0 ? 1 : breath === 1 ? -1 : (value(snapshot?.process?.flow) || 0) >= 0 ? 1 : -1;
   REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.82 + Math.min(flow, 8) * .055); });
-  REAL.lowerDiffusionParticles.forEach(({ dot, origin, angle, offset }) => { const p = (phase * .30 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spread = routeP < .56 ? routeP / .56 : 1 - (routeP - .56) / .44; const radius = .12 + spread * .54; dot.visible = normalFlowPath && airflowActive; dot.position.set(origin.x + Math.sin(angle) * radius, origin.y + .12 + routeP * 1.18, origin.z + Math.cos(angle) * radius); dot.scale.setScalar(.65 + spread * .72); dot.material.opacity = .32 + spread * .58; });
+  REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, radialOffset }) => { const p = (phase * .30 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radialP = (phase * .18 + radialOffset) % 1; const spread = radialP < .50 ? radialP * 2 : (1 - radialP) * 2; const radius = .16 + spread * .50; dot.visible = normalFlowPath && airflowActive; dot.position.lerpVectors(start, end, routeP); dot.position.x += Math.sin(angle) * radius; dot.position.z += Math.cos(angle) * radius; dot.scale.setScalar(.62 + spread * .55); dot.material.opacity = .30 + spread * .56; });
   REAL.upperDiffusionParticles.forEach(({ dot, origin, angle, offset }) => { const p = (phase * .34 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spread = routeP < .54 ? routeP / .54 : 1 - (routeP - .54) / .46; const radius = .10 + spread * .56; dot.visible = normalFlowPath && airflowActive; dot.position.set(origin.x + Math.sin(angle) * radius, origin.y + (routeP - .35) * .72, origin.z + Math.cos(angle) * radius); dot.scale.setScalar(.58 + spread * .78); dot.material.opacity = .24 + spread * .54; });
   REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (phase * .90 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
