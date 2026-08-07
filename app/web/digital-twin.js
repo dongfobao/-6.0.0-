@@ -151,9 +151,11 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const upperSilicaCenter = upperSilicaNode ? centerOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
   const upperCoreX = upperSilicaCenter.x;
   const upperCoreZ = upperSilicaCenter.z;
-  const upperChamber = new THREE.Vector3(upperCoreX, insulationCenter.y + .10, upperCoreZ);
+  // 上阀出口是上部干燥剂腔的唯一气源；不再从隔热板位置凭空起流。
+  const upperChamber = upper.clone().add(new THREE.Vector3(0, .08, .14));
   const upperGlassTop = upperGlassBox ? upperGlassBox.max.y - .12 : upperSilicaCenter.y;
-  const upperSilicaY = Math.min(upperGlassTop, upperSilicaCenter.y);
+  // 气体需穿过整段上部硅胶，最终在上盖板中心孔收敛后进入传感器仓。
+  const upperSilicaY = upperGlassTop;
   const upperWallRadius = Math.max(.13, Math.min(upperGlassSize.x, upperGlassSize.z) * .42);
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
@@ -202,17 +204,27 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     const waveIndex = Math.floor(index / (silicaAngles * silicaLevels));
     return { dot, start: coreEntry.clone(), end: coreExit.clone(), angle: ringIndex / silicaAngles * Math.PI * 2, heightOffset: (levelIndex + .5) / silicaLevels, waveOffset: waveIndex / silicaWaves, outerRadius: lowerWallRadius - .07 };
   });
-  REAL.upperDiffusionParticles = Array.from({ length: 48 }, (_, index) => {
+  const upperFlowAngles = 16;
+  const upperFlowWaves = 4;
+  REAL.upperDiffusionParticles = Array.from({ length: upperFlowAngles * upperFlowWaves }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.020 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .78, depthTest: false, depthWrite: false }));
     dot.renderOrder = 19;
     realEffects.add(dot);
-    return { dot, source: upperChamber.clone(), topY: upperSilicaY, angle: index * 2.399, offset: index / 48, wallRadius: upperWallRadius };
+    const angleIndex = index % upperFlowAngles;
+    const waveIndex = Math.floor(index / upperFlowAngles);
+    return { dot, source: upperChamber.clone(), topY: upperSilicaY, angle: angleIndex / upperFlowAngles * Math.PI * 2, offset: waveIndex / upperFlowWaves + angleIndex / upperFlowAngles / upperFlowWaves, wallRadius: upperWallRadius };
   });
-  REAL.upperSilicaParticles = Array.from({ length: 80 }, (_, index) => {
+  const upperSilicaAngles = 12;
+  const upperSilicaLevels = 8;
+  const upperSilicaWaves = 2;
+  REAL.upperSilicaParticles = Array.from({ length: upperSilicaAngles * upperSilicaLevels * upperSilicaWaves }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.015, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .52, depthTest: false, depthWrite: false }));
     dot.renderOrder = 18;
     realEffects.add(dot);
-    return { dot, center: upperChamber.clone(), startY: upperSilicaY - .18, endY: upperSilicaY + .12, angle: (index % 10) / 10 * Math.PI * 2, level: (Math.floor(index / 10) % 4 + .5) / 4, wave: Math.floor(index / 40) / 2, wallRadius: upperWallRadius - .06 };
+    const angleIndex = index % upperSilicaAngles;
+    const levelIndex = Math.floor(index / upperSilicaAngles) % upperSilicaLevels;
+    const waveIndex = Math.floor(index / (upperSilicaAngles * upperSilicaLevels));
+    return { dot, center: new THREE.Vector3(upperCoreX, 0, upperCoreZ), startY: upperChamber.y + .05, endY: upperSilicaY, angle: angleIndex / upperSilicaAngles * Math.PI * 2, level: (levelIndex + .5) / upperSilicaLevels, wave: waveIndex / upperSilicaWaves, wallRadius: upperWallRadius - .06 };
   });
   REAL.sensorParticles = Array.from({ length: 8 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.ConeGeometry(.052, .17, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .96, depthTest: false, depthWrite: false }));
@@ -398,8 +410,8 @@ function animateRealProcess(now, snapshot) {
   REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.82 + Math.min(flow, 8) * .055); });
   REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, wallRadius, radiusOffset }) => { const p = (phase * .34 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = wallRadius + radiusOffset; dot.visible = normalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(start.y, end.y, routeP), start.z + Math.cos(angle) * radius); dot.scale.setScalar(.82); dot.material.opacity = .82; });
   REAL.silicaFlowParticles.forEach(({ dot, start, end, angle, heightOffset, waveOffset, outerRadius }) => { const p = (phase * .18 + waveOffset) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(outerRadius, .13, inwardP); const y = THREE.MathUtils.lerp(start.y + .10, end.y - .10, heightOffset); dot.visible = normalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, y, start.z + Math.cos(angle) * radius); dot.scale.setScalar(.76 + inwardP * .22); dot.material.opacity = .30 + inwardP * .44; });
-  REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (phase * .30 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(.08, wallRadius, Math.min(1, routeP * 2.2)); const y = THREE.MathUtils.lerp(source.y, topY - .16, routeP); dot.visible = normalFlowPath && airflowActive; dot.position.set(source.x + Math.sin(angle) * radius, y, source.z + Math.cos(angle) * radius); dot.scale.setScalar(.74); dot.material.opacity = .34 + Math.min(1, routeP * 2) * .46; });
-  REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (phase * .18 + wave) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(wallRadius, .10, inwardP); dot.visible = normalFlowPath && airflowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, level), center.z + Math.cos(angle) * radius); dot.material.opacity = .28 + inwardP * .44; });
+  REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (phase * .24 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = normalFlowPath && airflowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });
+  REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (phase * .16 + wave) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const levelP = THREE.MathUtils.clamp(level + routeP * .30, 0, 1); const convergeP = THREE.MathUtils.clamp((levelP - .76) / .24, 0, 1); const radius = wallRadius * (1 - convergeP * .88); dot.visible = normalFlowPath && airflowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, levelP), center.z + Math.cos(angle) * radius); dot.material.opacity = .22 + (1 - convergeP) * .34; });
   REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (phase * .90 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
   REAL.heatBypassParticles.forEach(({ arrow, path, offset }) => { const p = (phase * .72 + offset) % 1; const tangent = path.getTangentAt(p).normalize(); arrow.visible = heatingBypass; arrow.position.copy(path.getPointAt(p)); arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
