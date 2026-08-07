@@ -9,7 +9,8 @@ const drainCallout = document.getElementById("twinDrainCallout");
 const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue"), breath: document.getElementById("twinBreathValue") };
 const twinDataInfoNodes = { t1: document.getElementById("twinT1Info"), t2: document.getElementById("twinT2Info"), t3: document.getElementById("twinT3Info"), pressure: document.getElementById("twinPressureInfo"), flow: document.getElementById("twinFlowInfo"), breath: document.getElementById("twinBreathInfo") };
 // 左右传感器标签固定在同一高度；上温湿度、压力与流量均对应传感器仓上方。
-const twinLabelAnchors = { t1: new THREE.Vector3(-.88, .65, .10), t2: new THREE.Vector3(.88, .65, .10), t3: new THREE.Vector3(-1.78, 1.68, .10), pressure: new THREE.Vector3(0, 2.18, .10), flow: new THREE.Vector3(1.78, 1.68, .10), breath: new THREE.Vector3(-.72, -1.15, .10) };
+// 标签锚点置于实体轮廓之外：随模型旋转、缩放，但不遮挡壳体及内部流场。
+const twinLabelAnchors = { t1: new THREE.Vector3(-2.35, .52, .10), t2: new THREE.Vector3(2.35, .52, .10), t3: new THREE.Vector3(-2.35, 1.62, .10), pressure: new THREE.Vector3(2.35, 1.72, .10), flow: new THREE.Vector3(2.35, 1.05, .10), breath: new THREE.Vector3(-2.35, -1.08, .10) };
 // 单管设备的左侧温湿度为 T1/传感器 1，对应监控快照的第一路环境通道。
 const LEFT_HUMIDITY_CHANNEL_INDEX = 0;
 
