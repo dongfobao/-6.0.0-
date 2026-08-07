@@ -99,7 +99,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], airTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], airTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -144,12 +144,25 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
   realEffects.add(airTubeReal, waterTubeReal);
   REAL.airTube = airTubeReal;
+  const bypassPort = upper.clone().add(new THREE.Vector3(.42, 0, .18));
+  const bypassOuterTop = upper.clone().add(new THREE.Vector3(.88, -.12, .36));
+  const bypassOuterBottom = oil.clone().add(new THREE.Vector3(.88, .12, .36));
+  const ambientOutlet = oil.clone().add(new THREE.Vector3(1.12, -.10, .44));
+  const heatBypassPath = new THREE.CatmullRomCurve3([bypassPort, bypassOuterTop, bypassOuterBottom, oil.clone().add(frontOffset), ambientOutlet]);
+  const heatBypassTube = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .028, 8, false), new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: .08, depthTest: false, depthWrite: false }));
+  realEffects.add(heatBypassTube);
+  REAL.heatBypassTube = heatBypassTube;
   REAL.airParticles = Array.from({ length: 26 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.ConeGeometry(.046, .14, 8), materials.air.clone());
     dot.material.depthTest = false;
     dot.material.depthWrite = false;
     realEffects.add(dot);
     return { dot, path: airPath, offset: index / 26 };
+  });
+  REAL.heatBypassParticles = Array.from({ length: 18 }, (_, index) => {
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(.042, .13, 8), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: .95, depthTest: false, depthWrite: false }));
+    realEffects.add(arrow);
+    return { arrow, path: heatBypassPath, offset: index / 18 };
   });
   REAL.waterParticles = Array.from({ length: 16 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.022, 8, 8), materials.water.clone());
@@ -276,8 +289,14 @@ function animateRealProcess(now, snapshot) {
   materials.heated.emissiveIntensity = heat === 1 ? 1.1 : 0;
   const activeBreath = breath === 0 || breath === 1;
   const upperWorkPath = upper.position === 1 && !upper.fault;
-  if (REAL.airTube) REAL.airTube.material.opacity = upperWorkPath ? (activeBreath ? .90 : .42) : .10;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = upperWorkPath && activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  const heatingBypass = heat === 1;
+  const normalFlowPath = upperWorkPath && !heatingBypass;
+  if (REAL.airTube) REAL.airTube.material.opacity = .08;
+  if (REAL.airTube && normalFlowPath && activeBreath) REAL.airTube.material.opacity = .90;
+  if (REAL.airTube && normalFlowPath && !activeBreath) REAL.airTube.material.opacity = .42;
+  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = normalFlowPath && activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
+  REAL.heatBypassParticles.forEach(({ arrow, path, offset }) => { const p = (phase * .72 + offset) % 1; const tangent = path.getTangentAt(p).normalize(); arrow.visible = heatingBypass; arrow.position.copy(path.getPointAt(p)); arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((phase * .46 + offset) % 1)); });
   REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .38 + offset) % 1; puff.visible = heat === 1; puff.position.set(origin.x + .16 * Math.sin((p + offset) * 18), origin.y + p * .92, origin.z + .13 * Math.cos((p + offset) * 13)); puff.scale.setScalar(.70 + p * 1.25); puff.material.opacity = (1 - p) * .52; });
