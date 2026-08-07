@@ -152,16 +152,13 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const upperGlassSize = upperGlassBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.08, 1.10, 1.08);
   const insulationCenter = insulationNode ? centerOf(insulationNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, -upperGlassSize.y * .35, 0));
   const upperSilicaCenter = upperSilicaNode ? centerOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
-  const upperSilicaBox = upperSilicaNode ? new THREE.Box3().setFromObject(upperSilicaNode) : null;
-  const sensorBox = sensorNode ? new THREE.Box3().setFromObject(sensorNode) : null;
   const upperCoreX = upperSilicaCenter.x;
   const upperCoreZ = upperSilicaCenter.z;
   // 上阀出口是上部干燥剂腔的唯一气源；不再从隔热板位置凭空起流。
   const upperChamber = upper.clone().add(new THREE.Vector3(0, .08, .14));
   const upperGlassTop = upperGlassBox ? upperGlassBox.max.y - .12 : upperSilicaCenter.y;
-  // 上部流场上升至传感器仓下方基座，在该基座下沿收敛，不进入传感器仓内部。
-  const sensorBaseY = sensorBox ? sensorBox.min.y - .045 : sensor.y - .16;
-  const upperSilicaY = Math.min(upperGlassTop, Math.max(upperSilicaBox ? upperSilicaBox.max.y + .035 : upperChamber.y, sensorBaseY));
+  // 观察罐顶板下沿即传感器仓基座下方：流场在此收敛，随后仅沿中心通道进入仓体。
+  const upperSilicaY = upperGlassTop;
   const upperWallRadius = Math.max(.13, Math.min(upperGlassSize.x, upperGlassSize.z) * .42);
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
@@ -335,7 +332,8 @@ function loadCadAssembly() {
       REAL.upperValve.userData.baseZ = REAL.upperValve.position.z;
       REAL.drainValve.userData.baseX = REAL.drainValve.position.x;
       REAL.drainValve.userData.baseZ = REAL.drainValve.position.z;
-      const upperGlassNode = [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
+      // component_52 为观察罐；不能取最高透明罩，否则粒子会越过传感器仓基座。
+      const upperGlassNode = REAL.shellMeshes.find(object => /component_52_/.test(`${object.name} ${object.parent?.name || ""}`)) || [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
       buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode);
     }
     host.classList.add("digital-twin-cad-ready");
