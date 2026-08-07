@@ -301,9 +301,11 @@ function loadCadAssembly() {
       const nodeName = `${object.name} ${object.parent?.name || ""}`;
       if (/component_04_/.test(nodeName)) namedLabelNodes.pressure ||= object;
       if (/component_05_/.test(nodeName)) namedLabelNodes.flow ||= object;
-      if (/component_06_/.test(nodeName)) namedLabelNodes.t1 ||= object;
-      if (/component_07_/.test(nodeName)) namedLabelNodes.t2 ||= object;
-      if (/component_23_/.test(nodeName)) namedLabelNodes.t3 ||= object;
+      // 上阀两侧的“传感器堵头-1/-2”分别对应左、右温湿度；
+      // component_06/07 是上传感器仓内同一只上温湿度传感器的两个结构件。
+      if (/component_21_/.test(nodeName)) namedLabelNodes.t1 ||= object;
+      if (/component_22_/.test(nodeName)) namedLabelNodes.t2 ||= object;
+      if (/component_(06|07)_/.test(nodeName)) (namedLabelNodes.t3 ||= []).push(object);
       if (/component_16_/.test(nodeName) && !lowerGlassNode) lowerGlassNode = object;
       const isGlassShell = object.userData?.digital_twin_role === "outer_shell" || /component_(16|36|51|52)_/.test(nodeName) || nodeName.includes("400玻璃管");
       if (isGlassShell) {
@@ -334,7 +336,11 @@ function loadCadAssembly() {
     cadModel.add(gltf.scene);
     cadModel.visible = true;
     cadModel.updateMatrixWorld(true);
-    Object.entries(namedLabelNodes).forEach(([key, object]) => twinLabelTargets[key].copy(rig.worldToLocal(centerOf(object))));
+    Object.entries(namedLabelNodes).forEach(([key, objectOrObjects]) => {
+      const objects = Array.isArray(objectOrObjects) ? objectOrObjects : [objectOrObjects];
+      const target = objects.reduce((sum, object) => sum.add(rig.worldToLocal(centerOf(object))), new THREE.Vector3()).multiplyScalar(1 / objects.length);
+      twinLabelTargets[key].copy(target);
+    });
     if (oilCoverNode || oilCupNode) twinLabelTargets.breath.copy(rig.worldToLocal(centerOf(oilCoverNode || oilCupNode)));
     hideProceduralDevice();
     if (REAL.upperValve && REAL.drainValve) {
@@ -440,13 +446,12 @@ function positionTwinDataLabels(){
     if(!item.leader)return;
     const target=projectPoint(twinLabelTargets[item.key]);
     const targetX=Math.max(2,Math.min(98,target.x)),targetY=Math.max(2,Math.min(98,target.y));
-    const halfWidth=item.node.offsetWidth/width*50,halfHeight=item.node.offsetHeight/height*50;
-    const deltaX=targetX-item.left,deltaY=targetY-item.top;
-    const scale=1/Math.max(Math.abs(deltaX)/Math.max(halfWidth,.1),Math.abs(deltaY)/Math.max(halfHeight,.1),1);
-    item.leader.setAttribute("x1",`${item.left+deltaX*scale}%`);
-    item.leader.setAttribute("y1",`${item.top+deltaY*scale}%`);
-    item.leader.setAttribute("x2",`${targetX}%`);
-    item.leader.setAttribute("y2",`${targetY}%`);
+    const halfWidth=item.node.offsetWidth/width*50;
+    const startX=item.side==="left"?item.left+halfWidth:item.left-halfWidth;
+    const laneOffsets={t3:-2,t1:0,breath:2,pressure:-2,t2:0,flow:2};
+    const laneBase=item.side==="left"?Math.min(targetX-4,startX+8):Math.max(targetX+4,startX-8);
+    const laneX=Math.max(3,Math.min(97,laneBase+(laneOffsets[item.key]||0)));
+    item.leader.setAttribute("points",`${startX},${item.top} ${laneX},${item.top} ${laneX},${targetY} ${targetX},${targetY}`);
   });
 }
 function animateRealProcess(now, snapshot) {
