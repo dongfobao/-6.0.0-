@@ -101,7 +101,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -124,7 +124,7 @@ function addRealHalo(object, color) {
   return helper;
 }
 
-function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode) {
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode) {
   const oilCover = centerOf(oilCoverNode || oilCupNode || drainValveNode);
   const oil = centerOf(oilCupNode || oilCoverNode || drainValveNode);
   const heaterCenter = centerOf(heaterNode || upperValveNode);
@@ -142,10 +142,20 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const coreEntry = new THREE.Vector3(coreX, lowerGlassBox ? lowerGlassBox.min.y + .12 : heaterCenter.y - .70, coreZ);
   const coreExit = new THREE.Vector3(coreX, lowerGlassBox ? lowerGlassBox.max.y - .18 : upper.y - .18, coreZ);
   const lowerWallRadius = Math.max(.16, Math.min(lowerGlassSize.x, lowerGlassSize.z) * .42);
-  const upperChamber = new THREE.Vector3(coreX, upper.y + .38, coreZ);
+  const upperGlassBox = upperGlassNode ? new THREE.Box3().setFromObject(upperGlassNode) : null;
+  const upperGlassCenter = upperGlassBox?.getCenter(new THREE.Vector3()) || upper.clone();
+  const upperGlassSize = upperGlassBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.08, 1.10, 1.08);
+  const insulationCenter = insulationNode ? centerOf(insulationNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, -upperGlassSize.y * .35, 0));
+  const upperSilicaCenter = upperSilicaNode ? centerOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
+  const upperCoreX = upperSilicaCenter.x;
+  const upperCoreZ = upperSilicaCenter.z;
+  const upperChamber = new THREE.Vector3(upperCoreX, insulationCenter.y + .10, upperCoreZ);
+  const upperGlassTop = upperGlassBox ? upperGlassBox.max.y - .12 : upperSilicaCenter.y;
+  const upperSilicaY = Math.min(upperGlassTop, upperSilicaCenter.y);
+  const upperWallRadius = Math.max(.13, Math.min(upperGlassSize.x, upperGlassSize.z) * .42);
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
-  const sensorPath = new THREE.LineCurve3(upperChamber, new THREE.Vector3(coreX, outlet.y, coreZ));
+  const sensorPath = new THREE.LineCurve3(new THREE.Vector3(upperCoreX, upperSilicaY, upperCoreZ), new THREE.Vector3(upperCoreX, outlet.y, upperCoreZ));
   const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
   const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
   realEffects.add(waterTubeReal);
@@ -190,11 +200,17 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     const waveIndex = Math.floor(index / (silicaAngles * silicaLevels));
     return { dot, start: coreEntry.clone(), end: coreExit.clone(), angle: ringIndex / silicaAngles * Math.PI * 2, heightOffset: (levelIndex + .5) / silicaLevels, waveOffset: waveIndex / silicaWaves, outerRadius: lowerWallRadius - .07 };
   });
-  REAL.upperDiffusionParticles = Array.from({ length: 42 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.028 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .78, depthTest: false, depthWrite: false }));
+  REAL.upperDiffusionParticles = Array.from({ length: 48 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.020 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .78, depthTest: false, depthWrite: false }));
     dot.renderOrder = 19;
     realEffects.add(dot);
-    return { dot, origin: upperChamber.clone(), angle: index * 2.399, offset: index / 42 };
+    return { dot, source: upperChamber.clone(), topY: upperSilicaY, angle: index * 2.399, offset: index / 48, wallRadius: upperWallRadius };
+  });
+  REAL.upperSilicaParticles = Array.from({ length: 80 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.015, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .52, depthTest: false, depthWrite: false }));
+    dot.renderOrder = 18;
+    realEffects.add(dot);
+    return { dot, center: upperChamber.clone(), startY: upperSilicaY - .18, endY: upperSilicaY + .12, angle: (index % 10) / 10 * Math.PI * 2, level: (Math.floor(index / 10) % 4 + .5) / 4, wave: Math.floor(index / 40) / 2, wallRadius: upperWallRadius - .06 };
   });
   REAL.sensorParticles = Array.from({ length: 8 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.ConeGeometry(.052, .17, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .96, depthTest: false, depthWrite: false }));
@@ -257,6 +273,8 @@ function loadCadAssembly() {
     let outletNode = null;
     let lowerGlassNode = null;
     let silicaGridNode = null;
+    let insulationNode = null;
+    let upperSilicaNode = null;
     gltf.scene.traverse(object => {
       if (!object.isMesh) return;
       // glTF 的业务属性和零件名在节点上，实际网格是其子对象。
@@ -283,6 +301,8 @@ function loadCadAssembly() {
       if (/component_45_/.test(nodeName) && !oilCoverNode) oilCoverNode = object;
       if (/component_52_/.test(nodeName) && !oilCupNode) oilCupNode = object;
       if (/component_15_/.test(nodeName) && !silicaGridNode) silicaGridNode = object;
+      if (/component_28_/.test(nodeName) && !insulationNode) insulationNode = object;
+      if (/component_(29|31)_/.test(nodeName) && !upperSilicaNode) upperSilicaNode = object;
       if (/component_(23|24|25)_/.test(nodeName) && !sensorNode) sensorNode = object;
       if (/component_(01|02|18|19)_/.test(nodeName) && !outletNode) outletNode = object;
     });
@@ -295,7 +315,8 @@ function loadCadAssembly() {
       REAL.upperValve.userData.baseZ = REAL.upperValve.position.z;
       REAL.drainValve.userData.baseX = REAL.drainValve.position.x;
       REAL.drainValve.userData.baseZ = REAL.drainValve.position.z;
-      buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve, lowerGlassNode, silicaGridNode);
+      const upperGlassNode = [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
+      buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode);
     }
     host.classList.add("digital-twin-cad-ready");
   }, undefined, error => {
@@ -369,7 +390,8 @@ function animateRealProcess(now, snapshot) {
   REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.82 + Math.min(flow, 8) * .055); });
   REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, wallRadius, radiusOffset }) => { const p = (phase * .34 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = wallRadius + radiusOffset; dot.visible = normalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(start.y, end.y, routeP), start.z + Math.cos(angle) * radius); dot.scale.setScalar(.82); dot.material.opacity = .82; });
   REAL.silicaFlowParticles.forEach(({ dot, start, end, angle, heightOffset, waveOffset, outerRadius }) => { const p = (phase * .18 + waveOffset) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(outerRadius, .13, inwardP); const y = THREE.MathUtils.lerp(start.y + .10, end.y - .10, heightOffset); dot.visible = normalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, y, start.z + Math.cos(angle) * radius); dot.scale.setScalar(.76 + inwardP * .22); dot.material.opacity = .30 + inwardP * .44; });
-  REAL.upperDiffusionParticles.forEach(({ dot, origin, angle, offset }) => { const p = (phase * .34 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spread = routeP < .54 ? routeP / .54 : 1 - (routeP - .54) / .46; const radius = .10 + spread * .56; dot.visible = normalFlowPath && airflowActive; dot.position.set(origin.x + Math.sin(angle) * radius, origin.y + (routeP - .35) * .72, origin.z + Math.cos(angle) * radius); dot.scale.setScalar(.58 + spread * .78); dot.material.opacity = .24 + spread * .54; });
+  REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (phase * .30 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(.08, wallRadius, Math.min(1, routeP * 2.2)); const y = THREE.MathUtils.lerp(source.y, topY - .16, routeP); dot.visible = normalFlowPath && airflowActive; dot.position.set(source.x + Math.sin(angle) * radius, y, source.z + Math.cos(angle) * radius); dot.scale.setScalar(.74); dot.material.opacity = .34 + Math.min(1, routeP * 2) * .46; });
+  REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (phase * .18 + wave) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(wallRadius, .10, inwardP); dot.visible = normalFlowPath && airflowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, level), center.z + Math.cos(angle) * radius); dot.material.opacity = .28 + inwardP * .44; });
   REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (phase * .90 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
   REAL.heatBypassParticles.forEach(({ arrow, path, offset }) => { const p = (phase * .72 + offset) % 1; const tangent = path.getTangentAt(p).normalize(); arrow.visible = heatingBypass; arrow.position.copy(path.getPointAt(p)); arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
