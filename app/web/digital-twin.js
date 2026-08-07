@@ -146,13 +146,19 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
   realEffects.add(airTubeReal, waterTubeReal);
   REAL.airTube = airTubeReal;
-  const bypassPort = upper.clone().add(new THREE.Vector3(.42, 0, .18));
-  const bypassOuterTop = upper.clone().add(new THREE.Vector3(.88, -.12, .36));
-  const bypassOuterBottom = oil.clone().add(new THREE.Vector3(.88, .12, .36));
-  const ambientOutlet = oil.clone().add(new THREE.Vector3(1.12, -.10, .44));
-  const heatBypassPath = new THREE.CatmullRomCurve3([bypassPort, bypassOuterTop, bypassOuterBottom, oil.clone().add(frontOffset), ambientOutlet]);
+  // 加热旁路是玻璃筒内的直通圆管：上阀反向接口直达油杯，不沿设备外侧布置。
+  const bypassPort = upper.clone().add(new THREE.Vector3(-.24, -.03, .18));
+  const bypassPipeX = oil.x + .48;
+  const bypassPipeZ = oil.z + .22;
+  const heatBypassPath = new THREE.CatmullRomCurve3([
+    bypassPort,
+    new THREE.Vector3(bypassPipeX, upper.y - .28, bypassPipeZ),
+    new THREE.Vector3(bypassPipeX, oil.y + .20, bypassPipeZ),
+    oil.clone().add(new THREE.Vector3(.14, 0, .18)),
+  ]);
+  const heatBypassHousing = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .052, 12, false), new THREE.MeshStandardMaterial({ color: 0x738394, metalness: .84, roughness: .24, transparent: true, opacity: .48, depthTest: false, depthWrite: false }));
   const heatBypassTube = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .028, 8, false), new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: .08, depthTest: false, depthWrite: false }));
-  realEffects.add(heatBypassTube);
+  realEffects.add(heatBypassHousing, heatBypassTube);
   REAL.heatBypassTube = heatBypassTube;
   REAL.airParticles = Array.from({ length: 26 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.ConeGeometry(.046, .14, 8), materials.air.clone());
