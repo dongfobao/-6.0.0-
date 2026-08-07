@@ -6,10 +6,12 @@ const resetButton = document.getElementById("resetDigitalTwinBtn");
 const upperCallout = document.getElementById("twinUpperCallout");
 const heatCallout = document.getElementById("twinHeatCallout");
 const drainCallout = document.getElementById("twinDrainCallout");
+const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue"), breath: document.getElementById("twinBreathValue") };
+const twinLabelAnchors = { t1: new THREE.Vector3(-.82, .65, .10), t2: new THREE.Vector3(.82, .42, .10), t3: new THREE.Vector3(.72, 1.45, .10), pressure: new THREE.Vector3(-.82, -.16, .10), flow: new THREE.Vector3(.82, -.42, .10), breath: new THREE.Vector3(-.72, -1.15, .10) };
 // 单管设备的左侧温湿度为 T1/传感器 1，对应监控快照的第一路环境通道。
 const LEFT_HUMIDITY_CHANNEL_INDEX = 0;
 
-const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.3 };
+const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.0 };
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
@@ -339,6 +341,11 @@ function update(snapshot) {
   const breath = value(snapshot?.process?.breathState);
   const online = value(snapshot?.communication?.online) === 1;
   const alarm = Boolean(snapshot?.alarms?.active);
+  const compact = (point, suffix="") => { const n = value(point); return n === null ? "--" : `${n.toFixed(1)}${suffix}`; };
+  (snapshot?.environmentChannels || []).slice(0, 3).forEach((channel, index) => { const node = twinDataNodes[`t${index + 1}`]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, "%RH")}`; });
+  if (twinDataNodes.pressure) twinDataNodes.pressure.textContent = compact(snapshot?.process?.pressure, " kPa");
+  if (twinDataNodes.flow) twinDataNodes.flow.textContent = compact(snapshot?.process?.flow, " L/min");
+  if (twinDataNodes.breath) twinDataNodes.breath.textContent = snapshot?.process?.breathState?.displayValue || "--";
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
@@ -348,8 +355,9 @@ function update(snapshot) {
   setStatus([["上阀", upper.fault ? "故障" : upper.moving ? "切换中" : upper.label, upper.fault ? "fault" : ""],["左排水阀", drain.fault ? "故障" : drain.moving ? "切换中" : drain.label, drain.fault ? "fault" : ""],["HTC1", heat === 1 ? "加热中" : heat === 2 ? "闪烁" : heat === 3 ? "切换中" : "关闭", heat === 1 ? "active" : ""],["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]]);
 }
 
-function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.3; }
+function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.0; }
 function resize(){ const width=host.clientWidth,height=host.clientHeight; if(!width||!height)return; renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix(); }
+function positionTwinDataLabels(){ const width=host.clientWidth,height=host.clientHeight;if(!width||!height)return;Object.entries(twinLabelAnchors).forEach(([key,anchor])=>{const node=document.querySelector(`.twin-data-label.${key}`);if(!node)return;const point=rig.localToWorld(anchor.clone()).project(camera);node.style.left=`${Math.max(7,Math.min(93,(point.x*.5+.5)*100))}%`;node.style.top=`${Math.max(9,Math.min(90,(-point.y*.5+.5)*100))}%`;}); }
 function animateRealProcess(now, snapshot) {
   if (!cadModel.visible || !REAL.upperValve || !REAL.drainValve) return;
   const upper = valveState(snapshot?.valves?.[0]);
@@ -409,7 +417,7 @@ function animateRealProcess(now, snapshot) {
   REAL.heatHalo.visible = heat === 1 || heat === 2 || heat === 3;
 }
 
-function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const flow=Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 12); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*(.35+flow*.16); upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=!cadModel.visible && activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=!cadModel.visible && drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); steamParticles.forEach(({puff,offset})=>{const p=(phase*.40+offset)%1;puff.visible=!cadModel.visible && heat===1;puff.position.set(.10*Math.sin((p+offset)*18),-1.25+p*2.70,.11*Math.cos((p+offset)*12));puff.scale.setScalar(.65+p*.9);puff.material.opacity=(1-p)*.28;}); animateRealProcess(now, snapshot); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);renderer.render(scene,camera); }
+function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const flow=Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 12); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*(.35+flow*.16); upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=!cadModel.visible && activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=!cadModel.visible && drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); steamParticles.forEach(({puff,offset})=>{const p=(phase*.40+offset)%1;puff.visible=!cadModel.visible && heat===1;puff.position.set(.10*Math.sin((p+offset)*18),-1.25+p*2.70,.11*Math.cos((p+offset)*12));puff.scale.setScalar(.65+p*.9);puff.material.opacity=(1-p)*.28;}); animateRealProcess(now, snapshot); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);rig.updateMatrixWorld(true);positionTwinDataLabels();renderer.render(scene,camera); }
 
 host.addEventListener("pointerdown", event => { STATUS.dragging=true; STATUS.pointer={x:event.clientX,y:event.clientY}; host.setPointerCapture(event.pointerId); });
 host.addEventListener("pointermove", event => { if(!STATUS.dragging||!STATUS.pointer)return; STATUS.yaw+=(event.clientX-STATUS.pointer.x)*.011;STATUS.pitch=Math.max(-.48,Math.min(.48,STATUS.pitch+(event.clientY-STATUS.pointer.y)*.008));STATUS.pointer={x:event.clientX,y:event.clientY}; });
