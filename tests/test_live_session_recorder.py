@@ -32,7 +32,12 @@ class LiveSessionRecorderTests(unittest.TestCase):
             self.assertTrue(recorder.breath_path.exists())
             self.assertTrue(recorder.run_path.exists())
             self.assertFalse(recorder.raw_path.exists())
-            self.assertIn("[2026-05-22 12:00:00],/* 1.20,25.00,-1.50,44.00 */", recorder.env_path.read_text(encoding="utf-8"))
+            self.assertEqual(recorder.env_path.name, "sensor_2026_05_22.csv")
+            self.assertIn(
+                "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity\n"
+                "2026-05-22 12:00:00,1.20,-1.50,25.00,44.00,0.00,0.00,0.00,0.00\n",
+                recorder.env_path.read_text(encoding="utf-8"),
+            )
             self.assertIn("2026-05-22 12:00:00,0,-1.50,0.0,1", recorder.breath_path.read_text(encoding="utf-8"))
             self.assertIn("I/YLDQ [2026-05-22 12:00:01] session started", recorder.run_path.read_text(encoding="utf-8"))
 
@@ -74,7 +79,7 @@ class LiveSessionRecorderTests(unittest.TestCase):
             exported_dir = recorder.export_to(root / "exports")
 
             self.assertTrue((exported_dir / "data_0").exists())
-            self.assertTrue(any((exported_dir / "data_0").glob("log_*.csv")))
+            self.assertTrue(any((exported_dir / "data_0").glob("sensor_*.csv")))
             self.assertFalse(any((exported_dir / "data_0").glob("raw_*.csv")))
             self.assertFalse((exported_dir / "traffic").exists())
 

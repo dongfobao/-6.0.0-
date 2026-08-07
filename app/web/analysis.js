@@ -1,8 +1,8 @@
 ﻿"use strict";
 (() => {
   // ============================ 数据格式（与 live_session_recorder 落盘格式一致） ============================
-  // 下位机 SensorLogger: [time],/* 压力,温度1,流量,湿度1,温度2,湿度2,温度3,湿度3 */
-  // 旧版上位机会话仅保存前四列，并可在尾部追加 JSON 扩展字段。
+  // 统一传感器 CSV：timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity。
+  // 同时兼容已保存的旧版上位机 ENV 行，确保历史会话仍可分析。
   const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*,?\/\*\s*(.*?)\s*\*\/(?:\s*\|\s*(\{.*\}))?\s*$/;
   const RUN_ROW_RE = /^([AIDEWV])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
 
@@ -94,6 +94,7 @@
     if (/(^|\/)run\//i.test(path) && /^log_\d+\.csv$/i.test(name)) return "firmware";
     if (/(^|\/)run\//i.test(path)) return "run";
     if (/^log_\d+\.csv$/i.test(name)) return "firmware";
+    if (/^sensor_\d{4}_\d{2}_\d{2}\.csv$/i.test(name)) return "env";
     if (/^log_.*\.csv$/i.test(name) || /(^|\/)data_\d+\//i.test(path)) return "env";
     if (/^breath_.*\.csv$/i.test(name) || /(^|\/)breath_data\//i.test(path)) return "breath";
     if (/^serial_output\.log(?:\.\d+)?$/i.test(name) || /(^|\/)logs?\//i.test(path) || /\.log(?:\.\d+)?$/i.test(name)) return "firmware";
@@ -103,7 +104,24 @@
 
   function parseEnvText(text) {
     const rows = [];
-    for (const line of text.split(/\r?\n/)) {
+    const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+    const header = lines[0].trim().toLowerCase();
+    const isUnifiedCsv = header === "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity";
+    for (const line of isUnifiedCsv ? lines.slice(1) : lines) {
+      if (isUnifiedCsv) {
+        const values = line.trim().split(",");
+        if (values.length !== 9) continue;
+        const ts = parseTs(values[0]);
+        const numbers = values.slice(1).map(Number);
+        if (!Number.isFinite(ts) || numbers.some((value) => !Number.isFinite(value))) continue;
+        rows.push({
+          ts, pressure: numbers[0], flow: numbers[1],
+          "sensor_1.temperature": numbers[2], "sensor_1.humidity": numbers[3],
+          "sensor_2.temperature": numbers[4], "sensor_2.humidity": numbers[5],
+          "sensor_3.temperature": numbers[6], "sensor_3.humidity": numbers[7],
+        });
+        continue;
+      }
       const m = ENV_ROW_RE.exec(line.trim());
       if (!m) continue;
       const ts = parseTs(m[1]);

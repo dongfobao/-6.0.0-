@@ -950,9 +950,9 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
                 "sensor_2.humidity": 52.0,
                 "sensor_3.humidity": 53.0,
             }
-            (data_dir / "log_2026_07_20_1000-1100.csv").write_text(
-                f"[2026-07-20 10:30:00],/* 1.25,21.00,2.50,51.00 */ | "
-                f"{json.dumps(details, ensure_ascii=False, separators=(',', ':'))}\n",
+            (data_dir / "sensor_2026_07_20.csv").write_text(
+                "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity\n"
+                "2026-07-20 10:30:00,1.25,2.50,21.00,51.00,22.00,52.00,23.00,53.00\n",
                 encoding="utf-8",
             )
 

@@ -636,10 +636,37 @@ class LiveAcquisitionService:
                 continue
             if str((meta.get("device") or {}).get("id") or "") != device_id:
                 continue
-            for data_path in sorted(meta_path.parent.glob("data_0/log_*.csv")):
+            data_paths = sorted(meta_path.parent.glob("data_0/sensor_*.csv"))
+            data_paths.extend(sorted(meta_path.parent.glob("data_0/log_*.csv")))
+            for data_path in data_paths:
                 try:
                     with data_path.open("r", encoding="utf-8") as handle:
                         for line in handle:
+                            csv_values = line.strip().split(",")
+                            if len(csv_values) == 9 and csv_values[0] != "timestamp":
+                                parsed = _parse_iso(csv_values[0])
+                                if parsed is None:
+                                    continue
+                                epoch = parsed.timestamp()
+                                if epoch < cutoff or epoch > now.timestamp() + 60:
+                                    continue
+                                try:
+                                    values = {
+                                        "pressure": float(csv_values[1]),
+                                        "flow": float(csv_values[2]),
+                                        "sensor_1.temperature": float(csv_values[3]),
+                                        "sensor_1.humidity": float(csv_values[4]),
+                                        "sensor_2.temperature": float(csv_values[5]),
+                                        "sensor_2.humidity": float(csv_values[6]),
+                                        "sensor_3.temperature": float(csv_values[7]),
+                                        "sensor_3.humidity": float(csv_values[8]),
+                                    }
+                                except ValueError:
+                                    continue
+                                for metric_key, value in values.items():
+                                    self._append_history_point(slot, metric_key, csv_values[0], epoch, value)
+                                    restored += 1
+                                continue
                             match = _ENV_HISTORY_ROW_RE.match(line.strip())
                             if match is None:
                                 continue

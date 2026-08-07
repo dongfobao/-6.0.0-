@@ -81,7 +81,7 @@ class LiveSessionRecorder:
                 counter += 1
 
     def _interval_env_path(self) -> Path:
-        return self.data_dir / f"log_{self._current_interval}.csv"
+        return self.data_dir / f"sensor_{self._current_interval[:10]}.csv"
 
     def _interval_breath_path(self) -> Path:
         return self.breath_dir / f"breath_{self._current_interval}.csv"
@@ -122,7 +122,7 @@ class LiveSessionRecorder:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.breath_dir.mkdir(parents=True, exist_ok=True)
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self._env_path.touch()
+        self._ensure_environment_file()
         self._breath_path.touch()
         self._run_path.touch()
         (self.session_dir / "config.json").write_text(
@@ -142,7 +142,7 @@ class LiveSessionRecorder:
         self._traffic_path = self._interval_traffic_path()
         self._raw_path = self._interval_raw_path()
         self._heat_path = self._interval_heat_path()
-        self._env_path.touch()
+        self._ensure_environment_file()
         self._breath_path.touch()
         self._run_path.touch()
 
@@ -161,13 +161,24 @@ class LiveSessionRecorder:
                 "heat_events": str(self._heat_path.relative_to(self.session_dir)),
             },
             "format": {
-                "environment": "compatible with ENV_ROW_RE",
+                "environment": "下位机传感器 CSV：timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity",
                 "breath": "derived from live flow sign and persisted per second",
                 "run": "compatible with RUN_ROW_RE",
                 "traffic": "one JSON object per line, abnormal command/response records only",
             },
         }
         self.meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _ensure_environment_file(self) -> None:
+        """创建与下位机一致的传感器 CSV，并且只写入一次表头。"""
+        if self._env_path.exists() and self._env_path.stat().st_size > 0:
+            return
+        self._env_path.parent.mkdir(parents=True, exist_ok=True)
+        self._env_path.write_text(
+            "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,"
+            "t2_temperature,t2_humidity,t3_temperature,t3_humidity\n",
+            encoding="utf-8",
+        )
 
     def _append_line(self, path: Path, line: str) -> None:
         with path.open("a", encoding="utf-8") as handle:
@@ -183,21 +194,17 @@ class LiveSessionRecorder:
             return
         self.last_env_second = second_key
         self.last_written_snapshot = dict(snapshot)
-        line = (
-            f"[{second_key}],/* "
-            f"{float(snapshot.get('pressure') or 0):.2f},"
-            f"{float(snapshot.get('sensor_1.temperature', snapshot.get('temperature')) or 0):.2f},"
-            f"{float(snapshot.get('flow') or 0):.2f},"
-            f"{float(snapshot.get('sensor_1.humidity', snapshot.get('humidity')) or 0):.2f}"
-            " */\n"
+        values = (
+            float(snapshot.get("pressure") or 0),
+            float(snapshot.get("flow") or 0),
+            float(snapshot.get("sensor_1.temperature", snapshot.get("temperature")) or 0),
+            float(snapshot.get("sensor_1.humidity", snapshot.get("humidity")) or 0),
+            float(snapshot.get("sensor_2.temperature") or 0),
+            float(snapshot.get("sensor_2.humidity") or 0),
+            float(snapshot.get("sensor_3.temperature") or 0),
+            float(snapshot.get("sensor_3.humidity") or 0),
         )
-        detailed_keys = (
-            "sensor_1.temperature", "sensor_2.temperature", "sensor_3.temperature",
-            "sensor_1.humidity", "sensor_2.humidity", "sensor_3.humidity",
-        )
-        if any(key in snapshot for key in detailed_keys):
-            details = {key: float(snapshot.get(key) or 0) for key in detailed_keys}
-            line = line.rstrip("\n") + " | " + json.dumps(details, ensure_ascii=False, separators=(",", ":")) + "\n"
+        line = second_key + "," + ",".join(f"{value:.2f}" for value in values) + "\n"
         self._append_line(self._env_path, line)
         self._record_breath(timestamp, float(snapshot.get("flow") or 0))
 
@@ -305,7 +312,7 @@ class LiveSessionRecorder:
                 shutil.copy2(src, dst)
 
         patterns = {
-            "data_0": ("log_*.csv",),
+            "data_0": ("sensor_*.csv",),
             "breath_data": ("breath_*.csv",),
             "run": ("*.csv",),
             "heat_events": ("heat_*.csv",),
