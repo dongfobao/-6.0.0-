@@ -87,11 +87,12 @@ def main() -> None:
     low, high = world_bounds(imported)
     center = (low + high) / 2
     offset = Vector((-center.x, -center.y, -low.z))
-    model_transform = Matrix.Translation(offset) @ Matrix.Diagonal((SCALE, SCALE, SCALE, 1.0))
+    # 先减去 CAD 原点，再统一缩放；矩阵从右向左应用。
+    model_transform = Matrix.Diagonal((SCALE, SCALE, SCALE, 1.0)) @ Matrix.Translation(offset)
     for obj in imported:
-        # STL 顶点自身携带的是 CAD 的全局坐标；平移、缩放需直接应用到网格，
-        # 不能把未缩放的偏移写进对象 location。
-        obj.data.transform(model_transform)
+        # 有些 STL 的总装位置在 object.matrix_world，有些在顶点坐标中。
+        # 统一先应用其世界矩阵，再做总装归一化，不能直接丢弃 object location。
+        obj.data.transform(model_transform @ obj.matrix_world)
         obj.location = (0.0, 0.0, 0.0)
         obj.scale = (1.0, 1.0, 1.0)
 
