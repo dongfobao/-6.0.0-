@@ -3,6 +3,9 @@ const statusHost = document.getElementById("digitalTwinStatus");
 const connectionNode = document.getElementById("digitalTwinConnection");
 const breathNode = document.getElementById("digitalTwinBreath");
 const resetButton = document.getElementById("resetDigitalTwinBtn");
+const upperCallout = document.getElementById("twinUpperCallout");
+const heatCallout = document.getElementById("twinHeatCallout");
+const drainCallout = document.getElementById("twinDrainCallout");
 
 const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.3 };
 const scene = new THREE.Scene();
@@ -42,7 +45,8 @@ const keyLight = new THREE.DirectionalLight(0xe7f5ff, .86); keyLight.position.se
 const rimLight = new THREE.PointLight(0x38bdf8, 1.8, 12); rimLight.position.set(-3,2,3); scene.add(rimLight);
 
 const floor = new THREE.Mesh(new THREE.CircleGeometry(2.7,48), new THREE.MeshStandardMaterial({ color: 0x0b2940, metalness: .6, roughness: .55 })); floor.rotation.x = -Math.PI / 2; floor.position.y = -2.45; rig.add(floor);
-const outerShell = cylinder(1.08, 4.2, materials.glass, 0, -.1, 0);
+// 运行孪生使用半透明开窗壳体，优先呈现内部工艺而不是遮挡视线的实物外观。
+const outerShell = makeMesh(new THREE.CylinderGeometry(1.08, 1.08, 4.2, 48, 1, true, .42, Math.PI * 1.55), materials.glass, 0, -.1, 0);
 const topFlange = cylinder(1.19,.18,materials.metal,0,2.06,0);
 const bottomFlange = cylinder(1.19,.18,materials.metal,0,-2.08,0);
 const desiccantBed = cylinder(.82,3.55,materials.silica,0,-.05,0);
@@ -57,25 +61,34 @@ for (let y = -1.48; y <= 1.20; y += .24) {
 }
 const centerDuct = cylinder(.16,3.48,materials.dark,0,-.08,0);
 const oilCup = cylinder(.43,.74,materials.glass,0,-2.52,0);
-const upperValve = new THREE.Group(); rig.add(upperValve); upperValve.position.set(0,2.38,0);
+const upperValve = new THREE.Group(); rig.add(upperValve); upperValve.position.set(0,1.78,.82);
 const upperBody = new THREE.Mesh(new THREE.BoxGeometry(1.04,.42,.56),materials.dark); upperValve.add(upperBody);
 const upperSlider = new THREE.Mesh(new THREE.BoxGeometry(.34,.25,.38),materials.metal); upperSlider.name="upperSlider"; upperValve.add(upperSlider);
 upperSlider.position.set(-.23,.06,0);
 const upperCoil = new THREE.Mesh(new THREE.BoxGeometry(.36,.54,.68),materials.metal); upperValve.add(upperCoil); upperCoil.position.set(.66,.04,0);
-const drainValve = new THREE.Group(); rig.add(drainValve); drainValve.position.set(.82,-2.08,.05); drainValve.rotation.z = .10;
+const drainValve = new THREE.Group(); rig.add(drainValve); drainValve.position.set(.83,-1.84,.72); drainValve.rotation.z = .10;
 const drainBody = new THREE.Mesh(new THREE.BoxGeometry(.72,.34,.46),materials.dark); drainValve.add(drainBody);
 const drainSlider = new THREE.Mesh(new THREE.BoxGeometry(.28,.22,.32),materials.metal); drainSlider.name="drainSlider"; drainValve.add(drainSlider); drainSlider.position.set(-.20,.04,0);
 const drainCoil = new THREE.Mesh(new THREE.BoxGeometry(.26,.42,.52),materials.metal); drainValve.add(drainCoil); drainCoil.position.set(.49,.03,0);
 
 const sensorGroup = new THREE.Group(); rig.add(sensorGroup); sensorGroup.position.y=2.22;
 [[-.58,0,"流量"],[0,0,"压力"],[.58,0,"温湿度"]].forEach(([x,z])=>{const s=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,.38,16),materials.metal);s.position.set(x,.28,z);sensorGroup.add(s);});
-const airCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0,-2.45,0),new THREE.Vector3(0,-.9,.02),new THREE.Vector3(0,.4,.02),new THREE.Vector3(0,1.5,.02),new THREE.Vector3(0,2.43,.02)]);
+const airCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0,-2.45,.22),new THREE.Vector3(0,-.9,.28),new THREE.Vector3(0,.4,.28),new THREE.Vector3(0,1.45,.28),new THREE.Vector3(0,2.30,.22)]);
 const waterCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(.82,.95,.42),new THREE.Vector3(.88,-.65,.42),new THREE.Vector3(.86,-1.85,.25),new THREE.Vector3(.78,-2.23,.08),new THREE.Vector3(0,-2.55,0)]);
 const airGuide = new THREE.Line(new THREE.BufferGeometry().setFromPoints(airCurve.getPoints(36)),new THREE.LineBasicMaterial({color:0xfb7185,transparent:true,opacity:.35}));
 const waterGuide = new THREE.Line(new THREE.BufferGeometry().setFromPoints(waterCurve.getPoints(36)),new THREE.LineBasicMaterial({color:0x4ade80,transparent:true,opacity:.3}));
 rig.add(airGuide, waterGuide);
+const airTube = new THREE.Mesh(new THREE.TubeGeometry(airCurve, 56, .018, 8, false), new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: .34 }));
+const waterTube = new THREE.Mesh(new THREE.TubeGeometry(waterCurve, 56, .014, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .30 }));
+rig.add(airTube, waterTube);
 const airParticles = Array.from({length: 22}, (_, index) => { const dot=new THREE.Mesh(new THREE.SphereGeometry(.032,8,8),materials.air); rig.add(dot); return {dot, offset:index/22}; });
 const waterParticles = Array.from({length: 12}, (_, index) => { const dot=new THREE.Mesh(new THREE.SphereGeometry(.025,8,8),materials.water); rig.add(dot); return {dot, offset:index/12}; });
+const steamMaterial = new THREE.MeshBasicMaterial({ color: 0xd9f8ff, transparent: true, opacity: .33, depthWrite: false });
+const steamParticles = Array.from({ length: 18 }, (_, index) => {
+  const puff = new THREE.Mesh(new THREE.SphereGeometry(.055 + (index % 3) * .018, 10, 8), steamMaterial.clone());
+  rig.add(puff);
+  return { puff, offset: index / 18 };
+});
 const cadModel = new THREE.Group();
 cadModel.position.y = -2.394;
 cadModel.visible = false;
@@ -135,16 +148,19 @@ function update(snapshot) {
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
+  upperCallout?.classList.toggle("active", upper.moving || upper.fault);
+  heatCallout?.classList.toggle("active", heat === 1 || heat === 2 || heat === 3);
+  drainCallout?.classList.toggle("active", drain.moving || drain.position === 1 || drain.fault);
   setStatus([["上阀", upper.fault ? "故障" : upper.moving ? "切换中" : upper.label, upper.fault ? "fault" : ""],["左排水阀", drain.fault ? "故障" : drain.moving ? "切换中" : drain.label, drain.fault ? "fault" : ""],["HTC1", heat === 1 ? "加热中" : heat === 2 ? "闪烁" : heat === 3 ? "切换中" : "关闭", heat === 1 ? "active" : ""],["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]]);
 }
 
 function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.3; }
 function resize(){ const width=host.clientWidth,height=host.clientHeight; if(!width||!height)return; renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix(); }
-function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const flow=Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 12); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*(.35+flow*.16); upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=!cadModel.visible && activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=!cadModel.visible && drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);renderer.render(scene,camera); }
+function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const flow=Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 12); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*(.35+flow*.16); upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); steamParticles.forEach(({puff,offset})=>{const p=(phase*.40+offset)%1;puff.visible=heat===1;puff.position.set(.10*Math.sin((p+offset)*18),-1.25+p*2.70,.11*Math.cos((p+offset)*12));puff.scale.setScalar(.65+p*.9);puff.material.opacity=(1-p)*.28;}); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);renderer.render(scene,camera); }
 
 host.addEventListener("pointerdown", event => { STATUS.dragging=true; STATUS.pointer={x:event.clientX,y:event.clientY}; host.setPointerCapture(event.pointerId); });
 host.addEventListener("pointermove", event => { if(!STATUS.dragging||!STATUS.pointer)return; STATUS.yaw+=(event.clientX-STATUS.pointer.x)*.011;STATUS.pitch=Math.max(-.48,Math.min(.48,STATUS.pitch+(event.clientY-STATUS.pointer.y)*.008));STATUS.pointer={x:event.clientX,y:event.clientY}; });
 host.addEventListener("pointerup", () => { STATUS.dragging=false;STATUS.pointer=null; });
 host.addEventListener("wheel", event => { event.preventDefault(); STATUS.distance=Math.max(5.1,Math.min(10.5,STATUS.distance+event.deltaY*.006)); },{passive:false});
-host.addEventListener("dblclick",resetView);resetButton?.addEventListener("click",resetView);new ResizeObserver(resize).observe(host);resize();loadCadAssembly();animate();
+host.addEventListener("dblclick",resetView);resetButton?.addEventListener("click",resetView);new ResizeObserver(resize).observe(host);resize();animate();
 window.digitalTwin = { update, resetView };
