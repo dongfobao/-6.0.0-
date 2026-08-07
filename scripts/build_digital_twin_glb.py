@@ -103,8 +103,9 @@ def main() -> None:
             modifier.ratio = 0.58
             bpy.context.view_layer.objects.active = obj
             bpy.ops.object.modifier_apply(modifier=modifier.name)
+        # 保留 STL 的机械硬边和折面，避免金属壳体在 Web 端被错误渲染成圆润塑料。
         for polygon in obj.data.polygons:
-            polygon.use_smooth = True
+            polygon.use_smooth = False
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.object.select_all(action="SELECT")

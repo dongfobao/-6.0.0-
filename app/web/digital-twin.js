@@ -31,10 +31,10 @@ const materials = {
   fault: new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x5f0000, emissiveIntensity: .7 }),
 };
 const cadMaterials = {
-  structure: new THREE.MeshStandardMaterial({ color: 0x708699, metalness: .64, roughness: .38 }),
-  valve: new THREE.MeshStandardMaterial({ color: 0x183d5b, metalness: .62, roughness: .30 }),
-  heater: new THREE.MeshStandardMaterial({ color: 0x98583b, metalness: .52, roughness: .42 }),
-  support: new THREE.MeshStandardMaterial({ color: 0x987252, metalness: .12, roughness: .58 }),
+  structure: new THREE.MeshStandardMaterial({ color: 0x405567, metalness: .88, roughness: .23 }),
+  valve: new THREE.MeshStandardMaterial({ color: 0x102b42, metalness: .90, roughness: .18 }),
+  heater: new THREE.MeshStandardMaterial({ color: 0x743416, metalness: .72, roughness: .30 }),
+  support: new THREE.MeshStandardMaterial({ color: 0x6d7781, metalness: .42, roughness: .46 }),
   desiccant: new THREE.MeshStandardMaterial({ color: 0x3f9b78, transparent: true, opacity: .16, metalness: .05, roughness: .64, depthWrite: false }),
   glass: new THREE.MeshPhysicalMaterial({ color: 0x4cc5cf, transparent: true, opacity: .14, metalness: .04, roughness: .08, side: THREE.DoubleSide, depthWrite: false }),
   activeValve: new THREE.MeshStandardMaterial({ color: 0x0d5b86, emissive: 0x0d2c42, emissiveIntensity: .9, metalness: .58, roughness: .28 }),
@@ -165,7 +165,7 @@ function loadCadAssembly() {
     console.warn("未加载 GLTFLoader，将使用简化数字孪生外观。");
     return;
   }
-  new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe.glb?v=3", gltf => {
+  new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe.glb?v=4", gltf => {
     let oilCupNode = null;
     let heaterNode = null;
     gltf.scene.traverse(object => {
