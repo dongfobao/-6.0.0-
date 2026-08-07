@@ -25,3 +25,16 @@ live_devices.json
 
 .DS_Store
 Thumbs.db
+
+# 本地三维建模资料（CAD、图片、视频不随代码仓库提交）
+3D数字孪生资料/
+
+# 本地构建诊断输出
+_build_*.txt
+_pkg_*.txt
+_pyi_*.txt
+_stdout.txt
+_stderr.txt
+
+# 打包过程遗留的 ESM 构建，页面仅使用兼容的经典构建
+app/web/vendor/three.module.js

@@ -6,6 +6,7 @@
   <title>YLDQ 6.0 远程监控系统</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/overview-dashboard.css">
+  <link rel="stylesheet" href="/digital-twin.css">
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
   <link rel="stylesheet" href="/analysis.css">
@@ -46,6 +47,22 @@
       <div id="notice" class="notice hidden"></div>
 
       <section class="page overview-page active" data-page-view="overview">
+        <section class="overview-section digital-twin-section" aria-labelledby="digitalTwinTitle">
+          <div class="overview-section-head digital-twin-head"><div><small>DIGITAL TWIN</small><h3 id="digitalTwinTitle">单管设备数字孪生</h3></div><p>仅展示下位机已回读的实际状态；拖动查看，滚轮缩放。</p></div>
+          <div class="digital-twin-layout">
+            <div id="digitalTwinViewport" class="digital-twin-viewport" role="img" aria-label="单管吸湿器三维数字孪生，包含上阀、左排水阀、加热架、传感器和油杯">
+              <div class="digital-twin-loading">正在初始化三维场景…</div>
+              <div class="digital-twin-hud"><span id="digitalTwinConnection" class="digital-twin-pill offline">等待数据</span><span id="digitalTwinBreath">呼吸：--</span></div>
+              <div class="digital-twin-hint">拖动旋转 · 滚轮缩放 · 双击复位</div>
+            </div>
+            <aside class="digital-twin-panel" aria-label="数字孪生实时状态">
+              <div class="digital-twin-summary"><span>设备型号</span><strong>5.0 单管吸湿器</strong><small>上阀 + 左排水阀 · HTC1</small></div>
+              <dl id="digitalTwinStatus" class="digital-twin-status"><div><dt>上阀</dt><dd>等待数据</dd></div><div><dt>左排水阀</dt><dd>等待数据</dd></div><div><dt>HTC1</dt><dd>等待数据</dd></div><div><dt>气流</dt><dd>等待数据</dd></div></dl>
+              <div class="digital-twin-legend"><span><i class="air"></i>气体通路</span><span><i class="water"></i>冷凝水排放</span><span><i class="heat"></i>HTC1 加热</span></div>
+              <button id="resetDigitalTwinBtn" class="button small secondary" type="button">复位视角</button>
+            </aside>
+          </div>
+        </section>
         <section class="overview-section environment-section">
           <div class="overview-section-head"><div><small>ENVIRONMENT</small><h3>三路温湿度</h3></div><p>每路独立显示测量值、通信质量和传感器状态</p></div>
           <div id="sensorCards" class="sensor-grid"></div>
@@ -196,6 +213,8 @@
       <div class="dialog-actions"><button type="button" id="cancelDeviceBtn" class="button secondary">取消</button><button type="submit" class="button primary">保存设备</button></div>
     </form>
   </dialog>
+  <script src="/vendor/three.legacy.js"></script>
+  <script src="/digital-twin.js"></script>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>
