@@ -26,7 +26,7 @@ const materials = {
   glass: new THREE.MeshPhysicalMaterial({ color: 0x4bbfc8, transparent: true, opacity: .18, roughness: .08, metalness: .08, side: THREE.DoubleSide, depthWrite: false }),
   silica: new THREE.MeshStandardMaterial({ color: 0x4c8f9b, transparent: true, opacity: .33, metalness: .15, roughness: .66, depthWrite: false }),
   heated: new THREE.MeshStandardMaterial({ color: 0x8d5534, emissive: 0x000000, emissiveIntensity: 0 }),
-  air: new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: .9 }),
+  air: new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .94 }),
   water: new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .74 }),
   fault: new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x5f0000, emissiveIntensity: .7 }),
 };
@@ -140,7 +140,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     outlet.clone().add(frontOffset),
   ]);
   const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
-  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 72, .030, 8, false), new THREE.MeshBasicMaterial({ color: 0xff5f78, transparent: true, opacity: .58, depthTest: false, depthWrite: false }));
+  const airTubeReal = new THREE.Mesh(new THREE.TubeGeometry(airPath, 96, .030, 8, false), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .58, depthTest: false, depthWrite: false }));
   const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
   realEffects.add(airTubeReal, waterTubeReal);
   REAL.airTube = airTubeReal;
@@ -246,7 +246,7 @@ function update(snapshot) {
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
-  upperCallout?.classList.toggle("active", upper.moving || upper.fault);
+  upperCallout?.classList.toggle("active", upper.position === 1 || upper.moving || upper.fault);
   heatCallout?.classList.toggle("active", heat === 1 || heat === 2 || heat === 3);
   drainCallout?.classList.toggle("active", drain.moving || drain.position === 1 || drain.fault);
   setStatus([["上阀", upper.fault ? "故障" : upper.moving ? "切换中" : upper.label, upper.fault ? "fault" : ""],["左排水阀", drain.fault ? "故障" : drain.moving ? "切换中" : drain.label, drain.fault ? "fault" : ""],["HTC1", heat === 1 ? "加热中" : heat === 2 ? "闪烁" : heat === 3 ? "切换中" : "关闭", heat === 1 ? "active" : ""],["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]]);
@@ -275,8 +275,9 @@ function animateRealProcess(now, snapshot) {
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.1 : 0;
   const activeBreath = breath === 0 || breath === 1;
-  if (REAL.airTube) REAL.airTube.material.opacity = activeBreath ? .78 : .24;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  const upperWorkPath = upper.position === 1 && !upper.fault;
+  if (REAL.airTube) REAL.airTube.material.opacity = upperWorkPath ? (activeBreath ? .90 : .42) : .10;
+  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = upperWorkPath && activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((phase * .46 + offset) % 1)); });
   REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .38 + offset) % 1; puff.visible = heat === 1; puff.position.set(origin.x + .16 * Math.sin((p + offset) * 18), origin.y + p * .92, origin.z + .13 * Math.cos((p + offset) * 13)); puff.scale.setScalar(.70 + p * 1.25); puff.material.opacity = (1 - p) * .52; });
