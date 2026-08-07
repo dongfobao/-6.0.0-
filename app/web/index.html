@@ -6,7 +6,7 @@
   <title>YLDQ 6.0 远程监控系统</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/overview-dashboard.css">
-  <link rel="stylesheet" href="/digital-twin.css?v=4">
+  <link rel="stylesheet" href="/digital-twin.css?v=5">
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
   <link rel="stylesheet" href="/analysis.css">
@@ -55,7 +55,7 @@
               <div class="digital-twin-hud"><span id="digitalTwinConnection" class="digital-twin-pill offline">等待数据</span><span id="digitalTwinBreath">呼吸：--</span></div>
               <div class="digital-twin-hint">拖动旋转 · 滚轮缩放 · 双击复位</div>
             </div>
-            <div class="digital-twin-data-labels" aria-label="模型实时数据"><div class="twin-data-label t1"><small>左温湿度</small><strong id="twinT1Value">--</strong><span id="twinT1Info">1号传感器 · 等待数据</span></div><div class="twin-data-label t2"><small>右温湿度</small><strong id="twinT2Value">--</strong><span id="twinT2Info">2号传感器 · 等待数据</span></div><div class="twin-data-label t3"><small>上温湿度</small><strong id="twinT3Value">--</strong><span id="twinT3Info">3号传感器 · 等待数据</span></div><div class="twin-data-label pressure"><small>压力</small><strong id="twinPressureValue">--</strong><span id="twinPressureInfo">压力状态：--</span></div><div class="twin-data-label flow"><small>流量</small><strong id="twinFlowValue">--</strong><span id="twinFlowInfo">呼吸状态：--</span></div><div class="twin-data-label breath"><small>实时过程</small><strong id="twinBreathValue">--</strong><span id="twinBreathInfo">气路状态：--</span></div></div><button id="resetDigitalTwinBtn" class="button small secondary twin-reset" type="button">复位视角</button><dl id="digitalTwinStatus" hidden></dl>
+            <div class="digital-twin-data-labels" aria-label="模型实时数据"><svg class="twin-label-leaders" aria-hidden="true"><defs><marker id="twinLabelArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" /></marker></defs><line id="twinLeaderT1" marker-end="url(#twinLabelArrow)"/><line id="twinLeaderT2" marker-end="url(#twinLabelArrow)"/><line id="twinLeaderT3" marker-end="url(#twinLabelArrow)"/><line id="twinLeaderPressure" marker-end="url(#twinLabelArrow)"/><line id="twinLeaderFlow" marker-end="url(#twinLabelArrow)"/><line id="twinLeaderBreath" marker-end="url(#twinLabelArrow)"/></svg><div class="twin-data-label t1"><small>左温湿度</small><strong id="twinT1Value">--</strong><span id="twinT1Info">1号传感器 · 等待数据</span></div><div class="twin-data-label t2"><small>右温湿度</small><strong id="twinT2Value">--</strong><span id="twinT2Info">2号传感器 · 等待数据</span></div><div class="twin-data-label t3"><small>上温湿度</small><strong id="twinT3Value">--</strong><span id="twinT3Info">3号传感器 · 等待数据</span></div><div class="twin-data-label pressure"><small>压力</small><strong id="twinPressureValue">--</strong><span id="twinPressureInfo">压力状态：--</span></div><div class="twin-data-label flow"><small>流量</small><strong id="twinFlowValue">--</strong><span id="twinFlowInfo">呼吸状态：--</span></div><div class="twin-data-label breath"><small>实时过程</small><strong id="twinBreathValue">--</strong><span id="twinBreathInfo">气路状态：--</span></div></div><button id="resetDigitalTwinBtn" class="button small secondary twin-reset" type="button">复位视角</button><dl id="digitalTwinStatus" hidden></dl>
           </div>
         </section>
         <section class="overview-section environment-section twin-source-data">
@@ -210,7 +210,7 @@
   </dialog>
   <script src="/vendor/three.legacy.js"></script>
   <script src="/vendor/GLTFLoader.legacy.js"></script>
-  <script src="/digital-twin.js?v=51"></script>
+  <script src="/digital-twin.js?v=54"></script>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>

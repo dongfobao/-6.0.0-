@@ -8,9 +8,12 @@ const heatCallout = document.getElementById("twinHeatCallout");
 const drainCallout = document.getElementById("twinDrainCallout");
 const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue"), breath: document.getElementById("twinBreathValue") };
 const twinDataInfoNodes = { t1: document.getElementById("twinT1Info"), t2: document.getElementById("twinT2Info"), t3: document.getElementById("twinT3Info"), pressure: document.getElementById("twinPressureInfo"), flow: document.getElementById("twinFlowInfo"), breath: document.getElementById("twinBreathInfo") };
+const twinLeaderNodes = { t1: document.getElementById("twinLeaderT1"), t2: document.getElementById("twinLeaderT2"), t3: document.getElementById("twinLeaderT3"), pressure: document.getElementById("twinLeaderPressure"), flow: document.getElementById("twinLeaderFlow"), breath: document.getElementById("twinLeaderBreath") };
 // 左右传感器标签固定在同一高度；上温湿度、压力与流量均对应传感器仓上方。
 // 标签锚点置于实体轮廓之外：随模型旋转、缩放，但不遮挡壳体及内部流场。
 const twinLabelAnchors = { t1: new THREE.Vector3(-3.15, .52, .10), t2: new THREE.Vector3(2.70, .52, .10), t3: new THREE.Vector3(-3.15, 1.62, .10), pressure: new THREE.Vector3(2.70, 1.72, .10), flow: new THREE.Vector3(2.70, -.40, .10), breath: new THREE.Vector3(-3.15, -1.08, .10) };
+// 箭头终点绑定真实零件：加载总装后按源文件命名更新为对应的结构中心。
+const twinLabelTargets = { t1: new THREE.Vector3(-.65, .55, .12), t2: new THREE.Vector3(.65, .55, .12), t3: new THREE.Vector3(0, 1.45, .12), pressure: new THREE.Vector3(.44, 1.45, .12), flow: new THREE.Vector3(-.44, 1.45, .12), breath: new THREE.Vector3(0, -1.58, .12) };
 // 单管设备的左侧温湿度为 T1/传感器 1，对应监控快照的第一路环境通道。
 const LEFT_HUMIDITY_CHANNEL_INDEX = 0;
 
@@ -291,10 +294,16 @@ function loadCadAssembly() {
     let silicaGridNode = null;
     let insulationNode = null;
     let upperSilicaNode = null;
+    const namedLabelNodes = {};
     gltf.scene.traverse(object => {
       if (!object.isMesh) return;
       // glTF 的业务属性和零件名在节点上，实际网格是其子对象。
       const nodeName = `${object.name} ${object.parent?.name || ""}`;
+      if (/component_04_/.test(nodeName)) namedLabelNodes.pressure ||= object;
+      if (/component_05_/.test(nodeName)) namedLabelNodes.flow ||= object;
+      if (/component_06_/.test(nodeName)) namedLabelNodes.t1 ||= object;
+      if (/component_07_/.test(nodeName)) namedLabelNodes.t2 ||= object;
+      if (/component_23_/.test(nodeName)) namedLabelNodes.t3 ||= object;
       if (/component_16_/.test(nodeName) && !lowerGlassNode) lowerGlassNode = object;
       const isGlassShell = object.userData?.digital_twin_role === "outer_shell" || /component_(16|36|51|52)_/.test(nodeName) || nodeName.includes("400玻璃管");
       if (isGlassShell) {
@@ -325,6 +334,8 @@ function loadCadAssembly() {
     cadModel.add(gltf.scene);
     cadModel.visible = true;
     cadModel.updateMatrixWorld(true);
+    Object.entries(namedLabelNodes).forEach(([key, object]) => twinLabelTargets[key].copy(rig.worldToLocal(centerOf(object))));
+    if (oilCoverNode || oilCupNode) twinLabelTargets.breath.copy(rig.worldToLocal(centerOf(oilCoverNode || oilCupNode)));
     hideProceduralDevice();
     if (REAL.upperValve && REAL.drainValve) {
       REAL.upperValve.userData.baseX = REAL.upperValve.position.x;
@@ -386,7 +397,44 @@ function update(snapshot) {
 
 function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.0; }
 function resize(){ const width=host.clientWidth,height=host.clientHeight; if(!width||!height)return; renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix(); }
-function positionTwinDataLabels(){ const width=host.clientWidth,height=host.clientHeight;if(!width||!height)return;let leftSensorTop=null;Object.entries(twinLabelAnchors).forEach(([key,anchor])=>{const node=document.querySelector(`.twin-data-label.${key}`);if(!node)return;const point=rig.localToWorld(anchor.clone()).project(camera);const horizontalMargin=Math.max(7,(node.offsetWidth/2+10)/width*100);node.style.left=`${Math.max(horizontalMargin,Math.min(100-horizontalMargin,(point.x*.5+.5)*100))}%`;const verticalMargin=Math.max(9,(node.offsetHeight/2+8)/height*100);const top=Math.max(verticalMargin,Math.min(100-verticalMargin,(-point.y*.5+.5)*100));if(key==="t1")leftSensorTop=top;node.style.top=`${key==="t2"&&leftSensorTop!==null?leftSensorTop:top}%`;}); }
+function positionTwinDataLabels(){
+  const width=host.clientWidth,height=host.clientHeight;
+  if(!width||!height)return;
+  const projectPoint=point=>{const projected=rig.localToWorld(point.clone()).project(camera);return {x:(projected.x*.5+.5)*100,y:(-projected.y*.5+.5)*100};};
+  const sides={left:[],right:[]},items={};
+  Object.entries(twinLabelAnchors).forEach(([key,anchor])=>{
+    const node=document.querySelector(`.twin-data-label.${key}`);
+    if(!node)return;
+    const projected=projectPoint(anchor);
+    const horizontalMargin=Math.max(7,(node.offsetWidth/2+10)/width*100);
+    const verticalMargin=Math.max(9,(node.offsetHeight/2+8)/height*100);
+    items[key]={key,node,leader:twinLeaderNodes[key],side:["t1","t3","breath"].includes(key)?"left":"right",left:Math.max(horizontalMargin,Math.min(100-horizontalMargin,projected.x)),desired:Math.max(verticalMargin,Math.min(100-verticalMargin,projected.y)),height:(node.offsetHeight+10)/height*100,verticalMargin};
+  });
+  if(items.t1&&items.t2)items.t2.desired=items.t1.desired;
+  Object.values(items).forEach(item=>sides[item.side].push(item));
+  Object.values(sides).forEach(group=>{
+    group.sort((a,b)=>a.desired-b.desired);
+    let cursor=4;
+    group.forEach(item=>{item.top=Math.max(item.desired,cursor+item.height/2);cursor=item.top+item.height/2+2;});
+    const overflow=Math.max(0,cursor-2-100);
+    if(overflow)group.forEach(item=>{item.top-=overflow;});
+    group.forEach(item=>{item.top=Math.max(item.verticalMargin,Math.min(100-item.verticalMargin,item.top));});
+  });
+  Object.values(items).forEach(item=>{
+    item.node.style.left=`${item.left}%`;
+    item.node.style.top=`${item.top}%`;
+    if(!item.leader)return;
+    const target=projectPoint(twinLabelTargets[item.key]);
+    const targetX=Math.max(2,Math.min(98,target.x)),targetY=Math.max(2,Math.min(98,target.y));
+    const halfWidth=item.node.offsetWidth/width*50,halfHeight=item.node.offsetHeight/height*50;
+    const deltaX=targetX-item.left,deltaY=targetY-item.top;
+    const scale=1/Math.max(Math.abs(deltaX)/Math.max(halfWidth,.1),Math.abs(deltaY)/Math.max(halfHeight,.1),1);
+    item.leader.setAttribute("x1",`${item.left+deltaX*scale}%`);
+    item.leader.setAttribute("y1",`${item.top+deltaY*scale}%`);
+    item.leader.setAttribute("x2",`${targetX}%`);
+    item.leader.setAttribute("y2",`${targetY}%`);
+  });
+}
 function animateRealProcess(now, snapshot) {
   if (!cadModel.visible || !REAL.upperValve || !REAL.drainValve) return;
   const upper = valveState(snapshot?.valves?.[0]);
