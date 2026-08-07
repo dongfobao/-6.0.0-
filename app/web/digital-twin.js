@@ -160,12 +160,13 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const heatBypassTube = new THREE.Mesh(new THREE.TubeGeometry(heatBypassPath, 84, .028, 8, false), new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: .08, depthTest: false, depthWrite: false }));
   realEffects.add(heatBypassHousing, heatBypassTube);
   REAL.heatBypassTube = heatBypassTube;
-  REAL.airParticles = Array.from({ length: 26 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.ConeGeometry(.046, .14, 8), materials.air.clone());
+  REAL.airParticles = Array.from({ length: 34 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.ConeGeometry(.066, .22, 10), new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 1, depthTest: false, depthWrite: false }));
     dot.material.depthTest = false;
     dot.material.depthWrite = false;
+    dot.renderOrder = 20;
     realEffects.add(dot);
-    return { dot, path: airPath, offset: index / 26 };
+    return { dot, path: airPath, offset: index / 34 };
   });
   REAL.heatBypassParticles = Array.from({ length: 18 }, (_, index) => {
     const arrow = new THREE.Mesh(new THREE.ConeGeometry(.042, .13, 8), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: .95, depthTest: false, depthWrite: false }));
@@ -297,6 +298,7 @@ function animateRealProcess(now, snapshot) {
   const heat = outputState(snapshot, "htc1");
   const breath = value(snapshot?.process?.breathState);
   const flow = Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 30);
+  const measuredFlow = flow >= .12;
   // 实时流量直接决定气体箭头在设备内上下穿梭的速度，低流量仍保留可辨识的缓慢运动。
   const phase = now * .001 * (.20 + flow * .55);
   const leftHumidity = value(snapshot?.environmentChannels?.[LEFT_HUMIDITY_CHANNEL_INDEX]?.humidity);
@@ -314,13 +316,15 @@ function animateRealProcess(now, snapshot) {
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.1 : 0;
   const activeBreath = breath === 0 || breath === 1;
-  const upperWorkPath = upper.position === 1 && !upper.fault;
+  const airflowActive = activeBreath || measuredFlow;
+  // 阀位未知时不假定阀门已到工作位；只有流量计实际检测到气流才展示观测到的通路。
+  const upperWorkPath = !upper.fault && (upper.position === 1 || (upper.position === 2 && measuredFlow));
   const heatingBypass = heat === 1;
   const normalFlowPath = upperWorkPath && !heatingBypass;
   if (REAL.airTube) REAL.airTube.material.opacity = .08;
-  if (REAL.airTube && normalFlowPath && activeBreath) REAL.airTube.material.opacity = .90;
-  if (REAL.airTube && normalFlowPath && !activeBreath) REAL.airTube.material.opacity = .42;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = normalFlowPath && activeBreath; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  if (REAL.airTube && normalFlowPath && airflowActive) REAL.airTube.material.opacity = .96;
+  if (REAL.airTube && normalFlowPath && !airflowActive) REAL.airTube.material.opacity = .42;
+  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (phase + offset) % 1; const direction = breath === 0 ? 1 : breath === 1 ? -1 : (value(snapshot?.process?.flow) || 0) >= 0 ? 1 : -1; const pathPoint = direction === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(direction).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.82 + Math.min(flow, 8) * .055); });
   if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
   REAL.heatBypassParticles.forEach(({ arrow, path, offset }) => { const p = (phase * .72 + offset) % 1; const tangent = path.getTangentAt(p).normalize(); arrow.visible = heatingBypass; arrow.position.copy(path.getPointAt(p)); arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   const drainage = drain.position === 1 && !drain.fault;
