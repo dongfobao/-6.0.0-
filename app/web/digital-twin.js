@@ -40,11 +40,13 @@ const topFlange = cylinder(1.19,.18,materials.metal,0,2.06,0);
 const bottomFlange = cylinder(1.19,.18,materials.metal,0,-2.08,0);
 cylinder(.82,3.55,materials.silica,0,-.05,0);
 const heater = cylinder(.46,3.10,materials.heated,0,-.12,0);
+const heaterCoils = [];
 for (let y = -1.48; y <= 1.20; y += .24) {
   const coil = new THREE.Mesh(new THREE.TorusGeometry(.51,.022,8,28), materials.heated);
   coil.rotation.x = Math.PI / 2;
   coil.position.y = y;
   rig.add(coil);
+  heaterCoils.push(coil);
 }
 const centerDuct = cylinder(.16,3.48,materials.dark,0,-.08,0);
 const oilCup = cylinder(.43,.74,materials.glass,0,-2.52,0);
@@ -66,6 +68,35 @@ rig.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(airCurve.getPoin
 rig.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(waterCurve.getPoints(36)),new THREE.LineBasicMaterial({color:0x4ade80,transparent:true,opacity:.3})));
 const airParticles = Array.from({length: 22}, (_, index) => { const dot=new THREE.Mesh(new THREE.SphereGeometry(.032,8,8),materials.air); rig.add(dot); return {dot, offset:index/22}; });
 const waterParticles = Array.from({length: 12}, (_, index) => { const dot=new THREE.Mesh(new THREE.SphereGeometry(.025,8,8),materials.water); rig.add(dot); return {dot, offset:index/12}; });
+const cadModel = new THREE.Group();
+cadModel.position.y = -2.394;
+cadModel.visible = false;
+rig.add(cadModel);
+
+function loadCadAssembly() {
+  if (!THREE.GLTFLoader) {
+    console.warn("未加载 GLTFLoader，将使用简化数字孪生外观。");
+    return;
+  }
+  new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe.glb", gltf => {
+    gltf.scene.traverse(object => {
+      const isGlassShell = object.isMesh && (object.userData?.digital_twin_role === "outer_shell" || /component_(16|36|51|52)_/.test(object.name) || object.name.includes("400玻璃管"));
+      if (!isGlassShell) return;
+      object.material = object.material.clone();
+      object.material.transparent = true;
+      object.material.opacity = 0.035;
+      object.material.depthWrite = false;
+      object.renderOrder = 10;
+    });
+    cadModel.add(gltf.scene);
+    cadModel.visible = true;
+    [floor, outerShell, topFlange, bottomFlange, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, ...heaterCoils]
+      .forEach(object => { object.visible = false; });
+    host.classList.add("digital-twin-cad-ready");
+  }, undefined, error => {
+    console.warn("真实总装模型加载失败，将使用简化数字孪生外观。", error);
+  });
+}
 
 function value(point) { const n = Number(point?.value); return Number.isFinite(n) ? n : null; }
 function valveState(valve) { return { position: value(valve?.position), moving: value(valve?.actuatorState) === 1, fault: value(valve?.faultReason) > 0 || value(valve?.actuatorState) === 2, label: valve?.position?.displayValue || "无有效数据" }; }
@@ -96,5 +127,5 @@ host.addEventListener("pointerdown", event => { STATUS.dragging=true; STATUS.poi
 host.addEventListener("pointermove", event => { if(!STATUS.dragging||!STATUS.pointer)return; STATUS.yaw+=(event.clientX-STATUS.pointer.x)*.011;STATUS.pitch=Math.max(-.48,Math.min(.48,STATUS.pitch+(event.clientY-STATUS.pointer.y)*.008));STATUS.pointer={x:event.clientX,y:event.clientY}; });
 host.addEventListener("pointerup", () => { STATUS.dragging=false;STATUS.pointer=null; });
 host.addEventListener("wheel", event => { event.preventDefault(); STATUS.distance=Math.max(5.1,Math.min(10.5,STATUS.distance+event.deltaY*.006)); },{passive:false});
-host.addEventListener("dblclick",resetView);resetButton?.addEventListener("click",resetView);new ResizeObserver(resize).observe(host);resize();animate();
+host.addEventListener("dblclick",resetView);resetButton?.addEventListener("click",resetView);new ResizeObserver(resize).observe(host);resize();loadCadAssembly();animate();
 window.digitalTwin = { update, resetView };
