@@ -285,11 +285,13 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const drainBaseVertices = verticesInRig(drainBaseNode);
   const drainBaseBox = drainBaseVertices.length ? new THREE.Box3().setFromPoints(drainBaseVertices) : null;
   const drainBaseCenter = drainBaseBox?.getCenter(new THREE.Vector3()) || drain.clone();
-  // “排水阀门、防冻加热仓”的上表面不是底座边缘。取阀主体所有朝上三角面中的真实最低点，
-  // 并对最低点附近的小平台取平均，避免落在单个三角形边缘造成视觉抖动。
+  // “排水阀门、防冻加热仓”包含左右两个低位圆形结构。真正的汇聚口位于阀主体左半侧的
+  // 圆形集水斜槽中，并非右侧电磁阀附近的圆面；先限定集水侧，再计算该区域的真实最低孔心。
   const drainSurfacePoints = upwardSurfacePointsInRig(drainBaseNode);
-  const lowestSurfaceY = drainSurfacePoints.length ? Math.min(...drainSurfacePoints.map(point => point.y)) : null;
-  const lowestSurfaceBand = lowestSurfaceY === null ? [] : drainSurfacePoints.filter(point => point.y <= lowestSurfaceY + .004);
+  const collectionSurfacePoints = drainSurfacePoints.filter(point => point.x < drainBaseCenter.x);
+  const drainTargetPoints = collectionSurfacePoints.length ? collectionSurfacePoints : drainSurfacePoints;
+  const lowestSurfaceY = drainTargetPoints.length ? Math.min(...drainTargetPoints.map(point => point.y)) : null;
+  const lowestSurfaceBand = lowestSurfaceY === null ? [] : drainTargetPoints.filter(point => point.y <= lowestSurfaceY + .004);
   const valveOutlet = lowestSurfaceBand.length
     ? lowestSurfaceBand.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / lowestSurfaceBand.length).add(new THREE.Vector3(0, .010, 0))
     : drain.clone().add(new THREE.Vector3(0, -.16, -.12));
