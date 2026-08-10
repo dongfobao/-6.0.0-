@@ -122,6 +122,31 @@ function centerOf(object) {
   return box.getCenter(new THREE.Vector3());
 }
 
+function verticesInRig(object) {
+  const vertices = [];
+  object?.traverse(candidate => {
+    const positions = candidate.geometry?.attributes?.position;
+    if (!candidate.isMesh || !positions) return;
+    for (let index = 0; index < positions.count; index += 1) {
+      const worldPoint = candidate.localToWorld(new THREE.Vector3().fromBufferAttribute(positions, index));
+      vertices.push(rig.worldToLocal(worldPoint));
+    }
+  });
+  return vertices;
+}
+
+function condensationPoint(item, progress) {
+  const fall = Math.pow(THREE.MathUtils.clamp(progress, 0, 1), 1.28);
+  const merge = THREE.MathUtils.smoothstep(fall, .18, .86);
+  const bend = Math.sin(fall * Math.PI * item.bends + item.seed) * item.curve * (1 - merge * .82);
+  const angle = THREE.MathUtils.lerp(item.startAngle, item.targetAngle, merge) + bend;
+  return new THREE.Vector3(
+    item.center.x + Math.sin(angle) * item.radius,
+    THREE.MathUtils.lerp(item.topY, item.bottomY, fall),
+    item.center.z + Math.cos(angle) * item.radius,
+  );
+}
+
 function addRealHalo(object, color) {
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3()).multiplyScalar(1.12);
@@ -191,18 +216,22 @@ function buildModelBypassFlow(pipeMeshes) {
   });
 }
 
-function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode) {
-  const oilCover = centerOf(oilCoverNode || oilCupNode || drainValveNode);
-  const oil = centerOf(oilCupNode || oilCoverNode || drainValveNode);
-  const heaterCenter = centerOf(heaterNode || upperValveNode);
-  const upper = centerOf(upperValveNode);
-  const sensor = centerOf(sensorNode || upperValveNode);
-  const outlet = centerOf(outletNode || sensorNode || upperValveNode);
-  const drain = centerOf(drainValveNode);
-  const lowerGlassBox = lowerGlassNode ? new THREE.Box3().setFromObject(lowerGlassNode) : null;
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode) {
+  const localCenterOf = object => rig.worldToLocal(centerOf(object));
+  const oilCover = localCenterOf(oilCoverNode || oilCupNode || drainValveNode);
+  const oil = localCenterOf(oilCupNode || oilCoverNode || drainValveNode);
+  const heaterCenter = localCenterOf(heaterNode || upperValveNode);
+  const upper = localCenterOf(upperValveNode);
+  const sensor = localCenterOf(sensorNode || upperValveNode);
+  const outlet = localCenterOf(outletNode || sensorNode || upperValveNode);
+  const drain = localCenterOf(drainValveNode);
+  const lowerGlassVertices = verticesInRig(lowerGlassNode);
+  const lowerGlassBox = lowerGlassVertices.length ? new THREE.Box3().setFromPoints(lowerGlassVertices) : null;
   const lowerGlassCenter = lowerGlassBox?.getCenter(new THREE.Vector3()) || heaterCenter.clone();
   const lowerGlassSize = lowerGlassBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.18, 2.9, 1.18);
-  const gridCenter = silicaGridNode ? centerOf(silicaGridNode) : lowerGlassCenter;
+  const glassRadii = lowerGlassVertices.map(point => Math.hypot(point.x - lowerGlassCenter.x, point.z - lowerGlassCenter.z)).filter(radius => radius > .12);
+  const lowerGlassInnerRadius = glassRadii.length ? Math.min(...glassRadii) : Math.min(lowerGlassSize.x, lowerGlassSize.z) * .46;
+  const gridCenter = silicaGridNode ? localCenterOf(silicaGridNode) : lowerGlassCenter;
   const coreX = gridCenter.x;
   const coreZ = gridCenter.z;
   const coreEntry = new THREE.Vector3(coreX, lowerGlassBox ? lowerGlassBox.min.y + .12 : heaterCenter.y - .70, coreZ);
@@ -211,11 +240,12 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const heatBottomY = lowerGlassBox ? lowerGlassBox.min.y + .16 : heaterCenter.y - .82;
   const heatTopY = lowerGlassBox ? lowerGlassBox.max.y - .16 : heaterCenter.y + .82;
   const heatOuterRadius = Math.max(.28, lowerWallRadius - .07);
-  const upperGlassBox = upperGlassNode ? new THREE.Box3().setFromObject(upperGlassNode) : null;
+  const upperGlassVertices = verticesInRig(upperGlassNode);
+  const upperGlassBox = upperGlassVertices.length ? new THREE.Box3().setFromPoints(upperGlassVertices) : null;
   const upperGlassCenter = upperGlassBox?.getCenter(new THREE.Vector3()) || upper.clone();
   const upperGlassSize = upperGlassBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.08, 1.10, 1.08);
-  const insulationCenter = insulationNode ? centerOf(insulationNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, -upperGlassSize.y * .35, 0));
-  const upperSilicaCenter = upperSilicaNode ? centerOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
+  const insulationCenter = insulationNode ? localCenterOf(insulationNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, -upperGlassSize.y * .35, 0));
+  const upperSilicaCenter = upperSilicaNode ? localCenterOf(upperSilicaNode) : upperGlassCenter.clone().add(new THREE.Vector3(0, upperGlassSize.y * .30, 0));
   const upperCoreX = upperSilicaCenter.x;
   const upperCoreZ = upperSilicaCenter.z;
   // 上阀出口是上部干燥剂腔的唯一气源；不再从隔热板位置凭空起流。
@@ -227,7 +257,12 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
   const sensorPath = new THREE.LineCurve3(new THREE.Vector3(upperCoreX, upperSilicaY, upperCoreZ), new THREE.Vector3(upperCoreX, outlet.y, upperCoreZ));
-  const valveOutlet = drain.clone().add(new THREE.Vector3(0, -.06, .26));
+  const drainBaseVertices = verticesInRig(drainBaseNode);
+  const drainBaseBox = drainBaseVertices.length ? new THREE.Box3().setFromPoints(drainBaseVertices) : null;
+  const drainBaseCenter = drainBaseBox?.getCenter(new THREE.Vector3()) || drain.clone();
+  const valveOutlet = drainBaseBox
+    ? new THREE.Vector3(drainBaseCenter.x, drainBaseBox.min.y + .018, Math.min(drainBaseBox.max.z - .025, drain.z - .08))
+    : drain.clone().add(new THREE.Vector3(0, -.16, -.12));
   const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
   // 中间无硅胶气道使用圆点平流，不使用锥形箭头。
@@ -291,18 +326,40 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     return { dot, path: waterPath, offset: index / 16 };
   });
   // 排水仓上方斜面：不同落点的水沿斜面汇聚到最低处的阀门洞口。
-  const slopeStartY = lowerGlassBox ? lowerGlassBox.min.y - .025 : valveOutlet.y + .24;
-  const slopeWidth = Math.min(lowerGlassSize.x * .31, .42);
-  const slopeStarts = [-1, -.5, 0, .5, 1].map((spread, index) => new THREE.Vector3(
-    lowerGlassCenter.x + spread * slopeWidth,
-    slopeStartY + Math.abs(spread) * .035,
-    THREE.MathUtils.lerp(lowerGlassCenter.z + (index % 2 ? -.13 : .13), valveOutlet.z, .28),
-  ));
-  const slopePaths = slopeStarts.map(start => new THREE.QuadraticBezierCurve3(
-    start,
-    new THREE.Vector3(THREE.MathUtils.lerp(start.x, valveOutlet.x, .58), THREE.MathUtils.lerp(start.y, valveOutlet.y, .52), THREE.MathUtils.lerp(start.z, valveOutlet.z, .62)),
-    valveOutlet.clone(),
-  ));
+  const slopeRaycaster = new THREE.Raycaster();
+  const projectToSlope = (x, z, fallbackY) => {
+    if (!drainBaseNode || !drainBaseBox) return new THREE.Vector3(x, fallbackY, z);
+    rig.updateMatrixWorld(true);
+    drainBaseNode.updateWorldMatrix(true, true);
+    const localOrigin = new THREE.Vector3(x, drainBaseBox.max.y + .20, z);
+    const worldOrigin = rig.localToWorld(localOrigin.clone());
+    const worldDirection = new THREE.Vector3(0, -1, 0).transformDirection(rig.matrixWorld);
+    slopeRaycaster.set(worldOrigin, worldDirection);
+    const hit = slopeRaycaster.intersectObject(drainBaseNode, true)[0];
+    return hit ? rig.worldToLocal(hit.point.clone()).add(new THREE.Vector3(0, .010, 0)) : new THREE.Vector3(x, fallbackY, z);
+  };
+  const slopeWidth = drainBaseBox ? Math.min(drainBaseBox.getSize(new THREE.Vector3()).x * .30, .22) : .20;
+  const slopeStartZ = drainBaseBox ? drainBaseCenter.z - drainBaseBox.getSize(new THREE.Vector3()).z * .19 : valveOutlet.z - .32;
+  const slopePaths = [-1, -.5, 0, .5, 1].map(spread => {
+    const start = projectToSlope(drainBaseCenter.x + spread * slopeWidth, slopeStartZ, valveOutlet.y + .16);
+    const points = [];
+    for (let step = 0; step <= 12; step += 1) {
+      const progress = step / 12;
+      if (step === 12) {
+        points.push(valveOutlet.clone());
+        continue;
+      }
+      const x = THREE.MathUtils.lerp(start.x, valveOutlet.x, progress) + Math.sin(progress * Math.PI) * spread * .018;
+      const z = THREE.MathUtils.lerp(start.z, valveOutlet.z, progress);
+      const projected = projectToSlope(x, z, THREE.MathUtils.lerp(start.y, valveOutlet.y, progress));
+      if (points.length) projected.y = Math.min(projected.y, points[points.length - 1].y - .0015);
+      projected.y = Math.max(projected.y, valveOutlet.y + .006);
+      points.push(projected);
+    }
+    const path = new THREE.CurvePath();
+    for (let index = 1; index < points.length; index += 1) path.add(new THREE.LineCurve3(points[index - 1], points[index]));
+    return path;
+  });
   REAL.slopeWaterParticles = Array.from({ length: 30 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .84, depthTest: false, depthWrite: false }));
     dot.renderOrder = 23;
@@ -346,7 +403,10 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   // 玻璃内壁凝结采用“水珠头 + 向上拖尾”，模拟雨水打在窗户上后缓慢下滑的水痕。
   const condensationTopY = lowerGlassBox ? lowerGlassBox.max.y - .10 : heaterCenter.y + .78;
   const condensationBottomY = lowerGlassBox ? lowerGlassBox.min.y + .08 : heaterCenter.y - .82;
-  const condensationRadius = Math.max(.20, lowerWallRadius + .025);
+  // 水珠贴在玻璃真实内圆柱面上；略向圆心缩进，避免水珠球体穿出外壁。
+  const condensationRadius = Math.max(.20, lowerGlassInnerRadius - .018);
+  const mergeChannels = 11;
+  const channelAngle = Math.PI * 2 / mergeChannels;
   REAL.condensationDrops = Array.from({ length: 44 }, (_, index) => {
     const group = new THREE.Group();
     const headMaterial = new THREE.MeshBasicMaterial({ color: 0x9be7ff, transparent: true, opacity: .78, depthTest: false, depthWrite: false });
@@ -354,18 +414,22 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     const head = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 5) * .003, 8, 8), headMaterial);
     const trailLength = .055 + (index % 4) * .018;
     const trail = new THREE.Mesh(new THREE.CylinderGeometry(.004, .009, trailLength, 7), trailMaterial);
-    trail.position.y = trailLength * .50;
     group.add(head, trail);
     realEffects.add(group);
+    const startAngle = index * 2.399;
     return {
       group,
       head,
       trail,
+      trailLength,
       center: new THREE.Vector3(lowerGlassCenter.x, 0, lowerGlassCenter.z),
-      angle: index * 2.399,
+      startAngle,
+      targetAngle: Math.round(startAngle / channelAngle) * channelAngle,
       offset: ((index * 17) % 44) / 44,
       speed: .026 + (index % 6) * .004,
-      wobble: .008 + (index % 4) * .003,
+      curve: .040 + (index % 5) * .009,
+      bends: 2.1 + (index % 4) * .58,
+      seed: index * 1.73,
       topY: condensationTopY,
       bottomY: condensationBottomY,
       radius: condensationRadius,
@@ -373,6 +437,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   });
   const valveHole = new THREE.Mesh(new THREE.CircleGeometry(.070, 18), new THREE.MeshBasicMaterial({ color: 0x082f49, transparent: true, opacity: .88, depthTest: false, depthWrite: false }));
   valveHole.position.copy(valveOutlet);
+  valveHole.rotation.x = -Math.PI / 2;
   realEffects.add(valveHole);
   REAL.valveDrops = Array.from({ length: 9 }, (_, index) => {
     const drop = new THREE.Mesh(new THREE.SphereGeometry(.024 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .86, depthTest: false, depthWrite: false }));
@@ -395,6 +460,7 @@ function loadCadAssembly() {
     let sensorNode = null;
     let outletNode = null;
     let lowerGlassNode = null;
+    let upperGlassNode = null;
     let silicaGridNode = null;
     let insulationNode = null;
     let upperSilicaNode = null;
@@ -453,12 +519,13 @@ function loadCadAssembly() {
       REAL.drainValve.userData.baseX = REAL.drainValve.position.x;
       REAL.drainValve.userData.baseZ = REAL.drainValve.position.z;
       // component_52 为观察罐；不能取最高透明罩，否则粒子会越过传感器仓基座。
-      const upperGlassNode = REAL.shellMeshes.find(object => /component_52_/.test(`${object.name} ${object.parent?.name || ""}`)) || [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
-      buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, REAL.upperValve, sensorNode, outletNode, REAL.drainValve, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode);
+      upperGlassNode = REAL.shellMeshes.find(object => /component_52_/.test(`${object.name} ${object.parent?.name || ""}`)) || [...REAL.shellMeshes].sort((a, b) => centerOf(b).y - centerOf(a).y)[0] || null;
     }
     // 旧总装只提供精确的零件坐标和动态锚点；实际显示改为用户提供的新版完整模型。
     gltf.scene.traverse(object => { if (object.isMesh) object.visible = false; });
     new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=3", replacement => {
+      let replacementLowerGlassNode = null;
+      let replacementDrainBaseNode = null;
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
         const role = object.userData?.digital_twin_role || "structure";
@@ -474,6 +541,8 @@ function loadCadAssembly() {
         const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile);
         const isBypassPipe = businessFunction === "heat_bypass_pipe";
         const isHeatingElement = role === "heater_frame" && !/295金属网/.test(sourceFile);
+        if (/400玻璃管/.test(sourceFile)) replacementLowerGlassNode ||= object;
+        if (/底座装配2-1 底座/.test(sourceFile)) replacementDrainBaseNode ||= object;
         object.material = isBypassPipe ? cadMaterials.bypassPipe
           : isValveHardware ? cadMaterials.valveSolid
           : isDrainChamber ? cadMaterials.drainChamber
@@ -491,6 +560,23 @@ function loadCadAssembly() {
       });
       cadModel.add(replacement.scene);
       cadModel.updateMatrixWorld(true);
+      if (REAL.upperValve && REAL.drainValve) {
+        buildRealProcessEffects(
+          oilCoverNode,
+          oilCupNode,
+          heaterNode,
+          REAL.upperValve,
+          sensorNode,
+          outletNode,
+          REAL.drainValve,
+          replacementLowerGlassNode || lowerGlassNode,
+          silicaGridNode,
+          upperGlassNode,
+          insulationNode,
+          upperSilicaNode,
+          replacementDrainBaseNode,
+        );
+      }
       buildModelBypassFlow(REAL.bypassMeshes);
       [...REAL.visualUpperValves, ...REAL.visualDrainValves].forEach(object => {
         if (!object) return;
@@ -639,14 +725,33 @@ function animateRealProcess(now, snapshot) {
   REAL.steamParticles.forEach(({ puff, center, angle, heightOffset, offset, startY, endY, outerRadius }) => { const p = (visualTime * .055 + offset) % 1; const radius = THREE.MathUtils.lerp(.12, outerRadius, p); puff.visible = heat === 1; puff.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, heightOffset) + p * .12, center.z + Math.cos(angle) * radius); puff.scale.setScalar((.52 + p * .72) * (.72 + visualMoisture * .38)); puff.material.opacity = (1 - p) * (.18 + visualMoisture * .40); });
   REAL.heatShells.forEach(({ shell, offset, innerRadius, outerRadius }) => { const p = (visualTime * .10 + offset) % 1; const radius = THREE.MathUtils.lerp(innerRadius, outerRadius, p); shell.visible = heat === 1; shell.scale.set(radius, 1, radius); shell.material.opacity = Math.sin(Math.PI * p) * .15; });
   if (REAL.heatLight) { REAL.heatLight.visible = heat === 1; REAL.heatLight.intensity = heat === 1 ? .42 + Math.sin(visualTime * 1.35) * .08 : 0; }
-  REAL.condensationDrops.forEach(({ group, head, trail, center, angle, offset, speed, wobble, topY, bottomY, radius }) => { const p = (visualTime * speed + offset) % 1; const rainAngle = angle + Math.sin(p * Math.PI * 2 + offset * 9) * wobble; group.visible = heat === 1; group.position.set(center.x + Math.sin(rainAngle) * radius, THREE.MathUtils.lerp(topY, bottomY, p), center.z + Math.cos(rainAngle) * radius); head.scale.setScalar(.72 + p * .55); trail.scale.y = .58 + p * .88; head.material.opacity = .48 + p * .40; trail.material.opacity = .18 + p * .28; });
+  REAL.condensationDrops.forEach(item => {
+    const p = (visualTime * item.speed + item.offset) % 1;
+    const point = condensationPoint(item, p);
+    const previous = condensationPoint(item, Math.max(0, p - .018));
+    const backward = previous.sub(point);
+    if (backward.lengthSq() < 1e-8) backward.set(0, .012, 0);
+    const backLength = backward.length();
+    item.group.visible = heat === 1;
+    item.group.position.copy(point);
+    item.head.scale.setScalar(.68 + Math.pow(p, .82) * .76);
+    item.trail.position.copy(backward).multiplyScalar(.5);
+    item.trail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), backward.normalize());
+    item.trail.scale.set(1, Math.max(.26, backLength / item.trailLength), 1);
+    item.head.material.opacity = .46 + p * .44;
+    item.trail.material.opacity = .16 + p * .30;
+  });
   REAL.valveDrops.forEach(({ drop, origin, offset }) => { const p = (visualTime * .06 + offset) % 1; drop.visible = drainage; drop.position.set(origin.x + Math.sin(offset * 31) * .035, origin.y - p * (.20 + visualMoisture * .35), origin.z); drop.scale.setScalar(.54 + visualMoisture); drop.material.opacity = .28 + visualMoisture * .62; });
   cadMaterials.glass.opacity = (upperFocus || drainFocus) ? .045 : .14;
   cadMaterials.drainChamber.opacity = (drainFocus || heat === 1) ? .07 : .20;
-  REAL.upperHalo.visible = upper.moving || upper.fault;
-  REAL.upperHalo.material.color.setHex(upper.fault ? 0xef4444 : 0xfb7185);
-  REAL.drainHalo.visible = drain.moving || drainage || drain.fault;
-  REAL.drainHalo.material.color.setHex(drain.fault ? 0xef4444 : 0x4ade80);
+  if (REAL.upperHalo) {
+    REAL.upperHalo.visible = upper.moving || upper.fault;
+    REAL.upperHalo.material.color.setHex(upper.fault ? 0xef4444 : 0xfb7185);
+  }
+  if (REAL.drainHalo) {
+    REAL.drainHalo.visible = drain.moving || drainage || drain.fault;
+    REAL.drainHalo.material.color.setHex(drain.fault ? 0xef4444 : 0x4ade80);
+  }
 }
 
 function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*.18; upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=!cadModel.visible && activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=!cadModel.visible && drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); steamParticles.forEach(({puff,offset})=>{const p=(phase*.40+offset)%1;puff.visible=!cadModel.visible && heat===1;puff.position.set(.10*Math.sin((p+offset)*18),-1.25+p*2.70,.11*Math.cos((p+offset)*12));puff.scale.setScalar(.65+p*.9);puff.material.opacity=(1-p)*.28;}); animateRealProcess(now, snapshot); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);rig.updateMatrixWorld(true);positionTwinDataLabels();renderer.render(scene,camera); }
