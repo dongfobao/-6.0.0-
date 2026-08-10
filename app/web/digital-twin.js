@@ -813,7 +813,9 @@ function positionTwinDataLabels(){
     const projected=projectPoint(anchor);
     const horizontalMargin=Math.max(7,(node.offsetWidth/2+10)/width*100);
     const verticalMargin=Math.max(9,(node.offsetHeight/2+8)/height*100);
-    items[key]={key,node,leader:twinLeaderNodes[key],side:["t1","t3","breath"].includes(key)?"left":"right",left:Math.max(horizontalMargin,Math.min(100-horizontalMargin,projected.x)),desired:Math.max(verticalMargin,Math.min(100-verticalMargin,projected.y)),height:(node.offsetHeight+10)/height*100,verticalMargin};
+    // 标签按零件投影自动换边，但始终停靠在视口两侧，避免旋转后压住模型。
+    const side=projected.x<50?"left":"right";
+    items[key]={key,node,leader:twinLeaderNodes[key],side,left:side==="left"?horizontalMargin:100-horizontalMargin,desired:Math.max(verticalMargin,Math.min(100-verticalMargin,projected.y)),height:(node.offsetHeight+10)/height*100,verticalMargin};
   });
   if(items.t1&&items.t2)items.t2.desired=items.t1.desired;
   Object.values(items).forEach(item=>sides[item.side].push(item));
@@ -833,10 +835,8 @@ function positionTwinDataLabels(){
     const targetX=Math.max(2,Math.min(98,target.x)),targetY=Math.max(2,Math.min(98,target.y));
     const halfWidth=item.node.offsetWidth/width*50;
     const startX=item.side==="left"?item.left+halfWidth:item.left-halfWidth;
-    const laneOffsets={t3:-2,t1:0,flow:-2,pressure:0,t2:2};
-    const laneBase=item.side==="left"?Math.min(targetX-4,startX+8):Math.max(targetX+4,startX-8);
-    const laneX=Math.max(3,Math.min(97,laneBase+(laneOffsets[item.key]||0)));
-    item.leader.setAttribute("points",`${startX},${item.top} ${laneX},${item.top} ${laneX},${targetY} ${targetX},${targetY}`);
+    // 单段引线直接连接标签和零件锚点；模型旋转时不再形成多重折角。
+    item.leader.setAttribute("points",`${startX},${item.top} ${targetX},${targetY}`);
   });
 }
 function animateRealProcess(now, snapshot) {
