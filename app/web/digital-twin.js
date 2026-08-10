@@ -172,6 +172,49 @@ function condensationPoint(item, progress) {
   );
 }
 
+function createRivuletTexture(variant) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 256;
+  const context = canvas.getContext("2d");
+  const centerX = 30 + (variant % 3 - 1) * 4;
+  const gradient = context.createLinearGradient(0, 4, 0, 244);
+  gradient.addColorStop(0, "rgba(190, 238, 255, 0)");
+  gradient.addColorStop(.18, "rgba(166, 226, 248, .30)");
+  gradient.addColorStop(.68, "rgba(127, 207, 238, .72)");
+  gradient.addColorStop(1, "rgba(214, 246, 255, .92)");
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = gradient;
+  context.lineWidth = 4 + variant % 2;
+  context.beginPath();
+  context.moveTo(centerX + Math.sin(variant * 1.7) * 7, 4);
+  for (let step = 1; step <= 11; step += 1) {
+    const y = 4 + step / 11 * 208;
+    const x = centerX + Math.sin(step * 1.15 + variant * 1.9) * (4 + variant % 3 * 1.5) + Math.sin(step * .37) * 3;
+    context.lineTo(x, y);
+  }
+  context.stroke();
+  // 短支流在中段并入主水痕，形成雨水在玻璃上相互汇合的观感。
+  context.strokeStyle = "rgba(151, 219, 244, .38)";
+  context.lineWidth = 2.2;
+  context.beginPath();
+  context.moveTo(variant % 2 ? 7 : 56, 84 + variant * 9);
+  context.bezierCurveTo(variant % 2 ? 18 : 45, 103, centerX + (variant % 2 ? -7 : 7), 122, centerX, 145);
+  context.stroke();
+  // 主水痕底端使用泪滴轮廓，不再使用会与气体混淆的球形粒子。
+  context.fillStyle = "rgba(190, 237, 253, .88)";
+  context.beginPath();
+  context.moveTo(centerX, 204);
+  context.bezierCurveTo(centerX - 4, 216, centerX - 10, 226, centerX - 10, 235);
+  context.bezierCurveTo(centerX - 10, 247, centerX + 10, 247, centerX + 10, 235);
+  context.bezierCurveTo(centerX + 10, 226, centerX + 4, 216, centerX, 204);
+  context.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function addRealHalo(object, color) {
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3()).multiplyScalar(1.12);
@@ -454,26 +497,32 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const condensationRadius = Math.max(.20, lowerGlassInnerRadius - .018);
   const mergeChannels = 11;
   const channelAngle = Math.PI * 2 / mergeChannels;
-  REAL.condensationDrops = Array.from({ length: 44 }, (_, index) => {
-    const group = new THREE.Group();
-    const headMaterial = new THREE.MeshBasicMaterial({ color: 0x9be7ff, transparent: true, opacity: .78, depthTest: false, depthWrite: false });
-    const trailMaterial = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .34, depthTest: false, depthWrite: false });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 5) * .003, 8, 8), headMaterial);
-    const trailLength = .055 + (index % 4) * .018;
-    const trail = new THREE.Mesh(new THREE.CylinderGeometry(.004, .009, trailLength, 7), trailMaterial);
-    group.add(head, trail);
-    realEffects.add(group);
+  const rivuletTextures = Array.from({ length: 4 }, (_, index) => createRivuletTexture(index));
+  REAL.condensationDrops = Array.from({ length: 20 }, (_, index) => {
+    const height = .38 + (index % 5) * .065;
+    const geometry = new THREE.PlaneGeometry(.078 + (index % 3) * .010, height);
+    geometry.translate(0, height * .46, 0);
+    const material = new THREE.MeshBasicMaterial({
+      map: rivuletTextures[index % rivuletTextures.length],
+      color: 0xd5f4ff,
+      transparent: true,
+      opacity: .55,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const rivulet = new THREE.Mesh(geometry, material);
+    rivulet.renderOrder = 17;
+    realEffects.add(rivulet);
     const startAngle = index * 2.399;
     return {
-      group,
-      head,
-      trail,
-      trailLength,
+      group: rivulet,
+      rivulet,
       center: new THREE.Vector3(lowerGlassCenter.x, 0, lowerGlassCenter.z),
       startAngle,
       targetAngle: Math.round(startAngle / channelAngle) * channelAngle,
-      offset: ((index * 17) % 44) / 44,
-      speed: .026 + (index % 6) * .004,
+      offset: ((index * 13) % 20) / 20,
+      speed: .020 + (index % 5) * .003,
       curve: .040 + (index % 5) * .009,
       bends: 2.1 + (index % 4) * .58,
       seed: index * 1.73,
@@ -775,18 +824,12 @@ function animateRealProcess(now, snapshot) {
   REAL.condensationDrops.forEach(item => {
     const p = (visualTime * item.speed + item.offset) % 1;
     const point = condensationPoint(item, p);
-    const previous = condensationPoint(item, Math.max(0, p - .018));
-    const backward = previous.sub(point);
-    if (backward.lengthSq() < 1e-8) backward.set(0, .012, 0);
-    const backLength = backward.length();
     item.group.visible = heat === 1;
     item.group.position.copy(point);
-    item.head.scale.setScalar(.68 + Math.pow(p, .82) * .76);
-    item.trail.position.copy(backward).multiplyScalar(.5);
-    item.trail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), backward.normalize());
-    item.trail.scale.set(1, Math.max(.26, backLength / item.trailLength), 1);
-    item.head.material.opacity = .46 + p * .44;
-    item.trail.material.opacity = .16 + p * .30;
+    const wallAngle = Math.atan2(point.x - item.center.x, point.z - item.center.z);
+    item.rivulet.rotation.set(0, wallAngle, 0);
+    item.rivulet.scale.set(.88 + p * .18, .72 + p * .34, 1);
+    item.rivulet.material.opacity = (.32 + p * .30) * (.76 + visualMoisture * .24);
   });
   REAL.valveDrops.forEach(({ drop, origin, offset }) => { const p = (visualTime * .06 + offset) % 1; drop.visible = drainage; drop.position.set(origin.x + Math.sin(offset * 31) * .035, origin.y - p * (.20 + visualMoisture * .35), origin.z); drop.scale.setScalar(.54 + visualMoisture); drop.material.opacity = .28 + visualMoisture * .62; });
   cadMaterials.glass.opacity = (upperFocus || drainFocus) ? .045 : .14;
