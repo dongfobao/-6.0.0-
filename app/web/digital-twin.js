@@ -557,7 +557,7 @@ function oilInletGroups(plateNode) {
   }).slice(0, 3);
 }
 
-function buildLowerSmokeFlow(oilPlateNode, oilCupNode, coreEntry, coreExit, lowerWallRadius) {
+function buildLowerSmokeFlow(oilPlateNode, oilCupNode, lowerPipeNode, coreEntry, coreExit, lowerWallRadius) {
   const plateCenter = oilPlateNode ? rig.worldToLocal(centerOf(oilPlateNode)) : coreEntry.clone().add(new THREE.Vector3(0, -.30, 0));
   let inletGroups = oilInletGroups(oilPlateNode);
   if (inletGroups.length !== 3) {
@@ -584,30 +584,74 @@ function buildLowerSmokeFlow(oilPlateNode, oilCupNode, coreEntry, coreExit, lowe
   REAL.oilVolume.renderOrder = 8;
   realEffects.add(REAL.oilVolume);
 
-  const junction = coreEntry.clone().add(new THREE.Vector3(0, -.05, 0));
+  const pipeVertices = verticesInRig(lowerPipeNode);
+  const pipeBox = pipeVertices.length ? new THREE.Box3().setFromPoints(pipeVertices) : new THREE.Box3(
+    new THREE.Vector3(cupCenter.x - .10, oilBottomY + .04, cupCenter.z - .10),
+    new THREE.Vector3(cupCenter.x + .10, oilTopY + .25, cupCenter.z + .10),
+  );
+  const pipeCenter = pipeBox.getCenter(new THREE.Vector3());
+  const pipeMouthY = pipeBox.min.y + .025;
+  const pipeExitY = pipeBox.max.y - .025;
+
+  // 外部空气穿过九个孔后直接进入油杯上方空间，并立即向整个油面铺开；不再画成插入油杯的三根管子。
   inletGroups.forEach((holes, groupIndex) => {
-    const merge = holes.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / holes.length);
-    merge.y = plateCenter.y - .13;
     holes.forEach((hole, holeIndex) => {
+      const inletIndex = groupIndex * 3 + holeIndex;
+      const angle = inletIndex / 9 * Math.PI * 2 + groupIndex * .23;
+      const surfaceRadius = oilRadius * (.50 + (inletIndex % 3) * .16);
+      const surfacePoint = new THREE.Vector3(
+        cupCenter.x + Math.sin(angle) * surfaceRadius,
+        oilTopY + .055 + (inletIndex % 2) * .025,
+        cupCenter.z + Math.cos(angle) * surfaceRadius,
+      );
       const start = hole.clone().add(new THREE.Vector3(0, .045, 0));
       const underPlate = hole.clone().add(new THREE.Vector3(0, -.050, 0));
-      const curve = new THREE.CatmullRomCurve3([start, underPlate, merge.clone()], false, "centripetal", .5);
-      REAL.inletSmokeTrails.push(addSmokeTrail(curve, .0065, .32, .025, (groupIndex * 3 + holeIndex) / 9));
+      const spread = new THREE.Vector3(
+        THREE.MathUtils.lerp(underPlate.x, surfacePoint.x, .56),
+        THREE.MathUtils.lerp(underPlate.y, surfacePoint.y, .54),
+        THREE.MathUtils.lerp(underPlate.z, surfacePoint.z, .56),
+      );
+      const curve = new THREE.CatmullRomCurve3([start, underPlate, spread, surfacePoint], false, "centripetal", .5);
+      REAL.inletSmokeTrails.push(addSmokeTrail(curve, .007 + (inletIndex % 2) * .001, .28, .022, inletIndex / 9));
     });
-    const angle = groupIndex / 3 * Math.PI * 2 + .35;
-    const submerged = new THREE.Vector3(cupCenter.x + Math.sin(angle) * .09, oilBottomY + .045, cupCenter.z + Math.cos(angle) * .09);
-    const oilRise = new THREE.Vector3(cupCenter.x + Math.sin(angle + .35) * .055, oilTopY + .025, cupCenter.z + Math.cos(angle + .35) * .055);
-    const approach = new THREE.Vector3(junction.x + Math.sin(angle) * .045, THREE.MathUtils.lerp(oilTopY, junction.y, .52), junction.z + Math.cos(angle) * .045);
-    const curve = new THREE.CatmullRomCurve3([merge, submerged, oilRise, approach, junction.clone()], false, "centripetal", .5);
-    REAL.inletSmokeTrails.push(addSmokeTrail(curve, .012 + groupIndex * .0015, .48, .040, .17 + groupIndex / 3));
   });
 
-  // 非加热时：烟带先向玻璃内壁展开，再沿固定方位竖直上升，并在不同高度向中心气道汇聚。
-  const smokeCount = 8;
+  // 油面以下使用多条宽松烟丝覆盖整个杯体，穿过油后才向真实下管道入口收敛。
+  const oilSmokeCount = 15;
+  for (let index = 0; index < oilSmokeCount; index += 1) {
+    const angle = index / oilSmokeCount * Math.PI * 2;
+    const startRadius = oilRadius * (.34 + (index % 5) * .13);
+    const middleRadius = oilRadius * (.42 + ((index * 3) % 5) * .10);
+    const deepRadius = oilRadius * (.16 + (index % 4) * .07);
+    const surface = new THREE.Vector3(cupCenter.x + Math.sin(angle) * startRadius, oilTopY + .018, cupCenter.z + Math.cos(angle) * startRadius);
+    const middle = new THREE.Vector3(cupCenter.x + Math.sin(angle + .30) * middleRadius, THREE.MathUtils.lerp(oilTopY, oilBottomY, .45), cupCenter.z + Math.cos(angle + .30) * middleRadius);
+    const deep = new THREE.Vector3(cupCenter.x + Math.sin(angle - .22) * deepRadius, THREE.MathUtils.lerp(oilTopY, oilBottomY, .82), cupCenter.z + Math.cos(angle - .22) * deepRadius);
+    const mouth = new THREE.Vector3(pipeCenter.x + Math.sin(angle) * .028, pipeMouthY, pipeCenter.z + Math.cos(angle) * .028);
+    const curve = new THREE.CatmullRomCurve3([surface, middle, deep, mouth], false, "centripetal", .5);
+    REAL.inletSmokeTrails.push(addSmokeTrail(curve, .0075 + (index % 3) * .0012, .25, .018, .12 + index / oilSmokeCount));
+  }
+
+  // 只有进入下管道后烟带才重新收拢，沿真实管腔向硅胶罐入口上升。
+  const pipeSmokeCount = 5;
+  for (let index = 0; index < pipeSmokeCount; index += 1) {
+    const angle = index / pipeSmokeCount * Math.PI * 2;
+    const radius = .025 + (index % 2) * .010;
+    const mouth = new THREE.Vector3(pipeCenter.x + Math.sin(angle) * radius, pipeMouthY, pipeCenter.z + Math.cos(angle) * radius);
+    const pipeMiddle = new THREE.Vector3(pipeCenter.x + Math.sin(angle + .20) * radius, THREE.MathUtils.lerp(pipeMouthY, pipeExitY, .52), pipeCenter.z + Math.cos(angle + .20) * radius);
+    const pipeExit = new THREE.Vector3(pipeCenter.x + Math.sin(angle) * radius, pipeExitY, pipeCenter.z + Math.cos(angle) * radius);
+    const junction = coreEntry.clone().add(new THREE.Vector3(Math.sin(angle) * .028, -.035, Math.cos(angle) * .028));
+    const curve = new THREE.CatmullRomCurve3([mouth, pipeMiddle, pipeExit, junction], false, "centripetal", .5);
+    REAL.inletSmokeTrails.push(addSmokeTrail(curve, .010, .34, .025, .30 + index / pipeSmokeCount));
+  }
+
+  // 非加热时在下管道出口再次大范围放射到玻璃内壁，避免气流只挤在中心形成一束。
+  const smokeCount = 14;
   REAL.lowerSmokeTrails = Array.from({ length: smokeCount }, (_, index) => {
     const angle = index / smokeCount * Math.PI * 2;
-    const level = .24 + (index % 5) / 5 * .58;
-    const wallPoint = new THREE.Vector3(coreEntry.x + Math.sin(angle) * lowerWallRadius, coreEntry.y + .06, coreEntry.z + Math.cos(angle) * lowerWallRadius);
+    const level = .18 + (index % 7) / 7 * .68;
+    const start = coreEntry.clone().add(new THREE.Vector3(Math.sin(angle) * .035, 0, Math.cos(angle) * .035));
+    const earlySpread = new THREE.Vector3(coreEntry.x + Math.sin(angle) * lowerWallRadius * .42, coreEntry.y + .07, coreEntry.z + Math.cos(angle) * lowerWallRadius * .42);
+    const wallPoint = new THREE.Vector3(coreEntry.x + Math.sin(angle) * lowerWallRadius * (.86 + (index % 3) * .05), coreEntry.y + .15, coreEntry.z + Math.cos(angle) * lowerWallRadius * (.86 + (index % 3) * .05));
     const wallRise = wallPoint.clone().setY(THREE.MathUtils.lerp(coreEntry.y, coreExit.y, level));
     const inward = new THREE.Vector3(
       THREE.MathUtils.lerp(wallRise.x, coreEntry.x, .72),
@@ -616,8 +660,8 @@ function buildLowerSmokeFlow(oilPlateNode, oilCupNode, coreEntry, coreExit, lowe
     );
     const centerJoin = new THREE.Vector3(coreEntry.x + Math.sin(angle) * .045, wallRise.y + .075, coreEntry.z + Math.cos(angle) * .045);
     const end = coreExit.clone().add(new THREE.Vector3(Math.sin(angle) * .025, 0, Math.cos(angle) * .025));
-    const curve = new THREE.CatmullRomCurve3([junction.clone(), wallPoint, wallRise, inward, centerJoin, end], false, "centripetal", .5);
-    return addSmokeTrail(curve, .010 + (index % 3) * .0015, .34, .018, index / smokeCount);
+    const curve = new THREE.CatmullRomCurve3([start, earlySpread, wallPoint, wallRise, inward, centerJoin, end], false, "centripetal", .5);
+    return addSmokeTrail(curve, .008 + (index % 3) * .0012, .27, .014, index / smokeCount);
   });
 }
 
@@ -671,7 +715,7 @@ function buildModelBypassFlow(pipeMeshes) {
   REAL.heatBypassSmoke = addSmokeTrail(path, .011, .52, .012, .42);
 }
 
-function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode) {
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode, lowerPipeNode) {
   const localCenterOf = object => rig.worldToLocal(centerOf(object));
   const oilCover = localCenterOf(oilCoverNode || oilCupNode || drainValveNode);
   const oil = localCenterOf(oilCupNode || oilCoverNode || drainValveNode);
@@ -725,7 +769,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   REAL.airParticles = [];
   REAL.lowerDiffusionParticles = [];
   REAL.silicaFlowParticles = [];
-  buildLowerSmokeFlow(oilPlateNode, visibleOilCupNode || oilCupNode, coreEntry, coreExit, lowerWallRadius);
+  buildLowerSmokeFlow(oilPlateNode, visibleOilCupNode || oilCupNode, lowerPipeNode, coreEntry, coreExit, lowerWallRadius);
   const upperFlowAngles = 16;
   const upperFlowWaves = 4;
   REAL.upperDiffusionParticles = Array.from({ length: upperFlowAngles * upperFlowWaves }, (_, index) => {
@@ -993,6 +1037,7 @@ function loadCadAssembly() {
       let replacementDrainBaseNode = null;
       let replacementOilPlateNode = null;
       let replacementOilCupNode = null;
+      let replacementLowerPipeNode = null;
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
         const role = object.userData?.digital_twin_role || "structure";
@@ -1013,6 +1058,7 @@ function loadCadAssembly() {
         if (/下链接座/.test(sourceFile)) replacementDrainBaseNode ||= object;
         if (/油杯固定板/.test(sourceFile)) replacementOilPlateNode ||= object;
         if (/底座装配2-1 透明罩子/.test(sourceFile)) replacementOilCupNode ||= object;
+        if (/吸气管-1 增粗排气管/.test(sourceFile)) replacementLowerPipeNode ||= object;
         object.material = isBypassPipe ? cadMaterials.bypassPipe
           : isValveHardware ? cadMaterials.valveSolid
           : isDrainChamber ? cadMaterials.drainChamber
@@ -1047,6 +1093,7 @@ function loadCadAssembly() {
           replacementDrainBaseNode,
           replacementOilPlateNode,
           replacementOilCupNode,
+          replacementLowerPipeNode,
         );
       }
       buildModelBypassFlow(REAL.bypassMeshes);
