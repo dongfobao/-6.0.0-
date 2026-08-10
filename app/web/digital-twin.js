@@ -450,11 +450,18 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     for (let index = 1; index < points.length; index += 1) path.add(new THREE.LineCurve3(points[index - 1], points[index]));
     return path;
   });
-  REAL.slopeWaterParticles = Array.from({ length: 30 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .84, depthTest: true, depthWrite: false }));
-    dot.renderOrder = 23;
+  REAL.slopeWaterParticles = Array.from({ length: 38 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.019 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: .96,
+      depthTest: false,
+      depthWrite: false,
+    }));
+    // 排水仓位于多层金属底片下方，汇流水流作为剖视高亮层置顶显示；不额外绘制孔口。
+    dot.renderOrder = 26;
     realEffects.add(dot);
-    return { dot, path: slopePaths[index % slopePaths.length], offset: Math.floor(index / slopePaths.length) / 6 + (index % slopePaths.length) * .035 };
+    return { dot, path: slopePaths[index % slopePaths.length], offset: Math.floor(index / slopePaths.length) / 8 + (index % slopePaths.length) * .035 };
   });
   REAL.steamParticles = Array.from({ length: 32 }, (_, index) => {
     const puff = new THREE.Mesh(new THREE.SphereGeometry(.065 + (index % 3) * .022, 9, 8), new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: .52, depthWrite: false }));
@@ -532,7 +539,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     };
   });
   REAL.valveDrops = Array.from({ length: 9 }, (_, index) => {
-    const drop = new THREE.Mesh(new THREE.SphereGeometry(.024 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .86, depthTest: true, depthWrite: false }));
+    const drop = new THREE.Mesh(new THREE.SphereGeometry(.024 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .90, depthTest: false, depthWrite: false }));
     realEffects.add(drop);
     return { drop, origin: valveOutlet.clone(), offset: index / 9 };
   });
@@ -814,7 +821,7 @@ function animateRealProcess(now, snapshot) {
   });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((visualTime * .10 + offset) % 1)); });
-  REAL.slopeWaterParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .085 + offset) % 1; dot.visible = heat === 1 || drainage; dot.position.copy(path.getPointAt(p)); dot.scale.setScalar(.76 + p * .38); dot.material.opacity = .42 + p * .48; });
+  REAL.slopeWaterParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .072 + offset) % 1; dot.visible = heat === 1 || drainage; dot.position.copy(path.getPointAt(p)); dot.scale.set(.82 + p * .30, 1.20 + p * .55, .82 + p * .30); dot.material.opacity = .64 + p * .32; });
   REAL.steamParticles.forEach(({ puff, center, angle, heightOffset, offset, startY, endY, outerRadius }) => { const p = (visualTime * .055 + offset) % 1; const radius = THREE.MathUtils.lerp(.12, outerRadius, p); puff.visible = heat === 1; puff.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, heightOffset) + p * .12, center.z + Math.cos(angle) * radius); puff.scale.setScalar((.52 + p * .72) * (.72 + visualMoisture * .38)); puff.material.opacity = (1 - p) * (.18 + visualMoisture * .40); });
   REAL.heatShells.forEach(({ shell, offset, innerRadius, outerRadius }) => { const p = (visualTime * .10 + offset) % 1; const radius = THREE.MathUtils.lerp(innerRadius, outerRadius, p); shell.visible = heat === 1; shell.scale.set(radius, 1, radius); shell.material.opacity = Math.sin(Math.PI * p) * .15; });
   if (REAL.heatLight) { REAL.heatLight.visible = heat === 1; REAL.heatLight.intensity = heat === 1 ? .42 + Math.sin(visualTime * 1.35) * .08 : 0; }
