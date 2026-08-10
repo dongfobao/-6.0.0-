@@ -110,7 +110,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, upperHalo: null, drainHalo: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, upperHalo: null, drainHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -199,7 +199,6 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const sensor = centerOf(sensorNode || upperValveNode);
   const outlet = centerOf(outletNode || sensorNode || upperValveNode);
   const drain = centerOf(drainValveNode);
-  const frontOffset = new THREE.Vector3(0, 0, .16);
   const lowerGlassBox = lowerGlassNode ? new THREE.Box3().setFromObject(lowerGlassNode) : null;
   const lowerGlassCenter = lowerGlassBox?.getCenter(new THREE.Vector3()) || heaterCenter.clone();
   const lowerGlassSize = lowerGlassBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.18, 2.9, 1.18);
@@ -228,7 +227,8 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   // 普通气体的通气孔全部使用竖直路径；玻璃罩内采用向外扩散、向内汇聚的粒子场。
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
   const sensorPath = new THREE.LineCurve3(new THREE.Vector3(upperCoreX, upperSilicaY, upperCoreZ), new THREE.Vector3(upperCoreX, outlet.y, upperCoreZ));
-  const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
+  const valveOutlet = drain.clone().add(new THREE.Vector3(0, -.06, .26));
+  const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
   // 中间无硅胶气道使用圆点平流，不使用锥形箭头。
   REAL.airParticles = Array.from({ length: 20 }, (_, index) => {
@@ -290,6 +290,25 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     realEffects.add(dot);
     return { dot, path: waterPath, offset: index / 16 };
   });
+  // 排水仓上方斜面：不同落点的水沿斜面汇聚到最低处的阀门洞口。
+  const slopeStartY = lowerGlassBox ? lowerGlassBox.min.y - .025 : valveOutlet.y + .24;
+  const slopeWidth = Math.min(lowerGlassSize.x * .31, .42);
+  const slopeStarts = [-1, -.5, 0, .5, 1].map((spread, index) => new THREE.Vector3(
+    lowerGlassCenter.x + spread * slopeWidth,
+    slopeStartY + Math.abs(spread) * .035,
+    THREE.MathUtils.lerp(lowerGlassCenter.z + (index % 2 ? -.13 : .13), valveOutlet.z, .28),
+  ));
+  const slopePaths = slopeStarts.map(start => new THREE.QuadraticBezierCurve3(
+    start,
+    new THREE.Vector3(THREE.MathUtils.lerp(start.x, valveOutlet.x, .58), THREE.MathUtils.lerp(start.y, valveOutlet.y, .52), THREE.MathUtils.lerp(start.z, valveOutlet.z, .62)),
+    valveOutlet.clone(),
+  ));
+  REAL.slopeWaterParticles = Array.from({ length: 30 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .84, depthTest: false, depthWrite: false }));
+    dot.renderOrder = 23;
+    realEffects.add(dot);
+    return { dot, path: slopePaths[index % slopePaths.length], offset: Math.floor(index / slopePaths.length) / 6 + (index % slopePaths.length) * .035 };
+  });
   REAL.steamParticles = Array.from({ length: 32 }, (_, index) => {
     const puff = new THREE.Mesh(new THREE.SphereGeometry(.065 + (index % 3) * .022, 9, 8), new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: .52, depthWrite: false }));
     realEffects.add(puff);
@@ -322,13 +341,34 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
       outerRadius: heatOuterRadius,
     };
   });
-  const condensationOrigin = heaterCenter.clone();
-  REAL.condensationDrops = Array.from({ length: 28 }, (_, index) => {
-    const drop = new THREE.Mesh(new THREE.SphereGeometry(.020 + (index % 4) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .72, depthTest: false, depthWrite: false }));
-    realEffects.add(drop);
-    return { drop, origin: condensationOrigin.clone(), angle: -.86 + (index % 9) * .215, offset: index / 28 };
+  // 玻璃内壁凝结采用“水珠头 + 向上拖尾”，模拟雨水打在窗户上后缓慢下滑的水痕。
+  const condensationTopY = lowerGlassBox ? lowerGlassBox.max.y - .10 : heaterCenter.y + .78;
+  const condensationBottomY = lowerGlassBox ? lowerGlassBox.min.y + .08 : heaterCenter.y - .82;
+  const condensationRadius = Math.max(.20, lowerWallRadius + .025);
+  REAL.condensationDrops = Array.from({ length: 44 }, (_, index) => {
+    const group = new THREE.Group();
+    const headMaterial = new THREE.MeshBasicMaterial({ color: 0x9be7ff, transparent: true, opacity: .78, depthTest: false, depthWrite: false });
+    const trailMaterial = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: .34, depthTest: false, depthWrite: false });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 5) * .003, 8, 8), headMaterial);
+    const trailLength = .055 + (index % 4) * .018;
+    const trail = new THREE.Mesh(new THREE.CylinderGeometry(.004, .009, trailLength, 7), trailMaterial);
+    trail.position.y = trailLength * .50;
+    group.add(head, trail);
+    realEffects.add(group);
+    return {
+      group,
+      head,
+      trail,
+      center: new THREE.Vector3(lowerGlassCenter.x, 0, lowerGlassCenter.z),
+      angle: index * 2.399,
+      offset: ((index * 17) % 44) / 44,
+      speed: .026 + (index % 6) * .004,
+      wobble: .008 + (index % 4) * .003,
+      topY: condensationTopY,
+      bottomY: condensationBottomY,
+      radius: condensationRadius,
+    };
   });
-  const valveOutlet = drain.clone().add(new THREE.Vector3(0, -.06, .26));
   const valveHole = new THREE.Mesh(new THREE.CircleGeometry(.070, 18), new THREE.MeshBasicMaterial({ color: 0x082f49, transparent: true, opacity: .88, depthTest: false, depthWrite: false }));
   valveHole.position.copy(valveOutlet);
   realEffects.add(valveHole);
@@ -593,12 +633,13 @@ function animateRealProcess(now, snapshot) {
   });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((visualTime * .10 + offset) % 1)); });
+  REAL.slopeWaterParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .085 + offset) % 1; dot.visible = heat === 1 || drainage; dot.position.copy(path.getPointAt(p)); dot.scale.setScalar(.76 + p * .38); dot.material.opacity = .42 + p * .48; });
   REAL.steamParticles.forEach(({ puff, center, angle, heightOffset, offset, startY, endY, outerRadius }) => { const p = (visualTime * .055 + offset) % 1; const radius = THREE.MathUtils.lerp(.12, outerRadius, p); puff.visible = heat === 1; puff.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, heightOffset) + p * .12, center.z + Math.cos(angle) * radius); puff.scale.setScalar((.52 + p * .72) * (.72 + visualMoisture * .38)); puff.material.opacity = (1 - p) * (.18 + visualMoisture * .40); });
   REAL.heatWaves.forEach(({ dot, center, angle, waveOffset, outerRadius }) => { const p = (visualTime * .085 + waveOffset) % 1; const radius = THREE.MathUtils.lerp(.10, outerRadius, p); dot.visible = heat === 1; dot.position.set(center.x + Math.sin(angle) * radius, center.y, center.z + Math.cos(angle) * radius); dot.scale.setScalar(.72 + p * .58); dot.material.opacity = (1 - p) * .64; });
-  REAL.condensationDrops.forEach(({ drop, origin, angle, offset }) => { const p = (visualTime * .045 + offset) % 1; const wallRadius = .57; drop.visible = heat === 1; drop.position.set(origin.x + Math.sin(angle) * wallRadius, origin.y + .72 - p * 1.46, origin.z + Math.cos(angle) * wallRadius); drop.scale.setScalar(.56 + visualMoisture * .92); drop.material.opacity = .18 + visualMoisture * .66; });
-  REAL.valveDrops.forEach(({ drop, origin, offset }) => { const p = (visualTime * .06 + offset) % 1; drop.visible = drainage && heat === 1; drop.position.set(origin.x + Math.sin(offset * 31) * .035, origin.y - p * (.20 + visualMoisture * .35), origin.z); drop.scale.setScalar(.54 + visualMoisture); drop.material.opacity = .28 + visualMoisture * .62; });
+  REAL.condensationDrops.forEach(({ group, head, trail, center, angle, offset, speed, wobble, topY, bottomY, radius }) => { const p = (visualTime * speed + offset) % 1; const rainAngle = angle + Math.sin(p * Math.PI * 2 + offset * 9) * wobble; group.visible = heat === 1; group.position.set(center.x + Math.sin(rainAngle) * radius, THREE.MathUtils.lerp(topY, bottomY, p), center.z + Math.cos(rainAngle) * radius); head.scale.setScalar(.72 + p * .55); trail.scale.y = .58 + p * .88; head.material.opacity = .48 + p * .40; trail.material.opacity = .18 + p * .28; });
+  REAL.valveDrops.forEach(({ drop, origin, offset }) => { const p = (visualTime * .06 + offset) % 1; drop.visible = drainage; drop.position.set(origin.x + Math.sin(offset * 31) * .035, origin.y - p * (.20 + visualMoisture * .35), origin.z); drop.scale.setScalar(.54 + visualMoisture); drop.material.opacity = .28 + visualMoisture * .62; });
   cadMaterials.glass.opacity = (upperFocus || drainFocus) ? .045 : .14;
-  cadMaterials.drainChamber.opacity = drainFocus ? .07 : .20;
+  cadMaterials.drainChamber.opacity = (drainFocus || heat === 1) ? .07 : .20;
   REAL.upperHalo.visible = upper.moving || upper.fault;
   REAL.upperHalo.material.color.setHex(upper.fault ? 0xef4444 : 0xfb7185);
   REAL.drainHalo.visible = drain.moving || drainage || drain.fault;
