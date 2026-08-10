@@ -138,30 +138,55 @@ function addRealHalo(object, color) {
 
 function buildModelBypassFlow(pipeMeshes) {
   if (!pipeMeshes.length) return;
-  const vertices = [];
+  const triangles = [];
   pipeMeshes.forEach(mesh => {
     const positions = mesh.geometry?.attributes?.position;
     if (!positions) return;
-    for (let index = 0; index < positions.count; index += 1) {
-      const worldPoint = mesh.localToWorld(new THREE.Vector3().fromBufferAttribute(positions, index));
-      vertices.push(rig.worldToLocal(worldPoint));
+    for (let index = 0; index + 2 < positions.count; index += 3) {
+      const triangle = [];
+      for (let offset = 0; offset < 3; offset += 1) {
+        const worldPoint = mesh.localToWorld(new THREE.Vector3().fromBufferAttribute(positions, index + offset));
+        triangle.push(rig.worldToLocal(worldPoint));
+      }
+      triangles.push(triangle);
     }
   });
-  if (!vertices.length) return;
+  if (!triangles.length) return;
+  const vertices = triangles.flat();
   const minY = Math.min(...vertices.map(point => point.y));
   const maxY = Math.max(...vertices.map(point => point.y));
   const height = Math.max(maxY - minY, .01);
-  const pathPoints = [0.04, .28, .54, .70, .80, .89, .97].map(sample => {
+  // 用三角面与水平截面的交点求管腔中心。长直管中间通常没有 STL 顶点，不能用邻近顶点估算。
+  const pathPoints = Array.from({ length: 29 }, (_, index) => .025 + index / 28 * .95).map(sample => {
     const y = THREE.MathUtils.lerp(minY, maxY, sample);
-    const halfBand = height * .035;
-    const slice = vertices.filter(point => Math.abs(point.y - y) <= halfBand);
-    return new THREE.Box3().setFromPoints(slice.length ? slice : vertices).getCenter(new THREE.Vector3()).setY(y);
-  });
-  const path = new THREE.CatmullRomCurve3(pathPoints, false, "centripetal", .5);
+    const intersections = [];
+    triangles.forEach(triangle => {
+      [[0, 1], [1, 2], [2, 0]].forEach(([startIndex, endIndex]) => {
+        const start = triangle[startIndex];
+        const end = triangle[endIndex];
+        const deltaY = end.y - start.y;
+        if (Math.abs(deltaY) < 1e-7 || (y - start.y) * (y - end.y) > 0) return;
+        const ratio = (y - start.y) / deltaY;
+        if (ratio < 0 || ratio > 1) return;
+        intersections.push(new THREE.Vector3(
+          THREE.MathUtils.lerp(start.x, end.x, ratio),
+          y,
+          THREE.MathUtils.lerp(start.z, end.z, ratio),
+        ));
+      });
+    });
+    return intersections.length ? new THREE.Box3().setFromPoints(intersections).getCenter(new THREE.Vector3()).setY(y) : null;
+  }).filter(Boolean);
+  if (pathPoints.length < 2) return;
+  // 分段中心线不会像样条曲线那样在弯头处过冲到管壁外。
+  const path = new THREE.CurvePath();
+  for (let index = 1; index < pathPoints.length; index += 1) {
+    path.add(new THREE.LineCurve3(pathPoints[index - 1], pathPoints[index]));
+  }
   REAL.heatBypassParticles = Array.from({ length: 22 }, (_, index) => {
     const dot = new THREE.Mesh(
-      new THREE.SphereGeometry(.016 + (index % 3) * .003, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: .88, depthTest: false, depthWrite: false }),
+      new THREE.SphereGeometry(.012 + (index % 3) * .002, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: .94, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }),
     );
     dot.renderOrder = 22;
     realEffects.add(dot);
@@ -537,8 +562,9 @@ function animateRealProcess(now, snapshot) {
   REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (phase * .24 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = upperFlowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });
   REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (phase * .16 + wave) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const levelP = THREE.MathUtils.clamp(level + routeP * .30, 0, 1); const convergeP = THREE.MathUtils.clamp((levelP - .76) / .24, 0, 1); const radius = wallRadius * (1 - convergeP * .88); dot.visible = upperFlowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, levelP), center.z + Math.cos(angle) * radius); dot.material.opacity = .22 + (1 - convergeP) * .34; });
   REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (phase * .90 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = upperFlowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
-  cadMaterials.bypassPipe.emissive.setHex(heatingBypass ? 0xf59e0b : 0x000000);
-  cadMaterials.bypassPipe.emissiveIntensity = heatingBypass ? .78 : 0;
+  cadMaterials.bypassPipe.color.setHex(heatingBypass ? 0x123e78 : 0x7897a8);
+  cadMaterials.bypassPipe.emissive.setHex(heatingBypass ? 0x0b3a8f : 0x000000);
+  cadMaterials.bypassPipe.emissiveIntensity = heatingBypass ? .82 : 0;
   REAL.heatBypassParticles.forEach(({ dot, path, offset }) => {
     // 加热时气体从上阀反向进入模型自带旁路，沿真实管腔向油杯方向流动。
     const pathPoint = 1 - ((phase * .72 + offset) % 1);
