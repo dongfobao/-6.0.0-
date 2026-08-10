@@ -167,6 +167,77 @@ function upwardSurfacePointsInRig(object) {
   return surfacePoints;
 }
 
+function verticalSurfaceComponentsInRig(object) {
+  const triangles = [];
+  object?.traverse(candidate => {
+    const geometry = candidate.geometry;
+    const positions = geometry?.attributes?.position;
+    if (!candidate.isMesh || !positions) return;
+    const indices = geometry.index;
+    const vertexCount = indices ? indices.count : positions.count;
+    const pointAt = offset => {
+      const vertexIndex = indices ? indices.getX(offset) : offset;
+      return rig.worldToLocal(candidate.localToWorld(new THREE.Vector3().fromBufferAttribute(positions, vertexIndex)));
+    };
+    for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
+      const points = [pointAt(offset), pointAt(offset + 1), pointAt(offset + 2)];
+      const normal = points[1].clone().sub(points[0]).cross(points[2].clone().sub(points[0])).normalize();
+      if (Math.abs(normal.y) >= .25) continue;
+      triangles.push(points);
+    }
+  });
+  const parent = triangles.map((_, index) => index);
+  const find = index => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[index] !== index) {
+      const next = parent[index];
+      parent[index] = root;
+      index = next;
+    }
+    return root;
+  };
+  const unite = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+  const vertexOwners = new Map();
+  triangles.forEach((triangle, triangleIndex) => triangle.forEach(point => {
+    const key = `${Math.round(point.x * 100000)},${Math.round(point.y * 100000)},${Math.round(point.z * 100000)}`;
+    if (vertexOwners.has(key)) unite(triangleIndex, vertexOwners.get(key));
+    else vertexOwners.set(key, triangleIndex);
+  }));
+  const groups = new Map();
+  triangles.forEach((triangle, triangleIndex) => {
+    const root = find(triangleIndex);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(...triangle);
+  });
+  return [...groups.values()].map(points => {
+    const box = new THREE.Box3().setFromPoints(points);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    return { center, size, radius: (size.x + size.z) * .25, minY: box.min.y, maxY: box.max.y };
+  });
+}
+
+function realCollectionOpening(object, surfaceCenter) {
+  const circularWalls = verticalSurfaceComponentsInRig(object).filter(component => {
+    const ratio = component.size.x / Math.max(component.size.z, 1e-6);
+    const offset = Math.hypot(component.center.x - surfaceCenter.x, component.center.z - surfaceCenter.z);
+    return ratio >= .78 && ratio <= 1.22 && component.radius >= .04 && component.radius <= .13 && offset >= .20;
+  });
+  if (!circularWalls.length) return null;
+  const outerWall = [...circularWalls].sort((left, right) => right.radius - left.radius)[0];
+  const concentricWalls = circularWalls.filter(component => Math.hypot(component.center.x - outerWall.center.x, component.center.z - outerWall.center.z) <= .025);
+  return new THREE.Vector3(
+    outerWall.center.x,
+    Math.max(...concentricWalls.map(component => component.maxY)) + .006,
+    outerWall.center.z,
+  );
+}
+
 function condensationPoint(item, progress) {
   const fall = Math.pow(THREE.MathUtils.clamp(progress, 0, 1), 1.28);
   const merge = THREE.MathUtils.smoothstep(fall, .18, .86);
@@ -335,16 +406,11 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const drainBaseVertices = verticesInRig(drainBaseNode);
   const drainBaseBox = drainBaseVertices.length ? new THREE.Box3().setFromPoints(drainBaseVertices) : null;
   const drainBaseCenter = drainBaseBox?.getCenter(new THREE.Vector3()) || drain.clone();
-  // “排水阀门、防冻加热仓”包含左右两个低位圆形结构。真正的汇聚口位于阀主体左半侧的
-  // 圆形集水斜槽中，并非右侧电磁阀附近的圆面；先限定集水侧，再计算该区域的真实最低孔心。
+  // 玻璃底部的完整集水斜面属于“下链接座（塑料）”。从该实体的竖直圆柱壁中识别
+  // 最大的偏心圆孔，避开中央气道和周围安装孔，直接使用模型自带排水口。
   const drainSurfacePoints = upwardSurfacePointsInRig(drainBaseNode);
-  const collectionSurfacePoints = drainSurfacePoints.filter(point => point.x < drainBaseCenter.x);
-  const drainTargetPoints = collectionSurfacePoints.length ? collectionSurfacePoints : drainSurfacePoints;
-  const lowestSurfaceY = drainTargetPoints.length ? Math.min(...drainTargetPoints.map(point => point.y)) : null;
-  const lowestSurfaceBand = lowestSurfaceY === null ? [] : drainTargetPoints.filter(point => point.y <= lowestSurfaceY + .004);
-  const valveOutlet = lowestSurfaceBand.length
-    ? lowestSurfaceBand.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / lowestSurfaceBand.length).add(new THREE.Vector3(0, -.030, 0))
-    : drain.clone().add(new THREE.Vector3(0, -.16, -.12));
+  const valveOutlet = realCollectionOpening(drainBaseNode, drainBaseCenter)
+    || drain.clone().add(new THREE.Vector3(0, -.16, -.12));
   const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
   // 中间无硅胶气道使用圆点平流，不使用锥形箭头。
@@ -407,7 +473,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     realEffects.add(dot);
     return { dot, path: waterPath, offset: index / 16 };
   });
-  // 排水仓上方斜面：不同落点的水沿斜面汇聚到最低处的阀门洞口。
+  // 整个下链接座上表面参与集水：水从玻璃内壁整圈落到斜面外缘，再绕开中央气道汇入偏心排水孔。
   const slopeRaycaster = new THREE.Raycaster();
   const projectToSlope = (x, z, fallbackY) => {
     if (!drainBaseNode || !drainBaseBox) return new THREE.Vector3(x, fallbackY, z);
@@ -420,34 +486,41 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     const hit = slopeRaycaster.intersectObject(drainBaseNode, true)[0];
     return hit ? rig.worldToLocal(hit.point.clone()).add(new THREE.Vector3(0, .010, 0)) : new THREE.Vector3(x, fallbackY, z);
   };
-  const slopeSize = drainBaseBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(.60, .20, .42);
-  const startRadius = Math.min(Math.max(Math.min(slopeSize.x, slopeSize.z) * .30, .10), .20);
-  const higherSurfacePoints = drainSurfacePoints.filter(point => {
-    const distance = Math.hypot(point.x - valveOutlet.x, point.z - valveOutlet.z);
-    return point.y >= valveOutlet.y + .018 && distance >= .055 && distance <= startRadius * 1.9;
-  });
-  const slopePaths = Array.from({ length: 5 }, (_, laneIndex) => {
-    const angle = laneIndex / 5 * Math.PI * 2 + .28;
+  const slopeSize = drainBaseBox?.getSize(new THREE.Vector3()) || new THREE.Vector3(1.45, .42, 1.45);
+  const startRadius = Math.min(slopeSize.x, slopeSize.z) * .40;
+  const laneCount = 14;
+  const slopePaths = Array.from({ length: laneCount }, (_, laneIndex) => {
+    const angle = laneIndex / laneCount * Math.PI * 2 + .16;
     const desired = new THREE.Vector3(
-      valveOutlet.x + Math.sin(angle) * startRadius,
-      valveOutlet.y + .10,
-      valveOutlet.z + Math.cos(angle) * startRadius,
+      drainBaseCenter.x + Math.sin(angle) * startRadius,
+      drainBaseBox?.max.y || valveOutlet.y + .16,
+      drainBaseCenter.z + Math.cos(angle) * startRadius,
     );
-    const nearestSurface = higherSurfacePoints.reduce((best, point) => {
+    const nearestSurface = drainSurfacePoints.reduce((best, point) => {
       const distance = Math.hypot(point.x - desired.x, point.z - desired.z);
       return !best || distance < best.distance ? { point, distance } : best;
     }, null)?.point;
     const start = nearestSurface?.clone().add(new THREE.Vector3(0, .010, 0))
       || projectToSlope(desired.x, desired.z, valveOutlet.y + .12);
+    const directMiddle = start.clone().lerp(valveOutlet, .52);
+    const toMiddle = directMiddle.clone().sub(drainBaseCenter).setY(0);
+    const directPassesCenter = toMiddle.length() < .23;
+    const pathDirection = valveOutlet.clone().sub(start).setY(0).normalize();
+    const bypassDirection = new THREE.Vector3(-pathDirection.z, 0, pathDirection.x);
+    if (bypassDirection.dot(start.clone().sub(drainBaseCenter).setY(0)) < 0) bypassDirection.negate();
+    const control = directPassesCenter
+      ? drainBaseCenter.clone().add(bypassDirection.multiplyScalar(.25)).setY(THREE.MathUtils.lerp(start.y, valveOutlet.y, .52))
+      : directMiddle;
     const points = [];
-    for (let step = 0; step <= 12; step += 1) {
-      const progress = step / 12;
-      if (step === 12) {
+    for (let step = 0; step <= 18; step += 1) {
+      const progress = step / 18;
+      if (step === 18) {
         points.push(valveOutlet.clone());
         continue;
       }
-      const x = THREE.MathUtils.lerp(start.x, valveOutlet.x, progress) + Math.sin(progress * Math.PI) * Math.sin(angle) * .012;
-      const z = THREE.MathUtils.lerp(start.z, valveOutlet.z, progress);
+      const inverse = 1 - progress;
+      const x = inverse * inverse * start.x + 2 * inverse * progress * control.x + progress * progress * valveOutlet.x;
+      const z = inverse * inverse * start.z + 2 * inverse * progress * control.z + progress * progress * valveOutlet.z;
       const projected = projectToSlope(x, z, THREE.MathUtils.lerp(start.y, valveOutlet.y, progress));
       if (points.length) projected.y = Math.min(projected.y, points[points.length - 1].y - .0015);
       projected.y = Math.max(projected.y, valveOutlet.y + .006);
@@ -457,8 +530,9 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     for (let index = 1; index < points.length; index += 1) path.add(new THREE.LineCurve3(points[index - 1], points[index]));
     return path;
   });
-  REAL.slopeWaterParticles = Array.from({ length: 38 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.019 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({
+  const surfaceWaterWaves = 6;
+  REAL.slopeWaterParticles = Array.from({ length: laneCount * surfaceWaterWaves }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.016 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
       opacity: .96,
@@ -468,7 +542,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     // 排水仓位于多层金属底片下方，汇流水流作为剖视高亮层置顶显示；不额外绘制孔口。
     dot.renderOrder = 26;
     realEffects.add(dot);
-    return { dot, path: slopePaths[index % slopePaths.length], offset: Math.floor(index / slopePaths.length) / 8 + (index % slopePaths.length) * .035 };
+    return { dot, path: slopePaths[index % laneCount], offset: Math.floor(index / laneCount) / surfaceWaterWaves + (index % laneCount) / laneCount / surfaceWaterWaves };
   });
   REAL.steamParticles = Array.from({ length: 32 }, (_, index) => {
     const puff = new THREE.Mesh(new THREE.SphereGeometry(.065 + (index % 3) * .022, 9, 8), new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: .52, depthWrite: false }));
@@ -649,7 +723,7 @@ function loadCadAssembly() {
         const isBypassPipe = businessFunction === "heat_bypass_pipe";
         const isHeatingElement = role === "heater_frame" && !/295金属网/.test(sourceFile);
         if (/400玻璃管/.test(sourceFile)) replacementLowerGlassNode ||= object;
-        if (/新下传感器.*阀主体|阀主体/.test(sourceFile)) replacementDrainBaseNode ||= object;
+        if (/下链接座/.test(sourceFile)) replacementDrainBaseNode ||= object;
         object.material = isBypassPipe ? cadMaterials.bypassPipe
           : isValveHardware ? cadMaterials.valveSolid
           : isDrainChamber ? cadMaterials.drainChamber
