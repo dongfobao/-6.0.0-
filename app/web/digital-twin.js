@@ -629,8 +629,9 @@ function loadCadAssembly() {
         }
         const isUpperMovingValve = /传感器动.*双向电磁阀/.test(sourceFile);
         const isDrainMovingValve = /新下传感器.*双向电磁阀/.test(sourceFile);
-        const isValveHardware = /双向电磁阀|阀主体|微动开关/.test(sourceFile);
-        const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile);
+        const isDrainSlopeHousing = /新下传感器.*阀主体|阀主体1\.8\.3/.test(sourceFile);
+        const isValveHardware = /双向电磁阀|阀主体|微动开关/.test(sourceFile) && !isDrainSlopeHousing;
+        const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile) || isDrainSlopeHousing;
         const isBypassPipe = businessFunction === "heat_bypass_pipe";
         const isHeatingElement = role === "heater_frame" && !/295金属网/.test(sourceFile);
         if (/400玻璃管/.test(sourceFile)) replacementLowerGlassNode ||= object;
