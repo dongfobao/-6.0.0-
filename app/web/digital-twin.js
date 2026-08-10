@@ -15,6 +15,13 @@ const twinLabelAnchors = { t1: new THREE.Vector3(-3.15, .52, .10), t2: new THREE
 // 箭头终点绑定真实零件：加载总装后按源文件命名更新为对应的结构中心。
 const twinLabelTargets = { t1: new THREE.Vector3(-.65, .55, .12), t2: new THREE.Vector3(.65, .55, .12), t3: new THREE.Vector3(0, 1.45, .12), pressure: new THREE.Vector3(.44, 1.45, .12), flow: new THREE.Vector3(-.44, 1.45, .12), breath: new THREE.Vector3(0, -1.58, .12) };
 const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.0 };
+const FLOW_VISUAL_CLOCK = { lastNow: null, time: 0 };
+
+function flowVisualSpeed(flowValue) {
+  const magnitude = Math.min(Math.abs(Number(flowValue) || 0), 5);
+  // 0～5 L/min 线性放大到明显的动画速度；超过 ±5 L/min 后保持最高速度。
+  return .15 + magnitude / 5 * 5.25;
+}
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
@@ -767,9 +774,16 @@ function animateRealProcess(now, snapshot) {
   const drain = valveState(snapshot?.valves?.[1]);
   const heat = outputState(snapshot, "htc1");
   const breath = value(snapshot?.process?.breathState);
-  const flow = Math.min(Math.abs(value(snapshot?.process?.flow)) || 0, 30);
+  const rawFlow = value(snapshot?.process?.flow) || 0;
+  const flow = Math.min(Math.abs(rawFlow), 5);
   const measuredFlow = flow >= .12;
-  // 实时量只决定业务状态和数据显示；动画采用固定视觉时间，避免高流量时快到无法辨认。
+  const activeBreath = breath === 0 || breath === 1;
+  const flowAnimationActive = activeBreath || measuredFlow || heat === 1;
+  const deltaSeconds = FLOW_VISUAL_CLOCK.lastNow === null ? 0 : THREE.MathUtils.clamp((now - FLOW_VISUAL_CLOCK.lastNow) * .001, 0, .10);
+  FLOW_VISUAL_CLOCK.lastNow = now;
+  if (flowAnimationActive) FLOW_VISUAL_CLOCK.time += deltaSeconds * flowVisualSpeed(rawFlow);
+  const flowTime = FLOW_VISUAL_CLOCK.time;
+  // 水滴、凝结、蒸汽和热场仍使用独立固定时钟，不受呼吸流量影响。
   const visualTime = now * .001;
   const visualMoisture = .68;
   const move = value => value === 1 ? .095 : -.095;
@@ -788,7 +802,6 @@ function animateRealProcess(now, snapshot) {
   REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
-  const activeBreath = breath === 0 || breath === 1;
   const airflowActive = activeBreath || measuredFlow;
   // 阀位未知时不假定阀门已到工作位；只有流量计实际检测到气流才展示观测到的通路。
   const upperWorkPath = !upper.fault && (upper.position === 1 || (upper.position === 2 && measuredFlow));
@@ -803,19 +816,19 @@ function animateRealProcess(now, snapshot) {
   if (REAL.sensorTube && upperFlowActive) REAL.sensorTube.material.opacity = .88;
   if (REAL.airTube && lowerNormalFlowPath && !airflowActive) REAL.airTube.material.opacity = .42;
   if (REAL.sensorTube && upperFlowPath && !upperFlowActive) REAL.sensorTube.material.opacity = .38;
-  const flowDirection = breath === 0 ? 1 : breath === 1 ? -1 : (value(snapshot?.process?.flow) || 0) >= 0 ? 1 : -1;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .14 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.96); });
-  REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, wallRadius, radiusOffset }) => { const p = (visualTime * .09 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = wallRadius + radiusOffset; dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(start.y, end.y, routeP), start.z + Math.cos(angle) * radius); dot.scale.setScalar(.82); dot.material.opacity = .82; });
-  REAL.silicaFlowParticles.forEach(({ dot, start, end, angle, heightOffset, waveOffset, outerRadius }) => { const p = (visualTime * .055 + waveOffset) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(outerRadius, .13, inwardP); const y = THREE.MathUtils.lerp(start.y + .10, end.y - .10, heightOffset); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, y, start.z + Math.cos(angle) * radius); dot.scale.setScalar(.76 + inwardP * .22); dot.material.opacity = .30 + inwardP * .44; });
-  REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (visualTime * .075 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = upperFlowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });
-  REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (visualTime * .05 + wave) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const levelP = THREE.MathUtils.clamp(level + routeP * .30, 0, 1); const convergeP = THREE.MathUtils.clamp((levelP - .76) / .24, 0, 1); const radius = wallRadius * (1 - convergeP * .88); dot.visible = upperFlowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, levelP), center.z + Math.cos(angle) * radius); dot.material.opacity = .22 + (1 - convergeP) * .34; });
-  REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .14 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = upperFlowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  const flowDirection = measuredFlow ? (rawFlow >= 0 ? 1 : -1) : breath === 0 ? 1 : -1;
+  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (flowTime * .14 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.96); });
+  REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, wallRadius, radiusOffset }) => { const p = (flowTime * .09 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = wallRadius + radiusOffset; dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(start.y, end.y, routeP), start.z + Math.cos(angle) * radius); dot.scale.setScalar(.82); dot.material.opacity = .82; });
+  REAL.silicaFlowParticles.forEach(({ dot, start, end, angle, heightOffset, waveOffset, outerRadius }) => { const p = (flowTime * .055 + waveOffset) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(outerRadius, .13, inwardP); const y = THREE.MathUtils.lerp(start.y + .10, end.y - .10, heightOffset); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, y, start.z + Math.cos(angle) * radius); dot.scale.setScalar(.76 + inwardP * .22); dot.material.opacity = .30 + inwardP * .44; });
+  REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (flowTime * .075 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = upperFlowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });
+  REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (flowTime * .05 + wave) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const levelP = THREE.MathUtils.clamp(level + routeP * .30, 0, 1); const convergeP = THREE.MathUtils.clamp((levelP - .76) / .24, 0, 1); const radius = wallRadius * (1 - convergeP * .88); dot.visible = upperFlowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, levelP), center.z + Math.cos(angle) * radius); dot.material.opacity = .22 + (1 - convergeP) * .34; });
+  REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (flowTime * .14 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = upperFlowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
   cadMaterials.bypassPipe.color.setHex(heatingBypass ? 0x123e78 : 0x7897a8);
   cadMaterials.bypassPipe.emissive.setHex(heatingBypass ? 0x0b3a8f : 0x000000);
   cadMaterials.bypassPipe.emissiveIntensity = heatingBypass ? .82 : 0;
   REAL.heatBypassParticles.forEach(({ dot, path, offset }) => {
     // 加热时气体从上阀反向进入模型自带旁路，沿真实管腔向油杯方向流动。
-    const pathPoint = 1 - ((visualTime * .10 + offset) % 1);
+    const pathPoint = 1 - ((flowTime * .10 + offset) % 1);
     dot.visible = heatingBypass;
     dot.position.copy(path.getPointAt(pathPoint));
   });
