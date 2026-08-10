@@ -117,7 +117,11 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
+const VALVE_ANIMATION = {
+  upper: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
+  drain: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
+};
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -302,6 +306,169 @@ function addRealHalo(object, color) {
   helper.userData.source = object;
   realEffects.add(helper);
   return helper;
+}
+
+function makeValveTextSprite(text, color = "#d8f7ff") {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 80;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgba(4, 18, 31, .88)";
+  context.strokeStyle = "rgba(125, 211, 252, .72)";
+  context.lineWidth = 4;
+  context.beginPath();
+  context.roundRect(5, 5, 246, 70, 15);
+  context.fill();
+  context.stroke();
+  context.fillStyle = color;
+  context.font = "700 32px 'Microsoft YaHei', sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, 128, 41);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
+  sprite.scale.set(.42, .132, 1);
+  sprite.renderOrder = 29;
+  return sprite;
+}
+
+function buildValveMotionVisual(object) {
+  if (!object) return null;
+  const box = new THREE.Box3().setFromObject(object);
+  const center = rig.worldToLocal(box.getCenter(new THREE.Vector3()));
+  const size = box.getSize(new THREE.Vector3());
+  const span = THREE.MathUtils.clamp(size.x * .40, .20, .32);
+  const group = new THREE.Group();
+  group.position.copy(center).add(new THREE.Vector3(0, Math.max(.10, size.y * .34), Math.max(.10, size.z * .24)));
+  realEffects.add(group);
+
+  const overlayMaterial = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending });
+  const railMaterial = overlayMaterial(0x7dd3fc, .24);
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(.008, .008, span * 2, 8), railMaterial);
+  rail.rotation.z = Math.PI / 2;
+  rail.renderOrder = 26;
+  group.add(rail);
+
+  const ports = [-1, 1].map(side => {
+    const ringMaterial = overlayMaterial(0x64748b, .42);
+    const sealMaterial = overlayMaterial(0x64748b, .12);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(.052, .010, 8, 28), ringMaterial);
+    const seal = new THREE.Mesh(new THREE.CircleGeometry(.040, 24), sealMaterial);
+    ring.position.x = side * span;
+    seal.position.set(side * span, 0, -.002);
+    ring.renderOrder = 28;
+    seal.renderOrder = 27;
+    group.add(ring, seal);
+    return { ring, seal, ringMaterial, sealMaterial };
+  });
+
+  const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xb8d5df, emissive: 0x0b3444, emissiveIntensity: .44, metalness: .88, roughness: .18, depthTest: false, depthWrite: false });
+  const marker = new THREE.Mesh(new THREE.BoxGeometry(.080, .052, .034), markerMaterial);
+  marker.renderOrder = 28;
+  group.add(marker);
+
+  const arrows = Array.from({ length: 3 }, () => {
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(.022, .060, 12), overlayMaterial(0xfbbf24, .92));
+    arrow.renderOrder = 29;
+    group.add(arrow);
+    return arrow;
+  });
+  const originLabel = makeValveTextSprite("原位");
+  const workLabel = makeValveTextSprite("工作位");
+  const movingLabel = makeValveTextSprite("切换中", "#fde68a");
+  const faultLabel = makeValveTextSprite("未到位", "#fecaca");
+  originLabel.position.set(-span, .122, 0);
+  workLabel.position.set(span, .122, 0);
+  movingLabel.position.set(0, .228, 0);
+  faultLabel.position.set(0, .228, 0);
+  group.add(originLabel, workLabel, movingLabel, faultLabel);
+  return { group, span, rail, railMaterial, ports, marker, markerMaterial, arrows, originLabel, workLabel, movingLabel, faultLabel };
+}
+
+function commandedValvePosition(snapshot, channelIndex, state, tracker) {
+  const command = value(snapshot?.runtimeValves?.[channelIndex]?.command);
+  if (command === 1) return 0;
+  if (command === 2) return 1;
+  if (state.moving && tracker.lastStable !== null) return 1 - tracker.lastStable;
+  return state.position === 0 || state.position === 1 ? state.position : null;
+}
+
+function advanceValveAnimation(tracker, state, targetPosition) {
+  const stablePosition = state.position === 0 || state.position === 1 ? state.position : null;
+  if (state.fault) {
+    tracker.wasMoving = state.moving;
+    return tracker.axis;
+  }
+  if (state.moving) {
+    if (!tracker.wasMoving) tracker.startAxis = tracker.axis;
+    tracker.target = targetPosition;
+    if (targetPosition !== null) {
+      const targetAxis = targetPosition === 1 ? 1 : -1;
+      // 运动中最多走到目标的 82%，只有收到真实到位反馈才完成余下行程。
+      const waitingAxis = THREE.MathUtils.lerp(tracker.startAxis, targetAxis, .82);
+      tracker.axis += (waitingAxis - tracker.axis) * .075;
+    }
+  } else if (stablePosition !== null) {
+    tracker.lastStable = stablePosition;
+    tracker.target = stablePosition;
+    const targetAxis = stablePosition === 1 ? 1 : -1;
+    tracker.axis += (targetAxis - tracker.axis) * .14;
+  }
+  tracker.wasMoving = state.moving;
+  return tracker.axis;
+}
+
+function updateValveMotionVisual(visual, tracker, state, targetPosition, visualTime) {
+  if (!visual) return;
+  const knownPosition = state.position === 0 || state.position === 1 ? state.position : tracker.lastStable;
+  const focus = state.moving || state.fault;
+  // 无有效反馈时仍保留低亮度的两端位置示意，避免客户找不到阀芯运动轴线。
+  visual.group.visible = true;
+  visual.marker.position.x = tracker.axis * visual.span;
+  visual.markerMaterial.color.setHex(state.fault ? 0xef4444 : state.moving ? 0xfbbf24 : 0xb8d5df);
+  visual.markerMaterial.emissive.setHex(state.fault ? 0x650000 : state.moving ? 0x6b3b00 : 0x0b3444);
+  visual.markerMaterial.emissiveIntensity = state.fault ? .95 : state.moving ? .82 : .44;
+  visual.railMaterial.opacity = focus ? .68 : .20;
+
+  visual.ports.forEach((port, index) => {
+    let color = 0x64748b;
+    let ringOpacity = .38;
+    let sealOpacity = .10;
+    if (state.fault) {
+      color = 0xef4444;
+      ringOpacity = .62 + Math.sin(visualTime * 4) * .24;
+      sealOpacity = .26;
+    } else if (state.moving) {
+      color = targetPosition === index ? 0xfbbf24 : 0x64748b;
+      ringOpacity = targetPosition === index ? .64 + Math.sin(visualTime * 5) * .22 : .28;
+      sealOpacity = targetPosition === index ? .22 : .08;
+    } else if (knownPosition !== null) {
+      // 阀芯所在端为封堵端，另一端为当前导通端。
+      color = knownPosition === index ? 0xef6a5b : 0x22d3ee;
+      ringOpacity = knownPosition === index ? .78 : .92;
+      sealOpacity = knownPosition === index ? .46 : .07;
+    }
+    port.ringMaterial.color.setHex(color);
+    port.sealMaterial.color.setHex(color);
+    port.ringMaterial.opacity = ringOpacity;
+    port.sealMaterial.opacity = sealOpacity;
+  });
+
+  const direction = targetPosition === null ? 0 : targetPosition === 1 ? 1 : -1;
+  visual.arrows.forEach((arrow, index) => {
+    arrow.visible = state.moving && !state.fault && direction !== 0;
+    if (!arrow.visible) return;
+    const phase = (visualTime * .70 + index / visual.arrows.length) % 1;
+    const route = direction > 0 ? phase : 1 - phase;
+    arrow.position.set(THREE.MathUtils.lerp(-visual.span * .72, visual.span * .72, route), .002, .024);
+    arrow.rotation.z = direction > 0 ? -Math.PI / 2 : Math.PI / 2;
+    arrow.material.opacity = .50 + Math.sin(Math.PI * phase) * .46;
+  });
+  visual.originLabel.visible = focus;
+  visual.workLabel.visible = focus;
+  visual.movingLabel.visible = state.moving && !state.fault;
+  visual.faultLabel.visible = state.fault;
 }
 
 function buildModelBypassFlow(pipeMeshes) {
@@ -763,6 +930,8 @@ function loadCadAssembly() {
         object.userData.baseX = object.position.x;
         object.userData.baseZ = object.position.z;
       });
+      REAL.upperMotion = buildValveMotionVisual(REAL.visualUpperValves[0] || REAL.upperValve);
+      REAL.drainMotion = buildValveMotionVisual(REAL.visualDrainValves[0] || REAL.drainValve);
     }, undefined, error => console.warn("新版真实总装模型加载失败。", error));
     host.classList.add("digital-twin-cad-ready");
   }, undefined, error => {
@@ -857,26 +1026,31 @@ function animateRealProcess(now, snapshot) {
   // 水滴、凝结、蒸汽和热场仍使用独立固定时钟，不受呼吸流量影响。
   const visualTime = now * .001;
   const visualMoisture = .68;
-  const move = value => value === 1 ? .095 : -.095;
+  const upperTargetPosition = commandedValvePosition(snapshot, 0, upper, VALVE_ANIMATION.upper);
+  const drainTargetPosition = commandedValvePosition(snapshot, 1, drain, VALVE_ANIMATION.drain);
+  const upperAxis = advanceValveAnimation(VALVE_ANIMATION.upper, upper, upperTargetPosition);
+  const drainAxis = advanceValveAnimation(VALVE_ANIMATION.drain, drain, drainTargetPosition);
   const upperFocus = upper.moving || upper.fault;
   const drainFocus = drain.moving || drain.fault || drain.position === 1;
   [REAL.upperValve, ...REAL.visualUpperValves].filter(Boolean).forEach(mesh => {
-    mesh.position.x += (mesh.userData.baseX + move(upper.position) - mesh.position.x) * .14;
+    mesh.position.x += (mesh.userData.baseX + upperAxis * .15 - mesh.position.x) * .14;
     mesh.position.z += (mesh.userData.baseZ + (upperFocus ? .24 : 0) - mesh.position.z) * .12;
     mesh.material = upper.fault ? materials.fault : (upper.moving ? cadMaterials.activeValve : cadMaterials.valveSolid);
   });
   [REAL.drainValve, ...REAL.visualDrainValves].filter(Boolean).forEach(mesh => {
-    mesh.position.x += (mesh.userData.baseX + move(drain.position) - mesh.position.x) * .14;
+    mesh.position.x += (mesh.userData.baseX + drainAxis * .15 - mesh.position.x) * .14;
     mesh.position.z += (mesh.userData.baseZ + (drainFocus ? .24 : 0) - mesh.position.z) * .12;
     mesh.material = drain.fault ? materials.fault : (drain.moving ? cadMaterials.activeValve : cadMaterials.valveSolid);
   });
+  updateValveMotionVisual(REAL.upperMotion, VALVE_ANIMATION.upper, upper, upperTargetPosition, visualTime);
+  updateValveMotionVisual(REAL.drainMotion, VALVE_ANIMATION.drain, drain, drainTargetPosition, visualTime);
   REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
   const airflowActive = activeBreath || measuredFlow;
   // 阀位未知时不假定阀门已到工作位；只有流量计实际检测到气流才展示观测到的通路。
-  const upperWorkPath = !upper.fault && (upper.position === 1 || (upper.position === 2 && measuredFlow));
-  const heatingBypass = heat === 1;
+  const upperWorkPath = !upper.fault && !upper.moving && (upper.position === 1 || (upper.position === 2 && measuredFlow));
+  const heatingBypass = heat === 1 && !upper.moving && !upper.fault;
   // 加热只切换下部气路：下部硅胶通道停流并改走旁路，上阀以上仍保持正常扩散、渗透和汇聚。
   const lowerNormalFlowPath = upperWorkPath && !heatingBypass;
   const upperFlowPath = !upper.fault && (upperWorkPath || heatingBypass);
@@ -903,7 +1077,7 @@ function animateRealProcess(now, snapshot) {
     dot.visible = heatingBypass;
     dot.position.copy(path.getPointAt(pathPoint));
   });
-  const drainage = drain.position === 1 && !drain.fault;
+  const drainage = drain.position === 1 && !drain.moving && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((visualTime * .10 + offset) % 1)); });
   REAL.slopeWaterParticles.forEach(({ dot, path, offset }) => { const p = (visualTime * .072 + offset) % 1; dot.visible = heat === 1 || drainage; dot.position.copy(path.getPointAt(p)); dot.scale.set(.82 + p * .30, 1.20 + p * .55, .82 + p * .30); dot.material.opacity = .64 + p * .32; });
   REAL.steamParticles.forEach(({ puff, center, angle, heightOffset, offset, startY, endY, outerRadius }) => { const p = (visualTime * .055 + offset) % 1; const radius = THREE.MathUtils.lerp(.12, outerRadius, p); puff.visible = heat === 1; puff.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, heightOffset) + p * .12, center.z + Math.cos(angle) * radius); puff.scale.setScalar((.52 + p * .72) * (.72 + visualMoisture * .38)); puff.material.opacity = (1 - p) * (.18 + visualMoisture * .40); });
