@@ -6,7 +6,7 @@
   <title>YLDQ 6.0 远程监控系统</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/overview-dashboard.css">
-  <link rel="stylesheet" href="/digital-twin.css?v=6">
+  <link rel="stylesheet" href="/digital-twin.css?v=7">
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
   <link rel="stylesheet" href="/analysis.css">
@@ -47,8 +47,7 @@
       <div id="notice" class="notice hidden"></div>
 
       <section class="page overview-page active" data-page-view="overview">
-        <section class="overview-section digital-twin-section" aria-labelledby="digitalTwinTitle">
-          <div class="overview-section-head digital-twin-head"><div><small>DIGITAL TWIN</small><h3 id="digitalTwinTitle">单管设备数字孪生</h3></div><p>仅展示下位机已回读的实际状态；拖动查看，滚轮缩放。</p></div>
+        <section class="overview-section digital-twin-section" aria-label="单管设备数字孪生">
           <div class="digital-twin-layout">
             <div id="digitalTwinViewport" class="digital-twin-viewport" role="img" aria-label="单管吸湿器三维数字孪生，包含上阀、左排水阀、加热架、传感器和油杯">
               <div class="digital-twin-loading">正在初始化三维场景…</div>
@@ -210,7 +209,7 @@
   </dialog>
   <script src="/vendor/three.legacy.js"></script>
   <script src="/vendor/GLTFLoader.legacy.js"></script>
-  <script src="/digital-twin.js?v=84"></script>
+  <script src="/digital-twin.js?v=89"></script>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>

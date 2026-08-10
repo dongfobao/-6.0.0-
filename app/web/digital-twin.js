@@ -14,8 +14,9 @@ const twinLeaderNodes = { t1: document.getElementById("twinLeaderT1"), t2: docum
 const twinLabelAnchors = { t1: new THREE.Vector3(-3.15, .52, .10), t2: new THREE.Vector3(2.70, .52, .10), t3: new THREE.Vector3(-3.15, 1.62, .10), flow: new THREE.Vector3(2.70, 2.05, .10), pressure: new THREE.Vector3(2.70, 1.28, .10) };
 // 箭头终点绑定真实零件：加载总装后按源文件命名更新为对应的结构中心。
 const twinLabelTargets = { t1: new THREE.Vector3(-.65, .55, .12), t2: new THREE.Vector3(.65, .55, .12), t3: new THREE.Vector3(0, 1.45, .12), pressure: new THREE.Vector3(.44, 1.45, .12), flow: new THREE.Vector3(-.44, 1.45, .12) };
-const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.0 };
+const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 8.8 };
 const FLOW_VISUAL_CLOCK = { lastNow: null, time: 0 };
+const OIL_VISUAL = { activity: 0 };
 
 function flowVisualSpeed(flowValue) {
   const magnitude = Math.min(Math.abs(Number(flowValue) || 0), 5);
@@ -33,6 +34,8 @@ host.prepend(renderer.domElement);
 host.querySelector(".digital-twin-loading")?.remove();
 
 const rig = new THREE.Group();
+// 设备整体略微上移，为油杯、下管道及仰视旋转预留稳定的底部画面空间。
+rig.position.y = .18;
 scene.add(rig);
 const materials = {
   metal: new THREE.MeshStandardMaterial({ color: 0xa5b4c3, metalness: .78, roughness: .28 }),
@@ -117,7 +120,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, oilSurface: null, oilBubbles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
 const VALVE_ANIMATION = {
   upper: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
   drain: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
@@ -584,6 +587,75 @@ function buildLowerSmokeFlow(oilPlateNode, oilCupNode, lowerPipeNode, coreEntry,
   REAL.oilVolume.renderOrder = 8;
   realEffects.add(REAL.oilVolume);
 
+  // 油体保持稳定边界，单独用细分油面表现气流造成的小幅晃动，避免整杯油倾斜穿出杯壁。
+  const oilSurfaceMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uActivity: { value: 0 },
+    },
+    vertexShader: `
+      uniform float uTime;
+      uniform float uActivity;
+      varying float vWave;
+      void main() {
+        vec3 p = position;
+        float waveA = sin(p.x * 24.0 + uTime * 1.35);
+        float waveB = sin(p.y * 19.0 - uTime * 1.05 + p.x * 7.0);
+        float waveC = sin((p.x + p.y) * 31.0 + uTime * .62);
+        vWave = (waveA + waveB * .72 + waveC * .28) / 2.0;
+        p.z += vWave * .022 * uActivity;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uActivity;
+      varying float vWave;
+      void main() {
+        float highlight = .10 + max(vWave, 0.0) * (.18 + uActivity * .18);
+        gl_FragColor = vec4(.55 + highlight, .34 + highlight * .72, .08, .48);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  REAL.oilSurface = new THREE.Mesh(new THREE.CircleGeometry(oilRadius * .98, 64), oilSurfaceMaterial);
+  REAL.oilSurface.rotation.x = -Math.PI / 2;
+  REAL.oilSurface.position.set(cupCenter.x, oilTopY + .006, cupCenter.z);
+  REAL.oilSurface.renderOrder = 10;
+  realEffects.add(REAL.oilSurface);
+
+  // 气泡只存在于油液内部；采用确定性分布，缓慢上浮并在油面消失。
+  const bubbleMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xbdefff,
+    transparent: true,
+    opacity: 0,
+    roughness: .08,
+    metalness: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  REAL.oilBubbles = Array.from({ length: 14 }, (_, index) => {
+    const angle = index * 2.399 + .35;
+    const radialLevel = .12 + ((index * 7) % 11) / 11 * .68;
+    const radius = oilRadius * radialLevel;
+    const size = .015 + (index % 4) * .005;
+    const bubble = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 9), bubbleMaterial.clone());
+    bubble.renderOrder = 11;
+    bubble.visible = false;
+    realEffects.add(bubble);
+    return {
+      bubble,
+      x: cupCenter.x + Math.sin(angle) * radius,
+      z: cupCenter.z + Math.cos(angle) * radius,
+      bottomY: oilBottomY + .025,
+      topY: oilTopY - .006,
+      offset: index / 14,
+      speed: .16 + (index % 5) * .018,
+      drift: .006 + (index % 3) * .003,
+    };
+  });
+
   const pipeVertices = verticesInRig(lowerPipeNode);
   const pipeBox = pipeVertices.length ? new THREE.Box3().setFromPoints(pipeVertices) : new THREE.Box3(
     new THREE.Vector3(cupCenter.x - .10, oilBottomY + .04, cupCenter.z - .10),
@@ -593,28 +665,43 @@ function buildLowerSmokeFlow(oilPlateNode, oilCupNode, lowerPipeNode, coreEntry,
   const pipeMouthY = pipeBox.min.y + .025;
   const pipeExitY = pipeBox.max.y - .025;
 
-  // 外部空气穿过九个孔后直接进入油杯上方空间，并立即向整个油面铺开；不再画成插入油杯的三根管子。
+  // 舱外空气从四面八方汇入每个小孔；穿孔后在舱内保持近似竖直下降，不提前弯向油杯中心。
+  const allHoles = inletGroups.flat();
   inletGroups.forEach((holes, groupIndex) => {
     holes.forEach((hole, holeIndex) => {
       const inletIndex = groupIndex * 3 + holeIndex;
-      const angle = inletIndex / 9 * Math.PI * 2 + groupIndex * .23;
-      const surfaceRadius = oilRadius * (.50 + (inletIndex % 3) * .16);
-      const surfacePoint = new THREE.Vector3(
-        cupCenter.x + Math.sin(angle) * surfaceRadius,
-        oilTopY + .055 + (inletIndex % 2) * .025,
-        cupCenter.z + Math.cos(angle) * surfaceRadius,
-      );
-      const start = hole.clone().add(new THREE.Vector3(0, .045, 0));
-      const underPlate = hole.clone().add(new THREE.Vector3(0, -.050, 0));
-      const spread = new THREE.Vector3(
-        THREE.MathUtils.lerp(underPlate.x, surfacePoint.x, .56),
-        THREE.MathUtils.lerp(underPlate.y, surfacePoint.y, .54),
-        THREE.MathUtils.lerp(underPlate.z, surfacePoint.z, .56),
-      );
-      const curve = new THREE.CatmullRomCurve3([start, underPlate, spread, surfacePoint], false, "centripetal", .5);
-      REAL.inletSmokeTrails.push(addSmokeTrail(curve, .007 + (inletIndex % 2) * .001, .28, .022, inletIndex / 9));
+      for (let directionIndex = 0; directionIndex < 3; directionIndex += 1) {
+        const angle = directionIndex / 3 * Math.PI * 2 + inletIndex * .71;
+        const reach = .10 + ((inletIndex + directionIndex) % 3) * .035;
+        const outside = hole.clone().add(new THREE.Vector3(Math.sin(angle) * reach, .075 + directionIndex * .012, Math.cos(angle) * reach));
+        const nearHole = hole.clone().add(new THREE.Vector3(Math.sin(angle) * .035, .028, Math.cos(angle) * .035));
+        const mouth = hole.clone().add(new THREE.Vector3(0, .006, 0));
+        const curve = new THREE.CatmullRomCurve3([outside, nearHole, mouth], false, "centripetal", .5);
+        REAL.inletSmokeTrails.push(addSmokeTrail(curve, .0045, .17, .010, (inletIndex * 3 + directionIndex) / 27));
+      }
+      const insideStart = hole.clone().add(new THREE.Vector3(0, -.018, 0));
+      const insideMiddle = hole.clone().setY(THREE.MathUtils.lerp(hole.y, oilTopY, .52));
+      const aboveOil = hole.clone().setY(oilTopY + .040);
+      const insideCurve = new THREE.CatmullRomCurve3([insideStart, insideMiddle, aboveOil], false, "centripetal", .5);
+      REAL.inletSmokeTrails.push(addSmokeTrail(insideCurve, .0065 + (inletIndex % 2) * .001, .21, .016, .20 + inletIndex / 9));
     });
   });
+
+  // 低透明度长烟带均匀填充盖板与油面之间，使舱内空气和油杯上方气体成为连续体。
+  const holeRadius = allHoles.length ? Math.max(...allHoles.map(point => Math.hypot(point.x - cupCenter.x, point.z - cupCenter.z))) : oilRadius;
+  const chamberRadius = Math.min(.62, Math.max(oilRadius * .92, holeRadius * .90));
+  const chamberSmokeCount = 18;
+  for (let index = 0; index < chamberSmokeCount; index += 1) {
+    const angle = index * 2.399;
+    const radialLevel = .22 + (index % 6) / 6 * .72;
+    const radius = chamberRadius * radialLevel;
+    const oilEndRadius = Math.min(radius, oilRadius * .92);
+    const top = new THREE.Vector3(cupCenter.x + Math.sin(angle) * radius, plateCenter.y - .055, cupCenter.z + Math.cos(angle) * radius);
+    const middle = new THREE.Vector3(top.x, THREE.MathUtils.lerp(top.y, oilTopY, .55), top.z);
+    const bottom = new THREE.Vector3(cupCenter.x + Math.sin(angle) * oilEndRadius, oilTopY + .030, cupCenter.z + Math.cos(angle) * oilEndRadius);
+    const curve = new THREE.CatmullRomCurve3([top, middle, bottom], false, "centripetal", .5);
+    REAL.inletSmokeTrails.push(addSmokeTrail(curve, .015 + (index % 4) * .003, .075, .014, .33 + index / chamberSmokeCount));
+  }
 
   // 油面以下使用多条宽松烟丝覆盖整个杯体，穿过油后才向真实下管道入口收敛。
   const oilSmokeCount = 15;
@@ -644,25 +731,8 @@ function buildLowerSmokeFlow(oilPlateNode, oilCupNode, lowerPipeNode, coreEntry,
     REAL.inletSmokeTrails.push(addSmokeTrail(curve, .010, .34, .025, .30 + index / pipeSmokeCount));
   }
 
-  // 非加热时在下管道出口再次大范围放射到玻璃内壁，避免气流只挤在中心形成一束。
-  const smokeCount = 14;
-  REAL.lowerSmokeTrails = Array.from({ length: smokeCount }, (_, index) => {
-    const angle = index / smokeCount * Math.PI * 2;
-    const level = .18 + (index % 7) / 7 * .68;
-    const start = coreEntry.clone().add(new THREE.Vector3(Math.sin(angle) * .035, 0, Math.cos(angle) * .035));
-    const earlySpread = new THREE.Vector3(coreEntry.x + Math.sin(angle) * lowerWallRadius * .42, coreEntry.y + .07, coreEntry.z + Math.cos(angle) * lowerWallRadius * .42);
-    const wallPoint = new THREE.Vector3(coreEntry.x + Math.sin(angle) * lowerWallRadius * (.86 + (index % 3) * .05), coreEntry.y + .15, coreEntry.z + Math.cos(angle) * lowerWallRadius * (.86 + (index % 3) * .05));
-    const wallRise = wallPoint.clone().setY(THREE.MathUtils.lerp(coreEntry.y, coreExit.y, level));
-    const inward = new THREE.Vector3(
-      THREE.MathUtils.lerp(wallRise.x, coreEntry.x, .72),
-      wallRise.y + .035,
-      THREE.MathUtils.lerp(wallRise.z, coreEntry.z, .72),
-    );
-    const centerJoin = new THREE.Vector3(coreEntry.x + Math.sin(angle) * .045, wallRise.y + .075, coreEntry.z + Math.cos(angle) * .045);
-    const end = coreExit.clone().add(new THREE.Vector3(Math.sin(angle) * .025, 0, Math.cos(angle) * .025));
-    const curve = new THREE.CatmullRomCurve3([start, earlySpread, wallPoint, wallRise, inward, centerJoin, end], false, "centripetal", .5);
-    return addSmokeTrail(curve, .008 + (index % 3) * .0012, .27, .014, index / smokeCount);
-  });
+  // 烟带只负责小孔、油杯和真实下管道；进入下部玻璃罩后恢复原有粒子扩散流场。
+  REAL.lowerSmokeTrails = [];
 }
 
 function buildModelBypassFlow(pipeMeshes) {
@@ -765,10 +835,32 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     || drain.clone().add(new THREE.Vector3(0, -.16, -.12));
   const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
-  // 下部气体改为连续烟带：三组三孔进气、穿过油液，再按工况进入硅胶罐或旁路。
-  REAL.airParticles = [];
-  REAL.lowerDiffusionParticles = [];
-  REAL.silicaFlowParticles = [];
+  // 小孔至真实下管道采用连续烟带；非加热工况从管道出口开始恢复下部三层粒子流场。
+  const airPath = new THREE.LineCurve3(coreEntry, coreExit);
+  REAL.airParticles = Array.from({ length: 20 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .94, depthTest: false, depthWrite: false }));
+    dot.renderOrder = 20;
+    realEffects.add(dot);
+    return { dot, path: airPath, offset: index / 20 };
+  });
+  REAL.lowerDiffusionParticles = Array.from({ length: 48 }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.018 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: .82, depthTest: false, depthWrite: false }));
+    dot.renderOrder = 19;
+    realEffects.add(dot);
+    return { dot, start: coreEntry.clone(), end: coreExit.clone(), angle: index * 2.399, offset: index / 48, wallRadius: lowerWallRadius, radiusOffset: ((index * .618) % 1 - .5) * .040 };
+  });
+  const silicaAngles = 10;
+  const silicaLevels = 7;
+  const silicaWaves = 2;
+  REAL.silicaFlowParticles = Array.from({ length: silicaAngles * silicaLevels * silicaWaves }, (_, index) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.015 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .44, depthTest: false, depthWrite: false }));
+    dot.renderOrder = 18;
+    realEffects.add(dot);
+    const ringIndex = index % silicaAngles;
+    const levelIndex = Math.floor(index / silicaAngles) % silicaLevels;
+    const waveIndex = Math.floor(index / (silicaAngles * silicaLevels));
+    return { dot, start: coreEntry.clone(), end: coreExit.clone(), angle: ringIndex / silicaAngles * Math.PI * 2, heightOffset: (levelIndex + .5) / silicaLevels, waveOffset: waveIndex / silicaWaves, outerRadius: lowerWallRadius - .07 };
+  });
   buildLowerSmokeFlow(oilPlateNode, visibleOilCupNode || oilCupNode, lowerPipeNode, coreEntry, coreExit, lowerWallRadius);
   const upperFlowAngles = 16;
   const upperFlowWaves = 4;
@@ -1141,7 +1233,7 @@ function update(snapshot) {
   setStatus([["上阀", upper.fault ? "故障" : upper.moving ? "切换中" : upper.label, upper.fault ? "fault" : ""],["左排水阀", drain.fault ? "故障" : drain.moving ? "切换中" : drain.label, drain.fault ? "fault" : ""],["HTC1", heat === 1 ? "加热中" : heat === 2 ? "闪烁" : heat === 3 ? "切换中" : "关闭", heat === 1 ? "active" : ""],["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]]);
 }
 
-function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=7.0; }
+function resetView(){ STATUS.yaw=-.42; STATUS.pitch=.10; STATUS.distance=8.8; }
 function resize(){ const width=host.clientWidth,height=host.clientHeight; if(!width||!height)return; renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix(); }
 function positionTwinDataLabels(){
   const width=host.clientWidth,height=host.clientHeight;
@@ -1220,6 +1312,30 @@ function animateRealProcess(now, snapshot) {
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
   const airflowActive = activeBreath || measuredFlow;
+  const oilFlowActive = airflowActive || heat === 1;
+  const normalizedOilFlow = measuredFlow ? Math.min(flow / 5, 1) : oilFlowActive ? .42 : 0;
+  const oilTargetActivity = oilFlowActive ? .34 + normalizedOilFlow * .66 : 0;
+  OIL_VISUAL.activity += (oilTargetActivity - OIL_VISUAL.activity) * (oilFlowActive ? .045 : .025);
+  if (REAL.oilSurface) {
+    REAL.oilSurface.material.uniforms.uTime.value = visualTime;
+    REAL.oilSurface.material.uniforms.uActivity.value = OIL_VISUAL.activity;
+    REAL.oilSurface.rotation.x = -Math.PI / 2 + Math.sin(visualTime * .82) * .040 * OIL_VISUAL.activity;
+    REAL.oilSurface.rotation.z = Math.sin(visualTime * .61 + 1.4) * .034 * OIL_VISUAL.activity;
+  }
+  REAL.oilBubbles.forEach(({ bubble, x, z, bottomY, topY, offset, speed, drift }, index) => {
+    const bubbleActive = OIL_VISUAL.activity > .035;
+    const p = (visualTime * speed * (.62 + OIL_VISUAL.activity * .72) + offset) % 1;
+    // 气泡在油中保持完整，只在抵达油面的最后约 2% 行程内迅速消失。
+    const edgeFade = Math.min(1, p * 9) * Math.min(1, (1 - p) * 48);
+    bubble.visible = bubbleActive;
+    bubble.position.set(
+      x + Math.sin(visualTime * .72 + index * 1.7) * drift * OIL_VISUAL.activity,
+      THREE.MathUtils.lerp(bottomY, topY, p),
+      z + Math.cos(visualTime * .58 + index * 1.3) * drift * OIL_VISUAL.activity,
+    );
+    bubble.scale.setScalar(.72 + p * .58);
+    bubble.material.opacity = edgeFade * (.24 + OIL_VISUAL.activity * .48);
+  });
   // 阀位未知时不假定阀门已到工作位；只有流量计实际检测到气流才展示观测到的通路。
   const upperWorkPath = !upper.fault && !upper.moving && (upper.position === 1 || (upper.position === 2 && measuredFlow));
   const heatingBypass = heat === 1 && !upper.moving && !upper.fault;
@@ -1279,8 +1395,8 @@ function animateRealProcess(now, snapshot) {
 function animate(now=0){ requestAnimationFrame(animate); const snapshot=STATUS.snapshot; const upper=valveState(snapshot?.valves?.[0]); const drain=valveState(snapshot?.valves?.[1]); const heat=outputState(snapshot,"htc1"); const breath=value(snapshot?.process?.breathState); const activeBreath=breath === 0 || breath === 1; const phase=now*.001*.18; upperSlider.position.x += (STATUS.upperTarget-upperSlider.position.x)*.14; drainSlider.position.x += (STATUS.drainTarget-drainSlider.position.x)*.14; upperSlider.material=upper.fault?materials.fault:materials.metal;drainSlider.material=drain.fault?materials.fault:materials.metal; materials.heated.emissive.setHex(heat===1?0xf05a18:0x000000);materials.heated.emissiveIntensity=heat===1?1.55:0; heater.rotation.y+=heat===1?.012:0; airParticles.forEach(({dot,offset})=>{const p=activeBreath?((phase+offset)%1):offset;dot.visible=!cadModel.visible && activeBreath;dot.position.copy(airCurve.getPointAt(breath===0?p:1-p));}); const drainage=drain.position===1 && !drain.fault; waterParticles.forEach(({dot,offset})=>{dot.visible=!cadModel.visible && drainage;dot.position.copy(waterCurve.getPointAt((phase*.45+offset)%1));}); steamParticles.forEach(({puff,offset})=>{const p=(phase*.40+offset)%1;puff.visible=!cadModel.visible && heat===1;puff.position.set(.10*Math.sin((p+offset)*18),-1.25+p*2.70,.11*Math.cos((p+offset)*12));puff.scale.setScalar(.65+p*.9);puff.material.opacity=(1-p)*.28;}); animateRealProcess(now, snapshot); rig.rotation.y += (STATUS.yaw-rig.rotation.y)*.08;rig.rotation.x += (STATUS.pitch-rig.rotation.x)*.08;camera.position.set(0,0,STATUS.distance);camera.lookAt(0,0,0);rig.updateMatrixWorld(true);positionTwinDataLabels();renderer.render(scene,camera); }
 
 host.addEventListener("pointerdown", event => { STATUS.dragging=true; STATUS.pointer={x:event.clientX,y:event.clientY}; host.setPointerCapture(event.pointerId); });
-host.addEventListener("pointermove", event => { if(!STATUS.dragging||!STATUS.pointer)return; STATUS.yaw+=(event.clientX-STATUS.pointer.x)*.011;STATUS.pitch=Math.max(-.48,Math.min(.48,STATUS.pitch+(event.clientY-STATUS.pointer.y)*.008));STATUS.pointer={x:event.clientX,y:event.clientY}; });
+host.addEventListener("pointermove", event => { if(!STATUS.dragging||!STATUS.pointer)return; STATUS.yaw+=(event.clientX-STATUS.pointer.x)*.011;STATUS.pitch=Math.max(-.76,Math.min(.76,STATUS.pitch+(event.clientY-STATUS.pointer.y)*.009));STATUS.pointer={x:event.clientX,y:event.clientY}; });
 host.addEventListener("pointerup", () => { STATUS.dragging=false;STATUS.pointer=null; });
-host.addEventListener("wheel", event => { event.preventDefault(); STATUS.distance=Math.max(5.1,Math.min(10.5,STATUS.distance+event.deltaY*.006)); },{passive:false});
+host.addEventListener("wheel", event => { event.preventDefault(); STATUS.distance=Math.max(5.1,Math.min(12.0,STATUS.distance+event.deltaY*.006)); },{passive:false});
 host.addEventListener("dblclick",resetView);resetButton?.addEventListener("click",resetView);new ResizeObserver(resize).observe(host);resize();loadCadAssembly();animate();
 window.digitalTwin = { update, resetView };
