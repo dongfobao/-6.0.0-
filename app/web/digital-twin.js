@@ -186,7 +186,7 @@ function createRivuletTexture(variant) {
   context.lineCap = "round";
   context.lineJoin = "round";
   context.strokeStyle = gradient;
-  context.lineWidth = 4 + variant % 2;
+  context.lineWidth = 6 + variant % 2;
   context.beginPath();
   context.moveTo(centerX + Math.sin(variant * 1.7) * 7, 4);
   for (let step = 1; step <= 11; step += 1) {
@@ -197,7 +197,7 @@ function createRivuletTexture(variant) {
   context.stroke();
   // 短支流在中段并入主水痕，形成雨水在玻璃上相互汇合的观感。
   context.strokeStyle = "rgba(151, 219, 244, .38)";
-  context.lineWidth = 2.2;
+  context.lineWidth = 3.2;
   context.beginPath();
   context.moveTo(variant % 2 ? 7 : 56, 84 + variant * 9);
   context.bezierCurveTo(variant % 2 ? 18 : 45, 103, centerX + (variant % 2 ? -7 : 7), 122, centerX, 145);
@@ -336,7 +336,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const lowestSurfaceY = drainTargetPoints.length ? Math.min(...drainTargetPoints.map(point => point.y)) : null;
   const lowestSurfaceBand = lowestSurfaceY === null ? [] : drainTargetPoints.filter(point => point.y <= lowestSurfaceY + .004);
   const valveOutlet = lowestSurfaceBand.length
-    ? lowestSurfaceBand.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / lowestSurfaceBand.length).add(new THREE.Vector3(0, .010, 0))
+    ? lowestSurfaceBand.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / lowestSurfaceBand.length).add(new THREE.Vector3(0, -.030, 0))
     : drain.clone().add(new THREE.Vector3(0, -.16, -.12));
   const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
@@ -451,7 +451,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     return path;
   });
   REAL.slopeWaterParticles = Array.from({ length: 30 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .84, depthTest: false, depthWrite: false }));
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(.014 + (index % 3) * .003, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .84, depthTest: true, depthWrite: false }));
     dot.renderOrder = 23;
     realEffects.add(dot);
     return { dot, path: slopePaths[index % slopePaths.length], offset: Math.floor(index / slopePaths.length) / 6 + (index % slopePaths.length) * .035 };
@@ -499,8 +499,8 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const channelAngle = Math.PI * 2 / mergeChannels;
   const rivuletTextures = Array.from({ length: 4 }, (_, index) => createRivuletTexture(index));
   REAL.condensationDrops = Array.from({ length: 20 }, (_, index) => {
-    const height = .38 + (index % 5) * .065;
-    const geometry = new THREE.PlaneGeometry(.078 + (index % 3) * .010, height);
+    const height = .52 + (index % 5) * .075;
+    const geometry = new THREE.PlaneGeometry(.105 + (index % 3) * .014, height);
     geometry.translate(0, height * .46, 0);
     const material = new THREE.MeshBasicMaterial({
       map: rivuletTextures[index % rivuletTextures.length],
@@ -531,12 +531,8 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
       radius: condensationRadius,
     };
   });
-  const valveHole = new THREE.Mesh(new THREE.CircleGeometry(.070, 18), new THREE.MeshBasicMaterial({ color: 0x082f49, transparent: true, opacity: .88, depthTest: false, depthWrite: false }));
-  valveHole.position.copy(valveOutlet);
-  valveHole.rotation.x = -Math.PI / 2;
-  realEffects.add(valveHole);
   REAL.valveDrops = Array.from({ length: 9 }, (_, index) => {
-    const drop = new THREE.Mesh(new THREE.SphereGeometry(.024 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .86, depthTest: false, depthWrite: false }));
+    const drop = new THREE.Mesh(new THREE.SphereGeometry(.024 + (index % 3) * .006, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: .86, depthTest: true, depthWrite: false }));
     realEffects.add(drop);
     return { drop, origin: valveOutlet.clone(), offset: index / 9 };
   });
@@ -828,8 +824,8 @@ function animateRealProcess(now, snapshot) {
     item.group.position.copy(point);
     const wallAngle = Math.atan2(point.x - item.center.x, point.z - item.center.z);
     item.rivulet.rotation.set(0, wallAngle, 0);
-    item.rivulet.scale.set(.88 + p * .18, .72 + p * .34, 1);
-    item.rivulet.material.opacity = (.32 + p * .30) * (.76 + visualMoisture * .24);
+    item.rivulet.scale.set(.94 + p * .22, .78 + p * .38, 1);
+    item.rivulet.material.opacity = (.42 + p * .36) * (.78 + visualMoisture * .22);
   });
   REAL.valveDrops.forEach(({ drop, origin, offset }) => { const p = (visualTime * .06 + offset) % 1; drop.visible = drainage; drop.position.set(origin.x + Math.sin(offset * 31) * .035, origin.y - p * (.20 + visualMoisture * .35), origin.z); drop.scale.setScalar(.54 + visualMoisture); drop.material.opacity = .28 + visualMoisture * .62; });
   cadMaterials.glass.opacity = (upperFocus || drainFocus) ? .045 : .14;
