@@ -50,6 +50,7 @@ const cadMaterials = {
   desiccant: new THREE.MeshStandardMaterial({ color: 0x3f9b78, transparent: true, opacity: .16, metalness: .05, roughness: .64, depthWrite: false }),
   glass: new THREE.MeshPhysicalMaterial({ color: 0x4cc5cf, transparent: true, opacity: .14, metalness: .04, roughness: .08, side: THREE.DoubleSide, depthWrite: false }),
   drainChamber: new THREE.MeshPhysicalMaterial({ color: 0x55d6c3, transparent: true, opacity: .20, metalness: .08, roughness: .10, side: THREE.DoubleSide, depthWrite: false }),
+  bypassPipe: new THREE.MeshStandardMaterial({ color: 0x7897a8, metalness: .92, roughness: .19, emissive: 0x000000, emissiveIntensity: 0 }),
   activeValve: new THREE.MeshStandardMaterial({ color: 0x0d5b86, emissive: 0x0d2c42, emissiveIntensity: .9, metalness: .58, roughness: .28 }),
 };
 const makeMesh = (geometry, material, x=0, y=0, z=0) => { const mesh = new THREE.Mesh(geometry, material); mesh.position.set(x,y,z); rig.add(mesh); return mesh; };
@@ -112,7 +113,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatBypassTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], heatBypassParticles: [], waterParticles: [], steamParticles: [], heatWaves: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, upperHalo: null, drainHalo: null, heatHalo: null };
 
 function hideProceduralDevice() {
   [floor, outerShell, topFlange, bottomFlange, desiccantBed, heater, centerDuct, oilCup, upperValve, drainValve, sensorGroup, airGuide, waterGuide, airTube, waterTube, ...heaterCoils, ...airParticles.map(item => item.dot), ...waterParticles.map(item => item.dot), ...steamParticles.map(item => item.puff)]
@@ -133,6 +134,39 @@ function addRealHalo(object, color) {
   helper.userData.source = object;
   realEffects.add(helper);
   return helper;
+}
+
+function buildModelBypassFlow(pipeMeshes) {
+  if (!pipeMeshes.length) return;
+  const vertices = [];
+  pipeMeshes.forEach(mesh => {
+    const positions = mesh.geometry?.attributes?.position;
+    if (!positions) return;
+    for (let index = 0; index < positions.count; index += 1) {
+      const worldPoint = mesh.localToWorld(new THREE.Vector3().fromBufferAttribute(positions, index));
+      vertices.push(rig.worldToLocal(worldPoint));
+    }
+  });
+  if (!vertices.length) return;
+  const minY = Math.min(...vertices.map(point => point.y));
+  const maxY = Math.max(...vertices.map(point => point.y));
+  const height = Math.max(maxY - minY, .01);
+  const pathPoints = [0.04, .28, .54, .70, .80, .89, .97].map(sample => {
+    const y = THREE.MathUtils.lerp(minY, maxY, sample);
+    const halfBand = height * .035;
+    const slice = vertices.filter(point => Math.abs(point.y - y) <= halfBand);
+    return new THREE.Box3().setFromPoints(slice.length ? slice : vertices).getCenter(new THREE.Vector3()).setY(y);
+  });
+  const path = new THREE.CatmullRomCurve3(pathPoints, false, "centripetal", .5);
+  REAL.heatBypassParticles = Array.from({ length: 22 }, (_, index) => {
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(.016 + (index % 3) * .003, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: .88, depthTest: false, depthWrite: false }),
+    );
+    dot.renderOrder = 22;
+    realEffects.add(dot);
+    return { dot, path, offset: index / 22 };
+  });
 }
 
 function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode) {
@@ -170,20 +204,7 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const airPath = new THREE.LineCurve3(coreEntry, coreExit);
   const sensorPath = new THREE.LineCurve3(new THREE.Vector3(upperCoreX, upperSilicaY, upperCoreZ), new THREE.Vector3(upperCoreX, outlet.y, upperCoreZ));
   const waterPath = new THREE.CatmullRomCurve3([heaterCenter.clone().add(new THREE.Vector3(.45, .55, .18)), heaterCenter.clone().add(new THREE.Vector3(.58, -.65, .20)), drain.clone().add(frontOffset), oil.clone().add(frontOffset)]);
-  const waterTubeReal = new THREE.Mesh(new THREE.TubeGeometry(waterPath, 72, .020, 8, false), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: .46, depthTest: false, depthWrite: false }));
-  realEffects.add(waterTubeReal);
-  // 加热旁路是玻璃筒内的直通圆管：上阀反向接口直达油杯，不沿设备外侧布置。
-  const bypassPort = upper.clone().add(new THREE.Vector3(-.24, -.03, .18));
-  const bypassPipeX = oil.x + .48;
-  const bypassPipeZ = oil.z + .22;
-  const heatBypassPath = new THREE.CatmullRomCurve3([
-    bypassPort,
-    new THREE.Vector3(bypassPipeX, upper.y - .28, bypassPipeZ),
-    new THREE.Vector3(bypassPipeX, oil.y + .20, bypassPipeZ),
-    oil.clone().add(new THREE.Vector3(.14, 0, .18)),
-  ]);
-  // 新版总装已包含真实旁路通气管，只保留管内流动粒子，不再额外绘制管体。
-  REAL.heatBypassTube = null;
+  // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
   // 中间无硅胶气道使用圆点平流，不使用锥形箭头。
   REAL.airParticles = Array.from({ length: 20 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .94, depthTest: false, depthWrite: false }));
@@ -238,11 +259,6 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
     dot.renderOrder = 20;
     realEffects.add(dot);
     return { dot, path: sensorPath, offset: index / 8 };
-  });
-  REAL.heatBypassParticles = Array.from({ length: 18 }, (_, index) => {
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(.042, .13, 8), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: .95, depthTest: false, depthWrite: false }));
-    realEffects.add(arrow);
-    return { arrow, path: heatBypassPath, offset: index / 18 };
   });
   REAL.waterParticles = Array.from({ length: 16 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.022, 8, 8), materials.water.clone());
@@ -356,16 +372,23 @@ function loadCadAssembly() {
     }
     // 旧总装只提供精确的零件坐标和动态锚点；实际显示改为用户提供的新版完整模型。
     gltf.scene.traverse(object => { if (object.isMesh) object.visible = false; });
-    new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=2", replacement => {
+    new THREE.GLTFLoader().load("/assets/yldq-5-single-pipe-v2.glb?v=3", replacement => {
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
         const role = object.userData?.digital_twin_role || "structure";
         const sourceFile = object.userData?.source_file || "";
+        const businessFunction = object.userData?.digital_twin_function || "";
+        if (businessFunction === "lower_outer_retaining_mesh") {
+          object.visible = false;
+          return;
+        }
         const isUpperMovingValve = /传感器动.*双向电磁阀/.test(sourceFile);
         const isDrainMovingValve = /新下传感器.*双向电磁阀/.test(sourceFile);
         const isValveHardware = /双向电磁阀|阀主体|微动开关/.test(sourceFile);
         const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile);
-        object.material = isValveHardware ? cadMaterials.valveSolid
+        const isBypassPipe = businessFunction === "heat_bypass_pipe";
+        object.material = isBypassPipe ? cadMaterials.bypassPipe
+          : isValveHardware ? cadMaterials.valveSolid
           : isDrainChamber ? cadMaterials.drainChamber
             : role === "outer_shell" ? cadMaterials.glass
           : role === "desiccant" ? cadMaterials.desiccant
@@ -373,12 +396,14 @@ function loadCadAssembly() {
               : role === "heater_frame" ? cadMaterials.heater
                 : role === "support" ? cadMaterials.support
                   : cadMaterials.structure;
-        object.renderOrder = isValveHardware ? 9 : (isDrainChamber || role === "outer_shell") ? 5 : role === "desiccant" ? 4 : 7;
+        object.renderOrder = isBypassPipe ? 10 : isValveHardware ? 9 : (isDrainChamber || role === "outer_shell") ? 5 : role === "desiccant" ? 4 : 7;
+        if (isBypassPipe) REAL.bypassMeshes.push(object);
         if (isUpperMovingValve) REAL.visualUpperValves.push(object);
         if (isDrainMovingValve) REAL.visualDrainValves.push(object);
       });
       cadModel.add(replacement.scene);
       cadModel.updateMatrixWorld(true);
+      buildModelBypassFlow(REAL.bypassMeshes);
       [...REAL.visualUpperValves, ...REAL.visualDrainValves].forEach(object => {
         if (!object) return;
         object.userData.baseX = object.position.x;
@@ -509,8 +534,14 @@ function animateRealProcess(now, snapshot) {
   REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (phase * .24 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = normalFlowPath && airflowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });
   REAL.upperSilicaParticles.forEach(({ dot, center, startY, endY, angle, level, wave, wallRadius }) => { const p = (phase * .16 + wave) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const levelP = THREE.MathUtils.clamp(level + routeP * .30, 0, 1); const convergeP = THREE.MathUtils.clamp((levelP - .76) / .24, 0, 1); const radius = wallRadius * (1 - convergeP * .88); dot.visible = normalFlowPath && airflowActive; dot.position.set(center.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(startY, endY, levelP), center.z + Math.cos(angle) * radius); dot.material.opacity = .22 + (1 - convergeP) * .34; });
   REAL.sensorParticles.forEach(({ dot, path, offset }) => { const p = (phase * .90 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = normalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
-  if (REAL.heatBypassTube) REAL.heatBypassTube.material.opacity = heatingBypass ? .88 : .06;
-  REAL.heatBypassParticles.forEach(({ arrow, path, offset }) => { const p = (phase * .72 + offset) % 1; const tangent = path.getTangentAt(p).normalize(); arrow.visible = heatingBypass; arrow.position.copy(path.getPointAt(p)); arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); });
+  cadMaterials.bypassPipe.emissive.setHex(heatingBypass ? 0xf59e0b : 0x000000);
+  cadMaterials.bypassPipe.emissiveIntensity = heatingBypass ? .78 : 0;
+  REAL.heatBypassParticles.forEach(({ dot, path, offset }) => {
+    // 加热时气体从上阀反向进入模型自带旁路，沿真实管腔向油杯方向流动。
+    const pathPoint = 1 - ((phase * .72 + offset) % 1);
+    dot.visible = heatingBypass;
+    dot.position.copy(path.getPointAt(pathPoint));
+  });
   const drainage = drain.position === 1 && !drain.fault;
   REAL.waterParticles.forEach(({ dot, path, offset }) => { dot.visible = drainage; dot.position.copy(path.getPointAt((phase * (.22 + humidityFactor * .34) + offset) % 1)); });
   REAL.steamParticles.forEach(({ puff, origin, offset }) => { const p = (phase * .22 + offset) % 1; const radius = .18 + p * (.30 + humidityFactor * .20); puff.visible = heat === 1 && humidityFactor > .08; puff.position.set(origin.x + radius * Math.sin((p + offset) * 12), origin.y + .10 + p * (1.00 + humidityFactor * .42), origin.z + radius * Math.cos((p + offset) * 10)); puff.scale.setScalar((.54 + p * 1.15) * (.60 + humidityFactor * .72)); puff.material.opacity = (1 - p) * (.15 + humidityFactor * .48); });

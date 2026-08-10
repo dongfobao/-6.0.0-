@@ -26,6 +26,34 @@ ROLE_MATERIAL = {
 }
 
 
+def component_function(low: np.ndarray, high: np.ndarray, matched: dict[str, Any]) -> str | None:
+    """识别新版总装中需要独立控制的实体，避免依赖旧模型的错误近邻命名。"""
+    size = high - low
+    center = (low + high) / 2
+    source_file = str(matched.get("source_file") or "")
+
+    # 新版旁路是一根位于下部玻璃筒内的空心弯管。STL 将其内、外壁拆成两个实体。
+    if (
+        1.70 <= size[1] <= 2.10
+        and low[1] >= 1.75
+        and high[1] <= 3.90
+        and max(size[0], size[2]) <= 0.32
+        and -0.76 <= center[0] <= -0.45
+        and -0.55 <= center[2] <= -0.34
+    ):
+        return "heat_bypass_pipe"
+
+    # 295 金属网中直径较大的一层是硅胶外固定网；内网仍保留。
+    if (
+        "295金属网" in source_file
+        and size[0] >= 1.10
+        and size[1] >= 1.85
+        and size[2] >= 1.10
+    ):
+        return "lower_outer_retaining_mesh"
+    return None
+
+
 def align4(data: bytes, padding: bytes = b"\x00") -> bytes:
     return data + padding * ((-len(data)) % 4)
 
@@ -180,6 +208,9 @@ def main() -> None:
         low, high = positions.min(axis=0), positions.max(axis=0)
         matched = match_reference(low, high, references)
         role = str(matched.get("role") or "structure")
+        function = component_function(low, high, matched)
+        if function == "heat_bypass_pipe":
+            role = "structure"
         role_counts[role] = role_counts.get(role, 0) + 1
 
         position_offset = len(binary)
@@ -200,7 +231,12 @@ def main() -> None:
         node_name = f"replacement_{component_index:04d}_{role}"
         document["meshes"].append({"name": node_name, "primitives": [{"attributes": {"POSITION": position_accessor, "NORMAL": normal_accessor}, "material": ROLE_MATERIAL.get(role, 0)}]})
         node_index = len(document["nodes"])
-        document["nodes"].append({"name": node_name, "mesh": mesh_index, "extras": {"digital_twin_role": role, "source_file": matched.get("source_file", "新版总装新增实体")}})
+        extras = {"digital_twin_role": role, "source_file": matched.get("source_file", "新版总装新增实体")}
+        if function:
+            extras["digital_twin_function"] = function
+        if function == "heat_bypass_pipe":
+            extras["source_file"] = "新版总装自带旁路通气管"
+        document["nodes"].append({"name": node_name, "mesh": mesh_index, "extras": extras})
         document["scenes"][0]["nodes"].append(node_index)
 
     document["buffers"] = [{"byteLength": len(binary)}]
