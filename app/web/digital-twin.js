@@ -6,14 +6,14 @@ const resetButton = document.getElementById("resetDigitalTwinBtn");
 const upperCallout = document.getElementById("twinUpperCallout");
 const heatCallout = document.getElementById("twinHeatCallout");
 const drainCallout = document.getElementById("twinDrainCallout");
-const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue"), breath: document.getElementById("twinBreathValue") };
-const twinDataInfoNodes = { t1: document.getElementById("twinT1Info"), t2: document.getElementById("twinT2Info"), t3: document.getElementById("twinT3Info"), pressure: document.getElementById("twinPressureInfo"), flow: document.getElementById("twinFlowInfo"), breath: document.getElementById("twinBreathInfo") };
-const twinLeaderNodes = { t1: document.getElementById("twinLeaderT1"), t2: document.getElementById("twinLeaderT2"), t3: document.getElementById("twinLeaderT3"), pressure: document.getElementById("twinLeaderPressure"), flow: document.getElementById("twinLeaderFlow"), breath: document.getElementById("twinLeaderBreath") };
+const twinDataNodes = { t1: document.getElementById("twinT1Value"), t2: document.getElementById("twinT2Value"), t3: document.getElementById("twinT3Value"), pressure: document.getElementById("twinPressureValue"), flow: document.getElementById("twinFlowValue") };
+const twinDataInfoNodes = { t1: document.getElementById("twinT1Info"), t2: document.getElementById("twinT2Info"), t3: document.getElementById("twinT3Info"), pressure: document.getElementById("twinPressureInfo"), flow: document.getElementById("twinFlowInfo") };
+const twinLeaderNodes = { t1: document.getElementById("twinLeaderT1"), t2: document.getElementById("twinLeaderT2"), t3: document.getElementById("twinLeaderT3"), pressure: document.getElementById("twinLeaderPressure"), flow: document.getElementById("twinLeaderFlow") };
 // 左右传感器标签固定在同一高度；上温湿度、压力与流量均对应传感器仓上方。
 // 标签锚点置于实体轮廓之外：随模型旋转、缩放，但不遮挡壳体及内部流场。
-const twinLabelAnchors = { t1: new THREE.Vector3(-3.15, .52, .10), t2: new THREE.Vector3(2.70, .52, .10), t3: new THREE.Vector3(-3.15, 1.62, .10), pressure: new THREE.Vector3(2.70, 1.72, .10), flow: new THREE.Vector3(2.70, -.40, .10), breath: new THREE.Vector3(-3.15, -1.08, .10) };
+const twinLabelAnchors = { t1: new THREE.Vector3(-3.15, .52, .10), t2: new THREE.Vector3(2.70, .52, .10), t3: new THREE.Vector3(-3.15, 1.62, .10), flow: new THREE.Vector3(2.70, 2.05, .10), pressure: new THREE.Vector3(2.70, 1.28, .10) };
 // 箭头终点绑定真实零件：加载总装后按源文件命名更新为对应的结构中心。
-const twinLabelTargets = { t1: new THREE.Vector3(-.65, .55, .12), t2: new THREE.Vector3(.65, .55, .12), t3: new THREE.Vector3(0, 1.45, .12), pressure: new THREE.Vector3(.44, 1.45, .12), flow: new THREE.Vector3(-.44, 1.45, .12), breath: new THREE.Vector3(0, -1.58, .12) };
+const twinLabelTargets = { t1: new THREE.Vector3(-.65, .55, .12), t2: new THREE.Vector3(.65, .55, .12), t3: new THREE.Vector3(0, 1.45, .12), pressure: new THREE.Vector3(.44, 1.45, .12), flow: new THREE.Vector3(-.44, 1.45, .12) };
 const STATUS = { snapshot: null, upperTarget: -0.23, drainTarget: -0.20, dragging: false, pointer: null, yaw: -0.42, pitch: 0.10, distance: 7.0 };
 const FLOW_VISUAL_CLOCK = { lastNow: null, time: 0 };
 
@@ -691,7 +691,6 @@ function loadCadAssembly() {
       const target = objects.reduce((sum, object) => sum.add(rig.worldToLocal(centerOf(object))), new THREE.Vector3()).multiplyScalar(1 / objects.length);
       twinLabelTargets[key].copy(target);
     });
-    if (oilCoverNode || oilCupNode) twinLabelTargets.breath.copy(rig.worldToLocal(centerOf(oilCoverNode || oilCupNode)));
     hideProceduralDevice();
     if (REAL.upperValve && REAL.drainValve) {
       REAL.upperValve.userData.baseX = REAL.upperValve.position.x;
@@ -792,8 +791,6 @@ function update(snapshot) {
   if (twinDataInfoNodes.pressure) twinDataInfoNodes.pressure.textContent = `压力状态：${snapshot?.process?.pressureStatus?.displayValue || "--"}`;
   if (twinDataNodes.flow) twinDataNodes.flow.textContent = compact(snapshot?.process?.flow, " L/min");
   if (twinDataInfoNodes.flow) twinDataInfoNodes.flow.textContent = `呼吸状态：${snapshot?.process?.breathState?.displayValue || "--"}`;
-  if (twinDataNodes.breath) twinDataNodes.breath.textContent = snapshot?.process?.breathState?.displayValue || "--";
-  if (twinDataInfoNodes.breath) twinDataInfoNodes.breath.textContent = `气流：${compact(snapshot?.process?.flow, " L/min")} · ${online ? "实时采集" : "等待数据"}`;
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
@@ -836,7 +833,7 @@ function positionTwinDataLabels(){
     const targetX=Math.max(2,Math.min(98,target.x)),targetY=Math.max(2,Math.min(98,target.y));
     const halfWidth=item.node.offsetWidth/width*50;
     const startX=item.side==="left"?item.left+halfWidth:item.left-halfWidth;
-    const laneOffsets={t3:-2,t1:0,breath:2,pressure:-2,t2:0,flow:2};
+    const laneOffsets={t3:-2,t1:0,flow:-2,pressure:0,t2:2};
     const laneBase=item.side==="left"?Math.min(targetX-4,startX+8):Math.max(targetX+4,startX-8);
     const laneX=Math.max(3,Math.min(97,laneBase+(laneOffsets[item.key]||0)));
     item.leader.setAttribute("points",`${startX},${item.top} ${laneX},${item.top} ${laneX},${targetY} ${targetX},${targetY}`);
