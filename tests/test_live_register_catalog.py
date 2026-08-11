@@ -19,9 +19,9 @@ class LiveRegisterCatalogTests(unittest.TestCase):
         self.by_id = {item["id"]: item for item in self.catalog}
 
     def test_catalog_is_v9_only_and_has_unique_points(self) -> None:
-        self.assertEqual(PROTOCOL_VERSION_WORD, 0x0900)
+        self.assertEqual(PROTOCOL_VERSION_WORD, 0x0901)
         self.assertEqual(len(self.catalog), len(self.by_id))
-        self.assertEqual(get_register_catalog_summary()["protocolVersion"], "9.0")
+        self.assertEqual(get_register_catalog_summary()["protocolVersion"], "9.1")
         self.assertTrue(
             all(item["sourceOfTruth"] == "firmware-v9" for item in self.catalog)
         )

@@ -114,6 +114,18 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "input_register.alarm.error_group_2",
     )]
     alarm_active = any(int(item.get("value") or 0) != 0 for item in alarm_items)
+    # 固件 appErr.h 的 ErrorPosition 位于错误组1。上温湿度的越限报警只由第3路产生。
+    alarm_group_1 = int(alarm_items[1].get("value") or 0)
+    def alarm_bit(bit: int) -> bool:
+        return bool(alarm_group_1 & (1 << bit))
+
+    sensor_module_alarms = {
+        "pressure": alarm_bit(0) or alarm_bit(1),
+        "flow": alarm_bit(2),
+        "t1": alarm_bit(3),
+        "t3": alarm_bit(8) or alarm_bit(28) or alarm_bit(30),
+        "t2": alarm_bit(29),
+    }
     control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
     controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
     runtime_valves = []
@@ -185,7 +197,11 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "heatSessions": heat_sessions,
         "channelStats": channel_stats,
         "schedulePlan": schedule_plan,
-        "alarms": {"active": alarm_active, "groups": alarm_items},
+        "alarms": {
+            "active": alarm_active,
+            "groups": alarm_items,
+            "sensorModules": sensor_module_alarms,
+        },
         "communication": {
             "online": _take(by_id, "input_register.communication.online"),
             "failureCount": _take(by_id, "input_register.communication.failure_count"),

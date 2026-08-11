@@ -5,7 +5,20 @@ const sessionArchive = {
   selectedName: null,
   detail: null,
   loading: false,
+  requestId: 0,
+  deviceId: null,
 };
+
+function sessionArchiveReset(deviceId) {
+  sessionArchive.requestId += 1;
+  sessionArchive.deviceId = deviceId || null;
+  sessionArchive.list = [];
+  sessionArchive.selectedName = null;
+  sessionArchive.detail = null;
+  renderSessionList();
+  $("sessionsDetail").classList.add("hidden");
+  $("sessionsDetailEmpty").classList.remove("hidden");
+}
 
 function sessionStatusBadge(status) {
   const map = { recording: ["记录中", "recording"], stopped: ["已停止", "stopped"], completed: ["已完成", "stopped"] };
@@ -14,11 +27,14 @@ function sessionStatusBadge(status) {
 }
 
 async function sessionArchiveRefresh() {
-  if (sessionArchive.loading) return;
+  const deviceId = state.selectedDeviceId;
+  const requestId = ++sessionArchive.requestId;
   sessionArchive.loading = true;
   try {
-    const deviceParam = state.selectedDeviceId ? `?deviceId=${encodeURIComponent(state.selectedDeviceId)}` : "";
+    const deviceParam = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : "";
     const payload = await api(`/api/sessions/list${deviceParam}`);
+    if (requestId !== sessionArchive.requestId || deviceId !== state.selectedDeviceId) return;
+    sessionArchive.deviceId = deviceId;
     sessionArchive.list = payload.items || [];
     renderSessionList();
     if (sessionArchive.selectedName && sessionArchive.list.some((item) => item.name === sessionArchive.selectedName)) {
@@ -27,7 +43,7 @@ async function sessionArchiveRefresh() {
   } catch (error) {
     showNotice(`会话列表加载失败：${error.message}`, "error");
   } finally {
-    sessionArchive.loading = false;
+    if (requestId === sessionArchive.requestId) sessionArchive.loading = false;
   }
 }
 
@@ -50,8 +66,11 @@ function renderSessionList() {
 }
 
 async function loadSessionDetail(name, silent) {
+  const deviceId = state.selectedDeviceId;
+  const requestId = ++sessionArchive.requestId;
   try {
     const payload = await api(`/api/sessions/detail?name=${encodeURIComponent(name)}`);
+    if (requestId !== sessionArchive.requestId || deviceId !== state.selectedDeviceId || payload.session?.deviceId !== deviceId) return;
     sessionArchive.selectedName = name;
     sessionArchive.detail = payload;
     renderSessionDetail();
@@ -132,8 +151,9 @@ function exportSessionCsv() {
   const eventValue = $("sessionsEventFilter").value;
   const events = detail.events.filter((item) =>
     (!channelValue || item.channel === channelValue) && (!eventValue || item.event === eventValue));
+  const safeCell = (cell) => { const text=String(cell ?? ""); return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text; };
   const lines = ["时间,通道,事件,详情"].concat(events.map((item) =>
-    [item.time, item.channel, item.event, item.detail || ""].map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")));
+    [item.time, item.channel, item.event, item.detail || ""].map((cell) => `"${safeCell(cell).replace(/"/g, '""')}"`).join(",")));
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);

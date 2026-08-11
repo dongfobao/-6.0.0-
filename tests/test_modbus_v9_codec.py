@@ -18,12 +18,29 @@ class ModbusV9CodecTests(unittest.TestCase):
     def test_boolean_register_uses_zero_or_one(self) -> None:
         self.assertEqual(encode_words(True, "bool"), [1])
         self.assertEqual(encode_words(False, "bool"), [0])
+        for value in (2, -1, [], {}):
+            with self.assertRaises(V9CodecError):
+                encode_words(value, "bool")
+        with self.assertRaises(V9CodecError):
+            decode_words([2], "bool")
+
+    def test_integer_codec_rejects_fractional_and_out_of_range_words(self) -> None:
+        with self.assertRaises(V9CodecError):
+            encode_words(1.5, "uint16")
+        with self.assertRaises(V9CodecError):
+            decode_words([-1], "uint16")
+        with self.assertRaises(V9CodecError):
+            decode_words([65536], "uint16")
 
     def test_rejects_bad_length_and_non_finite_float(self) -> None:
         with self.assertRaises(V9CodecError):
             decode_words([1], "uint32")
         with self.assertRaises(V9CodecError):
             encode_words(float("nan"), "float32")
+        with self.assertRaises(V9CodecError):
+            encode_words(1e100, "float32")
+        with self.assertRaises(V9CodecError):
+            decode_words([0x7FC0, 0x0000], "float32")
 
 
 if __name__ == "__main__":

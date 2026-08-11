@@ -33,6 +33,21 @@ class LivePollingCommandsTests(unittest.TestCase):
                 (4, 500, 7),
                 (3, 0, 5),
                 (3, 800, 21),
+                (3, 100, 63),
+                (3, 163, 12),
+                (3, 175, 2),
+                (3, 187, 6),
+                (3, 200, 7),
+                (3, 220, 9),
+                (3, 300, 6),
+                (3, 400, 11),
+                (3, 420, 8),
+                (3, 430, 3),
+                (3, 500, 8),
+                (3, 520, 7),
+                (3, 600, 5),
+                (3, 700, 4),
+                (3, 720, 29),
             },
         )
         self.assertTrue(all(item["id"].startswith("v9.") for item in commands))
@@ -67,7 +82,7 @@ class LivePollingCommandsTests(unittest.TestCase):
                 720,
             },
         )
-        self.assertTrue(all(not item["autoPoll"] for item in config_commands))
+        self.assertTrue(all(item["autoPoll"] for item in config_commands))
         expected_counts = {
             187: 6,
             300: 6,

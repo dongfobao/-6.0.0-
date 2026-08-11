@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 import time
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,21 @@ except Exception:  # pragma: no cover - environment dependent
 
 class ModbusError(Exception):
     pass
+
+
+ALLOWED_BAUDRATES = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200}
+
+
+def _validated_int(value: Any, name: str, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or (isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())):
+        raise ModbusError(f"{name} must be an integer")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ModbusError(f"{name} must be an integer") from exc
+    if not minimum <= number <= maximum:
+        raise ModbusError(f"{name} out of range [{minimum}, {maximum}]: {number}")
+    return number
 
 
 def crc16_modbus(data: bytes) -> int:
@@ -45,15 +61,31 @@ class SerialConfig:
 
     @classmethod
     def from_device(cls, device: dict[str, Any]) -> "SerialConfig":
+        def supplied(key: str, default: Any) -> Any:
+            value = device.get(key)
+            return default if value in (None, "") else value
+
+        slave_id = _validated_int(supplied("slaveId", 1), "slave id", 1, 247)
+        baudrate = _validated_int(supplied("baudrate", 9600), "baudrate", 1200, 115200)
+        if baudrate not in ALLOWED_BAUDRATES:
+            raise ModbusError(f"unsupported baudrate: {baudrate}")
+        databits = _validated_int(supplied("databits", 8), "data bits", 7, 8)
+        stopbits = _validated_int(supplied("stopbits", 1), "stop bits", 1, 2)
+        parity = str(device.get("parity") or "N").upper()
+        if parity not in {"N", "E", "O"}:
+            raise ModbusError(f"unsupported parity: {parity}")
+        port = str(device.get("address") or "").strip()
+        if not port:
+            raise ModbusError("serial port is required")
         return cls(
-            port=str(device.get("address") or "").strip(),
-            slave_id=max(1, min(247, int(device.get("slaveId") or 1))),
-            baudrate=max(1200, int(device.get("baudrate") or 9600)),
-            databits=int(device.get("databits") or 8),
-            stopbits=int(device.get("stopbits") or 1),
-            parity=str(device.get("parity") or "N").upper(),
-            timeout_ms=max(100, int(device.get("timeoutMs") or 1200)),
-            retry_count=max(0, int(device.get("retryCount") or 0)),
+            port=port,
+            slave_id=slave_id,
+            baudrate=baudrate,
+            databits=databits,
+            stopbits=stopbits,
+            parity=parity,
+            timeout_ms=_validated_int(supplied("timeoutMs", 1200), "timeout", 100, 30_000),
+            retry_count=_validated_int(supplied("retryCount", 0), "retry count", 0, 5),
         )
 
 
@@ -63,12 +95,13 @@ class LiveModbusClient:
         self._serial: Any | None = None
         self._trace_callback: Any | None = None
         self._trace_seq = 0
+        self._last_tx_completed_at = 0.0
 
     def set_trace_callback(self, callback: Any | None) -> None:
         self._trace_callback = callback
 
     def set_slave_id(self, slave_id: int) -> None:
-        self.config.slave_id = max(1, min(247, int(slave_id)))
+        self.config.slave_id = _validated_int(slave_id, "slave id", 1, 247)
 
     def open(self) -> None:
         if self._serial is not None and getattr(self._serial, "is_open", False):
@@ -115,9 +148,11 @@ class LiveModbusClient:
         return self._read_registers(4, address, count)
 
     def write_single_register(self, address: int, value: int) -> None:
-        payload = struct.pack(">B B H H", self.config.slave_id, 6, address, int(value) & 0xFFFF)
+        address = _validated_int(address, "register address", 0, 0xFFFF)
+        word = _validated_int(value, "register value", 0, 0xFFFF)
+        payload = struct.pack(">B B H H", self.config.slave_id, 6, address, word)
         response = self._request(payload, minimum_length=8)
-        if response[:6] != payload[:6]:
+        if len(response) != 8 or response[:6] != payload[:6]:
             raise ModbusError("unexpected response payload for write single register")
 
     def write_multiple_registers(self, address: int, values: list[int]) -> None:
@@ -125,13 +160,17 @@ class LiveModbusClient:
             raise ModbusError("register values are required")
         if len(values) > 123:
             raise ModbusError(f"invalid register count: {len(values)}")
+        address = _validated_int(address, "register address", 0, 0xFFFF)
+        if address + len(values) - 1 > 0xFFFF:
+            raise ModbusError("register write crosses address 65535")
         word_count = len(values)
         byte_count = word_count * 2
         payload = struct.pack(">B B H H B", self.config.slave_id, 16, address, word_count, byte_count)
-        payload += struct.pack(f">{word_count}H", *[int(value) & 0xFFFF for value in values])
+        words = [_validated_int(value, "register value", 0, 0xFFFF) for value in values]
+        payload += struct.pack(f">{word_count}H", *words)
         response = self._request(payload, minimum_length=8)
         expected = struct.pack(">B B H H", self.config.slave_id, 16, address, word_count)
-        if response[:6] != expected[:6]:
+        if len(response) != 8 or response[:6] != expected[:6]:
             raise ModbusError("unexpected response payload for write multiple registers")
 
     def send_raw_frame(
@@ -145,32 +184,48 @@ class LiveModbusClient:
         raw_frame = bytes(frame or b"")
         if not raw_frame:
             raise ModbusError("raw frame is required")
-        self.open()
-        assert self._serial is not None
-        self._serial.reset_input_buffer()
-        self._serial.reset_output_buffer()
         trace_id = self._next_trace_id()
         tx_frame = append_crc(raw_frame) if append_crc_bytes else raw_frame
-        self._emit_trace("request", trace_id, tx_frame, 0, summary=f"RAW bytes {len(tx_frame)}")
-        self._serial.write(tx_frame)
-        self._serial.flush()
-        if not expect_response:
-            self._emit_trace("sent", trace_id, None, 0, summary="manual send only")
-            return None
+        response: bytes | None = None
         try:
+            self.open()
+            assert self._serial is not None
+            self._wait_rtu_silent_interval()
+            self._serial.reset_input_buffer()
+            self._serial.reset_output_buffer()
+            self._emit_trace("request", trace_id, tx_frame, 0, summary=f"RAW bytes {len(tx_frame)}")
+            written = self._serial.write(tx_frame)
+            if written != len(tx_frame):
+                raise ModbusError(f"partial serial write: {written}/{len(tx_frame)} bytes")
+            self._serial.flush()
+            self._last_tx_completed_at = time.monotonic()
+            if not expect_response:
+                self._emit_trace("sent", trace_id, None, 0, summary="manual send only")
+                return None
             response = self._read_raw_response(response_timeout_ms=response_timeout_ms)
+            request_payload = raw_frame[:-2] if not append_crc_bytes and len(raw_frame) >= 8 else raw_frame
+            self._validate_response(request_payload, response)
+            self._validate_read_payload(request_payload, response)
             self._emit_trace("response", trace_id, response, 0, summary=f"RAW bytes {len(response)}")
             return response
         except Exception as exc:
-            self._emit_trace("no_response", trace_id, None, 0, error=str(exc))
+            self._emit_trace("error" if response is not None else "no_response", trace_id, response, 0, error=str(exc))
             raise ModbusError(str(exc)) from exc
 
     def _read_bits(self, function_code: int, address: int, count: int) -> list[bool]:
         if count < 1 or count > 2000:
             raise ModbusError(f"invalid bit count: {count}")
+        address = _validated_int(address, "bit address", 0, 0xFFFF)
+        if address + count - 1 > 0xFFFF:
+            raise ModbusError("bit read crosses address 65535")
         payload = struct.pack(">B B H H", self.config.slave_id, function_code, address, count)
         response = self._request(payload, minimum_length=5)
         byte_count = response[2]
+        expected_byte_count = (count + 7) // 8
+        if byte_count != expected_byte_count:
+            raise ModbusError(
+                f"unexpected bit byte count for fc={function_code}: expected {expected_byte_count}, got {byte_count}"
+            )
         expected_length = 3 + byte_count + 2
         if len(response) != expected_length:
             raise ModbusError(f"unexpected response length for fc={function_code}: {len(response)}")
@@ -184,6 +239,9 @@ class LiveModbusClient:
     def _read_registers(self, function_code: int, address: int, count: int) -> list[int]:
         if count < 1 or count > 125:
             raise ModbusError(f"invalid register count: {count}")
+        address = _validated_int(address, "register address", 0, 0xFFFF)
+        if address + count - 1 > 0xFFFF:
+            raise ModbusError("register read crosses address 65535")
         payload = struct.pack(">B B H H", self.config.slave_id, function_code, address, count)
         response = self._request(payload, minimum_length=5)
         byte_count = response[2]
@@ -209,15 +267,19 @@ class LiveModbusClient:
             try:
                 self.open()
                 assert self._serial is not None
+                self._wait_rtu_silent_interval()
                 self._serial.reset_input_buffer()
                 self._serial.reset_output_buffer()
                 frame = append_crc(payload)
                 self._emit_trace("request", trace_id, frame, attempt, summary=self._summarize_request(payload))
-                self._serial.write(frame)
+                written = self._serial.write(frame)
+                if written != len(frame):
+                    raise ModbusError(f"partial serial write: {written}/{len(frame)} bytes")
                 self._serial.flush()
+                self._last_tx_completed_at = time.monotonic()
                 response = self._read_response(minimum_length)
-                self._emit_trace("response", trace_id, response, attempt, summary=self._summarize_response(response))
                 self._validate_response(payload, response)
+                self._emit_trace("response", trace_id, response, attempt, summary=self._summarize_response(response))
                 return response
             except Exception as exc:
                 last_error = exc
@@ -250,7 +312,7 @@ class LiveModbusClient:
 
     def _read_raw_response(self, response_timeout_ms: int | None = None, idle_gap_ms: int = 40) -> bytes:
         assert self._serial is not None
-        timeout_ms = max(50, int(response_timeout_ms or self.config.timeout_ms))
+        timeout_ms = max(50, min(30_000, int(response_timeout_ms or self.config.timeout_ms)))
         deadline = time.monotonic() + (timeout_ms / 1000.0)
         idle_gap_sec = max(0.01, idle_gap_ms / 1000.0)
         buffer = bytearray()
@@ -298,6 +360,27 @@ class LiveModbusClient:
         if response[1] != function_code:
             raise ModbusError(f"unexpected function code: {response[1]}")
 
+    @staticmethod
+    def _validate_read_payload(request_payload: bytes, response: bytes) -> None:
+        if len(request_payload) < 6 or request_payload[1] not in {2, 3, 4}:
+            return
+        count = int.from_bytes(request_payload[4:6], "big")
+        expected = (count + 7) // 8 if request_payload[1] == 2 else count * 2
+        if len(response) < 5 or response[2] != expected or len(response) != expected + 5:
+            raise ModbusError(
+                f"unexpected response byte count for fc={request_payload[1]}: expected {expected}"
+            )
+
+    def _wait_rtu_silent_interval(self) -> None:
+        if self._last_tx_completed_at <= 0:
+            return
+        parity_bits = 0 if self.config.parity == "N" else 1
+        bits_per_character = 1 + self.config.databits + parity_bits + self.config.stopbits
+        minimum_gap = 3.5 * bits_per_character / self.config.baudrate
+        remaining = minimum_gap - (time.monotonic() - self._last_tx_completed_at)
+        if remaining > 0:
+            time.sleep(remaining)
+
     def _next_trace_id(self) -> int:
         self._trace_seq += 1
         return self._trace_seq
@@ -314,8 +397,8 @@ class LiveModbusClient:
     ) -> None:
         if self._trace_callback is None:
             return
-        self._trace_callback(
-            {
+        try:
+            self._trace_callback({
                 "kind": kind,
                 "traceId": trace_id,
                 "attempt": attempt,
@@ -324,8 +407,10 @@ class LiveModbusClient:
                 "error": error,
                 "port": self.config.port,
                 "slaveId": self.config.slave_id,
-            }
-        )
+            })
+        except Exception:
+            # 诊断记录失败不能改变 Modbus 请求本身的成功或失败结果。
+            return
 
     @staticmethod
     def _summarize_request(payload: bytes) -> str:

@@ -5,7 +5,6 @@ import ctypes
 import json
 import os
 import signal
-import subprocess
 import sys
 import threading
 import traceback
@@ -39,8 +38,9 @@ def _cleanup() -> None:
     try:
         from live_acquisition_service import get_live_acquisition_service
         get_live_acquisition_service().stop_all()
-    except Exception:
-        pass
+    except Exception as exc:
+        _shutting_down = False
+        print(f"停止采集失败，将在退出阶段重试: {exc}", file=sys.stderr)
 
 
 def _register_cleanup() -> None:
@@ -59,14 +59,13 @@ def _message(text: str, flags: int = 0) -> None:
         print(text)
 
 
-def _kill_port_owner(port: int) -> None:
+def _existing_instance_running() -> bool:
     try:
-        subprocess.run([
-            "powershell", "-NoProfile", "-Command",
-            f"$c=Get-NetTCPConnection -LocalPort {port} -State Listen -EA SilentlyContinue|Select -First 1;if($c){{Stop-Process -Id $c.OwningProcess -Force -EA SilentlyContinue}}",
-        ], capture_output=True, timeout=8)
+        with urllib.request.urlopen(HEALTH_URL, timeout=1) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            return response.status == 200 and payload.get("service") == "YLDQ 6.0 monitor"
     except Exception:
-        pass
+        return False
 
 
 def _open_browser_when_ready() -> None:
@@ -89,7 +88,9 @@ def main() -> int:
         if not (asset_dir / "web").exists():
             raise FileNotFoundError(f"未找到 web 目录: {asset_dir / 'web'}")
         dashboard_server.set_runtime_base(base_dir, asset_base_dir=asset_dir)
-        _kill_port_owner(dashboard_server.PORT)
+        if _existing_instance_running():
+            webbrowser.open(APP_URL)
+            return 0
         server = ThreadingHTTPServer((dashboard_server.HOST, dashboard_server.PORT), dashboard_server.DashboardRequestHandler)
         threading.Thread(target=_open_browser_when_ready, daemon=True).start()
         try:

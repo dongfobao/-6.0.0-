@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import uuid
 from copy import deepcopy
 from pathlib import Path
@@ -34,12 +36,82 @@ DEFAULT_DEVICE_PROFILE: dict[str, Any] = {
     "enabled": True,
 }
 
+ALLOWED_BAUDRATES = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200}
+_STORE_LOCKS_GUARD = threading.Lock()
+_STORE_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _store_lock(store_path: Path) -> threading.RLock:
+    key = str(Path(store_path).resolve())
+    with _STORE_LOCKS_GUARD:
+        return _STORE_LOCKS.setdefault(key, threading.RLock())
+
+
+def _normalize_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "是", "开"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "否", "关"}:
+            return False
+    raise ValueError(f"无效的布尔值: {value!r}")
+
+
+def _bounded_int(value: Any, name: str, minimum: int, maximum: int, default: int) -> int:
+    raw = default if value in (None, "") else value
+    try:
+        number = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} 必须是整数") from exc
+    if not minimum <= number <= maximum:
+        raise ValueError(f"{name} 必须在 {minimum}–{maximum} 之间")
+    return number
+
+
+def _atomic_write_json(store_path: Path, payload: dict[str, Any]) -> None:
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = store_path.with_name(f".{store_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, store_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def _pending_profile_path(store_path: Path) -> Path:
+    return store_path.with_name(f".{store_path.name}.pending-profile.json")
+
+
+def stage_pending_device_profile(store_path: Path, device_id: str, profile: dict[str, Any]) -> None:
+    """在提交设备通信参数前写入恢复日志，防止设备提交成功而本地档案丢失。"""
+    with _store_lock(store_path):
+        _atomic_write_json(_pending_profile_path(store_path), {
+            "deviceId": str(device_id), "profile": dict(profile),
+        })
+
+
+def clear_pending_device_profile(store_path: Path) -> None:
+    with _store_lock(store_path):
+        pending_path = _pending_profile_path(store_path)
+        if pending_path.exists():
+            pending_path.unlink()
+
 def _normalize_interval_ms(value: Any, default_value: int) -> int:
     try:
         interval_ms = int(value)
     except (TypeError, ValueError):
         interval_ms = int(default_value)
-    return max(100, interval_ms)
+    return max(100, min(300_000, interval_ms))
 
 
 def _normalize_targets(value: Any, default_value: list[str]) -> list[str]:
@@ -140,14 +212,18 @@ def _normalize_device_payload(
     device["protocolType"] = "modbus"
     device["transport"] = "rtu"
     device["address"] = str(device.get("address") or DEFAULT_DEVICE_PROFILE["address"]).strip() or DEFAULT_DEVICE_PROFILE["address"]
-    device["slaveId"] = max(1, min(247, int(device.get("slaveId") or 1)))
-    device["baudrate"] = int(device.get("baudrate") or DEFAULT_DEVICE_PROFILE["baudrate"])
-    device["databits"] = int(device.get("databits") or DEFAULT_DEVICE_PROFILE["databits"])
-    device["stopbits"] = int(device.get("stopbits") or DEFAULT_DEVICE_PROFILE["stopbits"])
+    device["slaveId"] = _bounded_int(device.get("slaveId"), "从站地址", 1, 247, 1)
+    device["baudrate"] = _bounded_int(device.get("baudrate"), "波特率", 1200, 115200, 9600)
+    if device["baudrate"] not in ALLOWED_BAUDRATES:
+        raise ValueError(f"不支持的波特率: {device['baudrate']}")
+    device["databits"] = _bounded_int(device.get("databits"), "数据位", 7, 8, 8)
+    device["stopbits"] = _bounded_int(device.get("stopbits"), "停止位", 1, 2, 1)
     parity = str(device.get("parity") or DEFAULT_DEVICE_PROFILE["parity"]).upper()
-    device["parity"] = parity if parity in {"N", "E", "O"} else "N"
-    device["timeoutMs"] = max(100, int(device.get("timeoutMs") or DEFAULT_DEVICE_PROFILE["timeoutMs"]))
-    device["retryCount"] = max(0, int(device.get("retryCount") or DEFAULT_DEVICE_PROFILE["retryCount"]))
+    if parity not in {"N", "E", "O"}:
+        raise ValueError(f"不支持的校验位: {parity}")
+    device["parity"] = parity
+    device["timeoutMs"] = _bounded_int(device.get("timeoutMs"), "通信超时", 100, 30_000, 1200)
+    device["retryCount"] = _bounded_int(device.get("retryCount"), "重试次数", 0, 5, 2)
     device["pollingProfile"] = str(device.get("pollingProfile") or DEFAULT_DEVICE_PROFILE["pollingProfile"]).strip() or DEFAULT_DEVICE_PROFILE["pollingProfile"]
     polling_defaults = profile_groups_index.get(device["pollingProfile"]) or DEFAULT_POLLING_GROUPS
     raw_polling_settings = device.get("pollingSettings")
@@ -155,7 +231,7 @@ def _normalize_device_payload(
         raw_polling_settings = device.get("pollingGroups")
     device["pollingSettings"] = _normalize_polling_groups(raw_polling_settings, polling_defaults)
     device["pollingCommands"] = normalize_polling_commands(device.get("pollingCommands"))
-    device["enabled"] = bool(device.get("enabled", True))
+    device["enabled"] = _normalize_bool(device.get("enabled"), True)
     return device
 
 
@@ -168,12 +244,13 @@ def _default_payload() -> dict[str, Any]:
 
 
 def load_live_devices(store_path: Path) -> dict[str, Any]:
-    if not store_path.exists():
-        return _default_payload()
-    try:
-        payload = json.loads(store_path.read_text(encoding="utf-8"))
-    except Exception:
-        return _default_payload()
+    with _store_lock(store_path):
+        if not store_path.exists():
+            return _default_payload()
+        try:
+            payload = json.loads(store_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"设备配置文件损坏，已拒绝清空现有设备: {store_path}") from exc
     result = _default_payload()
     if isinstance(payload, dict):
         result["selectedDeviceId"] = payload.get("selectedDeviceId")
@@ -185,26 +262,61 @@ def load_live_devices(store_path: Path) -> dict[str, Any]:
                 for item in payload["devices"]
                 if isinstance(item, dict)
             ]
-    if result["devices"] and not any(item["id"] == result["selectedDeviceId"] for item in result["devices"]):
-        result["selectedDeviceId"] = result["devices"][0]["id"]
+    ids = [str(item["id"]) for item in result["devices"]]
+    if len(ids) != len(set(ids)):
+        raise ValueError("设备配置文件中存在重复设备 ID")
+    endpoints = [(str(item["address"]).upper(), int(item["slaveId"])) for item in result["devices"]]
+    if len(endpoints) != len(set(endpoints)):
+        raise ValueError("设备配置文件中存在重复串口从站")
+    selected = next((item for item in result["devices"] if item["id"] == result["selectedDeviceId"]), None)
+    if selected is None or not selected.get("enabled", True):
+        result["selectedDeviceId"] = next((item["id"] for item in result["devices"] if item.get("enabled", True)), None)
+    pending_path = _pending_profile_path(store_path)
+    if pending_path.exists():
+        try:
+            pending = json.loads(pending_path.read_text(encoding="utf-8"))
+            pending_id = str(pending.get("deviceId") or "") if isinstance(pending, dict) else ""
+            profile = pending.get("profile") if isinstance(pending, dict) else None
+            if pending_id and isinstance(profile, dict):
+                for index, device in enumerate(result["devices"]):
+                    if device["id"] == pending_id:
+                        merged = deepcopy(device)
+                        merged.update(profile)
+                        result["devices"][index] = _normalize_device_payload(
+                            merged, existing_id=pending_id, profiles=result["profiles"]
+                        )
+                        break
+                _atomic_write_json(store_path, result)
+                pending_path.unlink()
+        except (OSError, ValueError, json.JSONDecodeError):
+            # 恢复日志保留到下次启动；本次仍返回已能解析的主配置。
+            pass
     return result
 
 
 def save_live_devices(store_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    profiles = _normalize_profiles(payload.get("profiles"))
-    normalized = {
-        "devices": [
-            _normalize_device_payload(item, profiles=profiles)
-            for item in payload.get("devices", [])
-            if isinstance(item, dict)
-        ],
-        "selectedDeviceId": payload.get("selectedDeviceId"),
-        "profiles": profiles,
-    }
-    if normalized["devices"] and not any(item["id"] == normalized["selectedDeviceId"] for item in normalized["devices"]):
-        normalized["selectedDeviceId"] = normalized["devices"][0]["id"]
-    store_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-    return normalized
+    with _store_lock(store_path):
+        profiles = _normalize_profiles(payload.get("profiles"))
+        normalized = {
+            "devices": [
+                _normalize_device_payload(item, profiles=profiles)
+                for item in payload.get("devices", [])
+                if isinstance(item, dict)
+            ],
+            "selectedDeviceId": payload.get("selectedDeviceId"),
+            "profiles": profiles,
+        }
+        ids = [str(item["id"]) for item in normalized["devices"]]
+        if len(ids) != len(set(ids)):
+            raise ValueError("设备 ID 不能重复")
+        endpoints = [(str(item["address"]).upper(), int(item["slaveId"])) for item in normalized["devices"]]
+        if len(endpoints) != len(set(endpoints)):
+            raise ValueError("同一串口上的从站地址不能重复")
+        selected = next((item for item in normalized["devices"] if item["id"] == normalized["selectedDeviceId"]), None)
+        if selected is None or not selected.get("enabled", True):
+            normalized["selectedDeviceId"] = next((item["id"] for item in normalized["devices"] if item.get("enabled", True)), None)
+        _atomic_write_json(store_path, normalized)
+        return normalized
 
 
 def export_live_devices_json(store_path: Path) -> str:
@@ -219,43 +331,51 @@ def import_live_devices_payload(store_path: Path, payload: dict[str, Any]) -> di
 
 
 def create_live_device(store_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    current = load_live_devices(store_path)
-    device = _normalize_device_payload(payload, profiles=current["profiles"])
-    current["devices"].append(device)
-    current["selectedDeviceId"] = device["id"]
-    save_live_devices(store_path, current)
-    return device
+    with _store_lock(store_path):
+        current = load_live_devices(store_path)
+        device = _normalize_device_payload(payload, profiles=current["profiles"])
+        current["devices"].append(device)
+        if device.get("enabled", True):
+            current["selectedDeviceId"] = device["id"]
+        save_live_devices(store_path, current)
+        return device
 
 
 def update_live_device(store_path: Path, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    current = load_live_devices(store_path)
-    for index, device in enumerate(current["devices"]):
-        if device["id"] == device_id:
-            merged = deepcopy(device)
-            merged.update(payload or {})
-            normalized = _normalize_device_payload(merged, existing_id=device_id, profiles=current["profiles"])
-            current["devices"][index] = normalized
-            save_live_devices(store_path, current)
-            return normalized
-    raise KeyError(f"Device not found: {device_id}")
+    with _store_lock(store_path):
+        current = load_live_devices(store_path)
+        for index, device in enumerate(current["devices"]):
+            if device["id"] == device_id:
+                merged = deepcopy(device)
+                merged.update(payload or {})
+                normalized = _normalize_device_payload(merged, existing_id=device_id, profiles=current["profiles"])
+                current["devices"][index] = normalized
+                save_live_devices(store_path, current)
+                return normalized
+        raise KeyError(f"Device not found: {device_id}")
 
 
 def delete_live_device(store_path: Path, device_id: str) -> dict[str, Any]:
-    current = load_live_devices(store_path)
-    filtered = [item for item in current["devices"] if item["id"] != device_id]
-    if len(filtered) == len(current["devices"]):
-        raise KeyError(f"Device not found: {device_id}")
-    current["devices"] = filtered
-    if current["selectedDeviceId"] == device_id:
-        current["selectedDeviceId"] = filtered[0]["id"] if filtered else None
-    save_live_devices(store_path, current)
-    return current
+    with _store_lock(store_path):
+        current = load_live_devices(store_path)
+        filtered = [item for item in current["devices"] if item["id"] != device_id]
+        if len(filtered) == len(current["devices"]):
+            raise KeyError(f"Device not found: {device_id}")
+        current["devices"] = filtered
+        if current["selectedDeviceId"] == device_id:
+            current["selectedDeviceId"] = next((item["id"] for item in filtered if item.get("enabled", True)), None)
+        save_live_devices(store_path, current)
+        return current
 
 
 def select_live_device(store_path: Path, device_id: str) -> dict[str, Any]:
-    current = load_live_devices(store_path)
-    if device_id and not any(item["id"] == device_id for item in current["devices"]):
-        raise KeyError(f"Device not found: {device_id}")
-    current["selectedDeviceId"] = device_id
-    save_live_devices(store_path, current)
-    return current
+    with _store_lock(store_path):
+        current = load_live_devices(store_path)
+        selected = next((item for item in current["devices"] if item["id"] == device_id), None)
+        if device_id and selected is None:
+            raise KeyError(f"Device not found: {device_id}")
+        if selected is not None and not selected.get("enabled", True):
+            raise ValueError("禁用设备不能被选为当前监控设备")
+        current["selectedDeviceId"] = device_id
+        save_live_devices(store_path, current)
+        return current

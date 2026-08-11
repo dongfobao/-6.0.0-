@@ -6,13 +6,15 @@ from dataclasses import dataclass
 import time
 from typing import Any, Protocol
 
-from live_register_catalog import PROTOCOL_VERSION_WORD
+from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_item
 from modbus_v9_codec import encode_words
 
 
-CONFIG_STATUS_ADDRESS = 0
+CONFIG_STATUS_ADDRESS = int(get_register_item("holding.config.protocol_version")["address"])
 CONFIG_STATUS_COUNT = 5
-CONFIG_COMMAND_ADDRESS = 3
+CONFIG_COMMAND_ADDRESS = int(get_register_item("holding.config.command")["address"])
+CONFIG_REGION_START = int(get_register_item("holding.sensor_1.enabled")["address"])
+RUNTIME_REGION_START = int(get_register_item("holding.runtime.remote_heat")["address"])
 COMMAND_COMMIT = 0xC6A6
 COMMAND_DISCARD = 0xD15C
 ERROR_SAVE_PENDING = 5
@@ -68,7 +70,9 @@ class V9ConfigTransaction:
         if item.get("area") != "holding_register" or not item.get("writable"):
             raise ConfigTransactionError(f"点不可写: {item.get('id')}")
         address = int(item["address"])
-        if address < 100 or address >= 800:
+        word_length = int(item.get("wordLength") or 1)
+        address_end = int(item.get("addressEnd") or (address + word_length - 1))
+        if address < CONFIG_REGION_START or address_end >= RUNTIME_REGION_START:
             raise ConfigTransactionError("配置事务只允许写入 100-799 配置区")
         self._validate_value_range(item, value)
         words = encode_words(value, str(item["dataType"]))
@@ -111,13 +115,14 @@ class V9ConfigTransaction:
 
     def commit(self) -> ConfigStatus:
         before = self.read_status()
+        expected_generation = (before.generation + 1) & 0xFFFF
         self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_COMMIT)
         deadline = time.monotonic() + self.commit_timeout_seconds
         while True:
             status = self.read_status()
             if status.error not in (0, ERROR_SAVE_PENDING):
                 raise ConfigTransactionError(f"配置提交失败，错误码: {status.error}")
-            generation_advanced = status.generation != before.generation
+            generation_advanced = status.generation == expected_generation
             commit_succeeded = bool(status.state & 0x0004)
             staging_dirty = bool(status.state & 0x0002)
             if generation_advanced and commit_succeeded and not staging_dirty:
@@ -127,7 +132,23 @@ class V9ConfigTransaction:
             time.sleep(self.poll_interval_seconds)
 
     def discard(self) -> ConfigStatus:
-        return self._command(COMMAND_DISCARD)
+        self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_DISCARD)
+        deadline = time.monotonic() + self.commit_timeout_seconds
+        clean_confirmations = 0
+        while True:
+            status = self.read_status()
+            if status.error != 0:
+                raise ConfigTransactionError(f"放弃配置失败，错误码: {status.error}")
+            if not bool(status.state & 0x0002):
+                clean_confirmations += 1
+                # 连续两次读到干净状态，避免把命令执行前的旧状态误当作放弃成功。
+                if clean_confirmations >= 2:
+                    return status
+            else:
+                clean_confirmations = 0
+            if time.monotonic() >= deadline:
+                raise ConfigTransactionError("放弃配置超时，暂存区仍处于已修改状态")
+            time.sleep(self.poll_interval_seconds)
 
     def _command(self, command: int) -> ConfigStatus:
         self.client.write_single_register(CONFIG_COMMAND_ADDRESS, command)

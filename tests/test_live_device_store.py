@@ -8,10 +8,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from live_device_store import export_live_devices_json, import_live_devices_payload
+from live_device_store import export_live_devices_json, import_live_devices_payload, load_live_devices
 
 
 class LiveDeviceStoreTests(unittest.TestCase):
+    def test_corrupt_store_is_not_silently_replaced(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "live_devices.json"
+            store_path.write_text("{broken", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_live_devices(store_path)
+
+    def test_duplicate_endpoint_and_invalid_serial_values_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "live_devices.json"
+            duplicate = {
+                "devices": [
+                    {"id": "a", "address": "COM7", "slaveId": 2},
+                    {"id": "b", "address": "com7", "slaveId": 2},
+                ]
+            }
+            with self.assertRaises(ValueError):
+                import_live_devices_payload(store_path, duplicate)
+            with self.assertRaises(ValueError):
+                import_live_devices_payload(store_path, {"devices": [{"id": "a", "slaveId": 0}]})
+            with self.assertRaises(ValueError):
+                import_live_devices_payload(store_path, {"devices": [{"id": "a", "parity": "X"}]})
+
     def test_export_live_devices_json_returns_normalized_payload(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store_path = Path(tmpdir) / "live_devices.json"

@@ -33,6 +33,14 @@ class SlowStopService(LiveAcquisitionService):
 
 
 class LiveAcquisitionServiceTests(unittest.TestCase):
+    def test_debug_frame_rejects_write_and_non_catalog_reads(self) -> None:
+        service = LiveAcquisitionService()
+        device = {"id": "dev-a", "address": "COM1", "slaveId": 1}
+        with self.assertRaises(ValueError):
+            service.send_debug_frame(device, "01 06 03 20 00 01", append_crc_bytes=True)
+        with self.assertRaises(ValueError):
+            service.send_debug_frame(device, "01 03 00 01 00 01", append_crc_bytes=True)
+
     def test_protocol_mismatch_stops_v9_decoding(self):
         service = LiveAcquisitionService()
         slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
@@ -101,6 +109,10 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
             def write_single_register(self, address, value):
                 calls.append(("register", address, value))
 
+            def read_input_registers(self, address, count):
+                calls.append(("read", address, count))
+                return [1]
+
         service = LiveAcquisitionService()
         service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
         service._device_slots["dev-a"]["state"]["running"] = True
@@ -111,6 +123,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["item"]["currentValue"], True)
         self.assertIn(("register", 800, 1), calls)
+        self.assertIn(("read", 307, 1), calls)
 
     def test_valve_command_is_read_back_before_success(self):
         calls = []
@@ -268,10 +281,14 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
                 self.selected = 1
 
             def write_single_register(self, address, value):
+                if address == 3:
+                    return
                 self.assert_address(address)
                 self.selected = value
 
             def read_holding_registers(self, address, count):
+                if address == 0 and count == 5:
+                    return [0x0901, 0x0001, 1, 0, 0]
                 self.assert_address(address)
                 words = [0] * 29
                 words[0] = self.selected
@@ -451,7 +468,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
                 self.committed = True
 
             def read_holding_registers(self, address, count):
-                return [0x0900, 0x0005 if self.committed else 0x0003,
+                return [0x0901, 0x0005 if self.committed else 0x0003,
                         11 if self.committed else 10, 0, 0]
 
             def close(self):
@@ -609,7 +626,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         device = {"id": "dev-a", "name": "A", "address": "COM1", "slaveId": 2}
 
         with patch.object(live_acquisition_service, "LiveModbusClient", FakeClient):
-            payload = service.send_debug_frame(device, "01 03 00 00 00 01", append_crc_bytes=False, expect_response=True, response_timeout_ms=900)
+            payload = service.send_debug_frame(device, "02 03 00 00 00 05", append_crc_bytes=True, expect_response=True, response_timeout_ms=900)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"], "ok")
@@ -618,7 +635,7 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(len(traffic), 1)
         self.assertEqual(traffic[0]["deviceId"], "dev-a")
         self.assertEqual(traffic[0]["status"], "ok")
-        self.assertIn(("raw", "dev-a", bytes.fromhex("010300000001"), False, True, 900), calls)
+        self.assertIn(("raw", "dev-a", bytes.fromhex("020300000005"), True, True, 900), calls)
 
     def test_run_port_loop_surfaces_modbus_error_details_in_last_error(self):
         class FailingClient:
@@ -643,11 +660,21 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
                 raise ModbusError("crc mismatch")
 
         service = LiveAcquisitionService()
+        environment_command = next(
+            item for item in service._default_polling_commands
+            if item.get("functionCode") == 4 and item.get("address") == 100
+        )
         device = {
             "id": "dev-a",
             "name": "A",
             "address": "COM1",
             "slaveId": 2,
+            # 旧界面目标名不能把点表生成的合法温湿度轮询块过滤掉。
+            "pollingSettings": {
+                "fast": {"targets": ["flow", "breath_states", "heating_states", "alarm_states"]},
+                "standard": {"targets": ["temperature", "humidity", "pressure", "sensor_alarms"]},
+            },
+            "pollingCommands": [environment_command],
         }
         service._ensure_device_slot(device)
         service._port_runners["COM1"] = {"client": None, "device_ids": ["dev-a"], "device_index": 0}
@@ -660,13 +687,16 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         stopper = threading.Thread(target=stop_soon)
         stopper.start()
         try:
-            with patch.object(live_acquisition_service, "LiveModbusClient", FailingClient):
+            with (
+                patch.object(live_acquisition_service, "LiveModbusClient", FailingClient),
+                patch.object(live_acquisition_service, "normalize_polling_commands", return_value=[environment_command]),
+            ):
                 service._run_port_loop("COM1", [device], stop_event)
         finally:
             stopper.join()
 
         state = service._device_slots["dev-a"]["state"]
-        self.assertEqual(state["last_error"], "read failed for 系统状态: crc mismatch")
+        self.assertEqual(state["last_error"], f"read failed for {environment_command['name']}: crc mismatch")
         self.assertEqual(state["consecutive_error_count"], 1)
 
     def test_clear_command_traffic_resets_global_log(self):
@@ -752,8 +782,8 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
     def test_same_port_devices_sequential_in_runner(self):
         service = LiveAcquisitionService()
         devices = [
-            {"id": "dev-1", "name": "D1", "address": "COM1", "enabled": True},
-            {"id": "dev-2", "name": "D2", "address": "COM1", "enabled": True},
+            {"id": "dev-1", "name": "D1", "address": "COM1", "slaveId": 1, "enabled": True},
+            {"id": "dev-2", "name": "D2", "address": "COM1", "slaveId": 2, "enabled": True},
         ]
         try:
             service.start_all(devices)
@@ -992,8 +1022,8 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         service = LiveAcquisitionService()
         try:
             service.start_all([
-                {"id": "dev-1", "name": "D1", "address": "COM1", "enabled": True},
-                {"id": "dev-2", "name": "D2", "address": "COM1", "enabled": True},
+                {"id": "dev-1", "name": "D1", "address": "COM1", "slaveId": 1, "enabled": True},
+                {"id": "dev-2", "name": "D2", "address": "COM1", "slaveId": 2, "enabled": True},
             ])
 
             service.stop_devices(["dev-1"])
@@ -1043,6 +1073,70 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertIs(service._port_runners["COM1"], runner)
         self.assertFalse(runner["finalize_on_exit"])
         service._port_runners.clear()
+
+    def test_health_reports_active_failure_even_after_recent_success(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "address": "COM1"})
+        slot["state"].update({
+            "running": True,
+            "last_success_at": datetime.now().isoformat(sep=" "),
+            "last_error": "一个轮询块失败",
+            "last_error_at": datetime.now().isoformat(sep=" "),
+            "consecutive_error_count": 1,
+        })
+        slot["active_failures"].add("block-a")
+        state = service._state_with_health(slot)
+        self.assertEqual(state["communication_health"], "warn")
+
+    def test_debug_hex_rejects_characters_instead_of_deleting_them(self):
+        with self.assertRaises(ValueError):
+            LiveAcquisitionService._parse_debug_hex("GG 01 03 00 00 00 01")
+
+    def test_start_rejects_duplicate_ids_and_endpoints(self):
+        service = LiveAcquisitionService()
+        with self.assertRaises(ValueError):
+            service.start_all([
+                {"id": "same", "address": "COM1", "slaveId": 1},
+                {"id": "same", "address": "COM2", "slaveId": 2},
+            ])
+        with self.assertRaises(ValueError):
+            service.start_all([
+                {"id": "a", "address": "COM1", "slaveId": 1},
+                {"id": "b", "address": "com1", "slaveId": 1},
+            ])
+
+    def test_history_restore_keeps_valid_columns_when_one_sensor_is_blank(self):
+        service = LiveAcquisitionService()
+        now = datetime.now().replace(microsecond=0)
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            session = root / "session-a"
+            data_dir = session / "data_0"
+            data_dir.mkdir(parents=True)
+            (session / "session_meta.json").write_text(json.dumps({
+                "device": {"id": "dev-a"},
+                "started_at": (now - timedelta(minutes=1)).isoformat(sep=" "),
+                "ended_at": now.isoformat(sep=" "),
+            }), encoding="utf-8")
+            date_key = now.strftime("%Y_%m_%d")
+            (data_dir / f"sensor_{date_key}.csv").write_text(
+                "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity\n"
+                f"{now.isoformat(sep=' ')},1.2,-2.3,,40,21,41,22,42\n",
+                encoding="utf-8",
+            )
+            slot = service._empty_device_slot({"id": "dev-a"})
+            restored = service._restore_recent_history(slot, root, "dev-a", now)
+            self.assertEqual(restored, 7)
+            self.assertEqual(slot["history"]["pressure"][-1]["value"], 1.2)
+            self.assertFalse(slot["history"]["sensor_1.temperature"])
+
+    def test_downsampling_keeps_large_spike(self):
+        rows = [
+            {"ts": str(index), "epoch": float(index), "value": 1000.0 if index == 50 else 0.0}
+            for index in range(100)
+        ]
+        sampled = LiveAcquisitionService._downsample_history_rows(rows, 10)
+        self.assertIn(1000.0, [row["value"] for row in sampled])
 
     @staticmethod
     def _lock_context(service):

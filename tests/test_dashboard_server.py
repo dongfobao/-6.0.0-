@@ -21,6 +21,13 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertEqual(value, 604800000)
 
+    def test_integer_query_rejects_invalid_and_out_of_range_values(self):
+        for raw in ("abc", "9", "604800001"):
+            with self.assertRaises(ValueError):
+                DashboardRequestHandler._query_int(
+                    {"windowMs": [raw]}, "windowMs", 900000, 10000, 604800000,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

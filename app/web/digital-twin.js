@@ -59,6 +59,7 @@ const cadMaterials = {
   drainChamber: new THREE.MeshPhysicalMaterial({ color: 0x55d6c3, transparent: true, opacity: .20, metalness: .08, roughness: .10, side: THREE.DoubleSide, depthWrite: false }),
   bypassPipe: new THREE.MeshStandardMaterial({ color: 0x7897a8, metalness: .92, roughness: .19, emissive: 0x000000, emissiveIntensity: 0 }),
   activeValve: new THREE.MeshStandardMaterial({ color: 0x0d5b86, emissive: 0x0d2c42, emissiveIntensity: .9, metalness: .58, roughness: .28 }),
+  sensorAlarm: new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x7f0000, emissiveIntensity: 1.2, metalness: .46, roughness: .22 }),
 };
 const makeMesh = (geometry, material, x=0, y=0, z=0) => { const mesh = new THREE.Mesh(geometry, material); mesh.position.set(x,y,z); rig.add(mesh); return mesh; };
 const cylinder = (radius, height, material, x=0,y=0,z=0) => makeMesh(new THREE.CylinderGeometry(radius,radius,height,40),material,x,y,z);
@@ -120,7 +121,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], airParticles: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, oilSurface: null, oilBubbles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], sensorAlarmMeshes: { t1: [], t2: [], t3: [], pressure: [], flow: [] }, centerChannelSmokes: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, oilSurface: null, oilBubbles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
 const VALVE_ANIMATION = {
   upper: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
   drain: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
@@ -785,7 +786,7 @@ function buildModelBypassFlow(pipeMeshes) {
   REAL.heatBypassSmoke = addSmokeTrail(path, .011, .52, .012, .42);
 }
 
-function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode, lowerPipeNode) {
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, upperWorkPortNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode, lowerPipeNode) {
   const localCenterOf = object => rig.worldToLocal(centerOf(object));
   const oilCover = localCenterOf(oilCoverNode || oilCupNode || drainValveNode);
   const oil = localCenterOf(oilCupNode || oilCoverNode || drainValveNode);
@@ -836,12 +837,33 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   const waterPath = new THREE.CatmullRomCurve3([valveOutlet.clone(), valveOutlet.clone().add(new THREE.Vector3(0, -.18, .02)), oil.clone().add(new THREE.Vector3(0, .06, .12))], false, "centripetal", .5);
   // 不绘制连续的人工排水管线；真实排水过程仅用水滴粒子表现，避免与模型自带管路混淆。
   // 小孔至真实下管道采用连续烟带；非加热工况从管道出口开始恢复下部三层粒子流场。
-  const airPath = new THREE.LineCurve3(coreEntry, coreExit);
-  REAL.airParticles = Array.from({ length: 20 }, (_, index) => {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.025, 8, 8), new THREE.MeshBasicMaterial({ color: 0xa5f3fc, transparent: true, opacity: .94, depthTest: false, depthWrite: false }));
-    dot.renderOrder = 20;
-    realEffects.add(dot);
-    return { dot, path: airPath, offset: index / 20 };
+  // 中间气道使用与油杯相同的长烟丝，但在三脚架上方独立起流，与油杯烟雾保留明显断点。
+  // 空气经侧壁和硅胶向内汇聚后，才从这里沿中心气道持续进入上阀腔体。
+  const centerChannelStartY = coreEntry.y + Math.max(.22, Math.min(.38, lowerGlassSize.y * .12));
+  const centerChannelStart = new THREE.Vector3(coreX, centerChannelStartY, coreZ);
+  // 工作位气口是上阀腔体左侧朝下的圆孔，使用真实模型“传感器堵头（董）-1”的下沿定位。
+  const workPortVertices = verticesInRig(upperWorkPortNode);
+  const workPortBox = workPortVertices.length ? new THREE.Box3().setFromPoints(workPortVertices) : null;
+  const workPortCenter = workPortBox?.getCenter(new THREE.Vector3())
+    || upper.clone().add(new THREE.Vector3(-.22, -.07, 0));
+  const valveChamberEnd = new THREE.Vector3(
+    workPortCenter.x,
+    workPortBox ? workPortBox.min.y + .012 : workPortCenter.y,
+    workPortCenter.z,
+  );
+  const centerSmokeCount = 7;
+  REAL.centerChannelSmokes = Array.from({ length: centerSmokeCount }, (_, index) => {
+    const angle = index / centerSmokeCount * Math.PI * 2;
+    const spread = .022 + (index % 3) * .012;
+    const start = centerChannelStart.clone().add(new THREE.Vector3(Math.sin(angle) * spread * .72, 0, Math.cos(angle) * spread * .72));
+    const lowerMiddle = centerChannelStart.clone().lerp(coreExit, .44)
+      .add(new THREE.Vector3(Math.sin(angle + .46) * spread, 0, Math.cos(angle + .46) * spread));
+    const upperMiddle = coreExit.clone()
+      .add(new THREE.Vector3(Math.sin(angle - .34) * spread * .68, 0, Math.cos(angle - .34) * spread * .68));
+    const end = valveChamberEnd.clone()
+      .add(new THREE.Vector3(Math.sin(angle + .18) * spread * .22, 0, Math.cos(angle + .18) * spread * .22));
+    const path = new THREE.CatmullRomCurve3([start, lowerMiddle, upperMiddle, end], false, "centripetal", .5);
+    return addSmokeTrail(path, .0055 + (index % 3) * .001, .21 + (index % 2) * .04, .004, .10 + index / centerSmokeCount);
   });
   REAL.lowerDiffusionParticles = Array.from({ length: 48 }, (_, index) => {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(.018 + (index % 3) * .004, 8, 8), new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: .82, depthTest: false, depthWrite: false }));
@@ -1130,11 +1152,13 @@ function loadCadAssembly() {
       let replacementOilPlateNode = null;
       let replacementOilCupNode = null;
       let replacementLowerPipeNode = null;
+      let replacementUpperWorkPortNode = null;
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
         const role = object.userData?.digital_twin_role || "structure";
         const sourceFile = object.userData?.source_file || "";
         const businessFunction = object.userData?.digital_twin_function || "";
+        if (/传感器堵头（董）-1\.STL/.test(sourceFile)) replacementUpperWorkPortNode ||= object;
         if (businessFunction === "lower_outer_retaining_mesh") {
           object.visible = false;
           return;
@@ -1159,7 +1183,17 @@ function loadCadAssembly() {
             : role === "valve_or_sensor" ? cadMaterials.valve
               : role === "heater_frame" ? cadMaterials.heater
                 : role === "support" ? cadMaterials.support
-                  : cadMaterials.structure;
+                 : cadMaterials.structure;
+        const sensorAlarmKeys = [];
+        if (/传感器堵头.*-1\.STL/.test(sourceFile)) sensorAlarmKeys.push("t1");
+        if (/传感器堵头.*-2\.STL/.test(sourceFile)) sensorAlarmKeys.push("t2");
+        if (/温湿度传感器/.test(sourceFile)) sensorAlarmKeys.push("t3");
+        if (/压力-1\.STL/.test(sourceFile)) sensorAlarmKeys.push("pressure");
+        if (/流量监测器/.test(sourceFile)) sensorAlarmKeys.push("flow");
+        sensorAlarmKeys.forEach(key => {
+          object.userData.sensorNormalMaterial ||= object.material;
+          REAL.sensorAlarmMeshes[key].push(object);
+        });
         object.renderOrder = isBypassPipe ? 10 : isValveHardware ? 9 : (isDrainChamber || role === "outer_shell") ? 5 : role === "desiccant" ? 4 : 7;
         if (isBypassPipe) REAL.bypassMeshes.push(object);
         if (isHeatingElement) REAL.heatMeshes.push(object);
@@ -1174,6 +1208,7 @@ function loadCadAssembly() {
           oilCupNode,
           heaterNode,
           REAL.upperValve,
+          replacementUpperWorkPortNode,
           sensorNode,
           outletNode,
           REAL.drainValve,
@@ -1208,6 +1243,27 @@ function valveState(valve) { return { position: value(valve?.position), moving: 
 function outputState(snapshot, key) { return value((snapshot?.outputs || []).find(item => item.key === key)?.state); }
 function setStatus(rows) { statusHost.innerHTML = rows.map(([name, text, state]) => `<div><dt>${name}</dt><dd class="${state || ""}">${text}</dd></div>`).join(""); }
 
+// 固件 appErr.h 的 ErrorPosition 直接对应错误组中的 bit；当前传感器报警由错误组1上报。
+function alarmBit(snapshot, bit) {
+  const word = Number(snapshot?.alarms?.groups?.[1]?.value);
+  return Number.isFinite(word) && (((word >>> 0) & (1 << bit)) !== 0);
+}
+
+function sensorAlarmStates(snapshot) {
+  const projected = snapshot?.alarms?.sensorModules;
+  if (projected && typeof projected === "object") {
+    return { pressure: Boolean(projected.pressure), flow: Boolean(projected.flow), t1: Boolean(projected.t1), t3: Boolean(projected.t3), t2: Boolean(projected.t2) };
+  }
+  return {
+    pressure: alarmBit(snapshot, 0) || alarmBit(snapshot, 1),
+    flow: alarmBit(snapshot, 2),
+    t1: alarmBit(snapshot, 3),
+    // 全局湿度/温度越限只由上温湿度传感器产生，分别对应 bit8 和 bit28。
+    t3: alarmBit(snapshot, 8) || alarmBit(snapshot, 28) || alarmBit(snapshot, 30),
+    t2: alarmBit(snapshot, 29),
+  };
+}
+
 function update(snapshot) {
   STATUS.snapshot = snapshot;
   const upper = valveState(snapshot?.valves?.[0]);
@@ -1218,6 +1274,7 @@ function update(snapshot) {
   const breath = value(snapshot?.process?.breathState);
   const online = value(snapshot?.communication?.online) === 1;
   const alarm = Boolean(snapshot?.alarms?.active);
+  const sensorAlarms = sensorAlarmStates(snapshot);
   const compact = (point, suffix="") => { const n = value(point); return n === null ? "--" : `${n.toFixed(1)}${suffix}`; };
   (snapshot?.environmentChannels || []).slice(0, 3).forEach((channel, index) => { const key = `t${index + 1}`; const node = twinDataNodes[key]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, "%RH")}`; const info = twinDataInfoNodes[key]; if (info) info.textContent = `${channel.channel || index + 1}号传感器 · ${value(channel.readOk) === 1 ? "通信正常" : "无有效数据"} · ${channel.status?.displayValue || "状态--"}`; });
   if (twinDataNodes.pressure) twinDataNodes.pressure.textContent = compact(snapshot?.process?.pressure, " kPa");
@@ -1227,6 +1284,9 @@ function update(snapshot) {
   connectionNode.textContent = online ? (alarm ? "存在活动告警" : "实时数据") : "等待有效数据";
   connectionNode.className = `digital-twin-pill ${alarm ? "fault" : online ? "online" : "offline"}`;
   breathNode.textContent = `呼吸：${snapshot?.process?.breathState?.displayValue || "--"}`;
+  Object.entries(sensorAlarms).forEach(([key, active]) => {
+    document.querySelector(`.twin-data-label.${key}`)?.classList.toggle("alarm", active);
+  });
   upperCallout?.classList.toggle("active", upper.position === 1 || upper.moving || upper.fault);
   heatCallout?.classList.toggle("active", heat === 1 || heat === 2 || heat === 3);
   drainCallout?.classList.toggle("active", drain.moving || drain.position === 1 || drain.fault);
@@ -1311,6 +1371,13 @@ function animateRealProcess(now, snapshot) {
   REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
   materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
   materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
+  const sensorAlarms = sensorAlarmStates(snapshot);
+  const alarmPulse = .5 + .5 * Math.sin(visualTime * 7.5);
+  cadMaterials.sensorAlarm.color.setRGB(.58 + alarmPulse * .40, .025 + alarmPulse * .035, .025 + alarmPulse * .035);
+  cadMaterials.sensorAlarm.emissiveIntensity = .75 + alarmPulse * 1.65;
+  Object.entries(REAL.sensorAlarmMeshes).forEach(([key, meshes]) => {
+    meshes.forEach(mesh => { mesh.material = sensorAlarms[key] ? cadMaterials.sensorAlarm : mesh.userData.sensorNormalMaterial; });
+  });
   const airflowActive = activeBreath || measuredFlow;
   const oilFlowActive = airflowActive || heat === 1;
   const normalizedOilFlow = measuredFlow ? Math.min(flow / 5, 1) : oilFlowActive ? .42 : 0;
@@ -1353,7 +1420,7 @@ function animateRealProcess(now, snapshot) {
   if (REAL.airTube && lowerNormalFlowPath && !airflowActive) REAL.airTube.material.opacity = .42;
   if (REAL.sensorTube && upperFlowPath && !upperFlowActive) REAL.sensorTube.material.opacity = .38;
   const flowDirection = measuredFlow ? (rawFlow >= 0 ? 1 : -1) : breath === 0 ? 1 : -1;
-  REAL.airParticles.forEach(({ dot, path, offset }) => { const p = (flowTime * .14 + offset) % 1; const pathPoint = flowDirection === 1 ? p : 1 - p; const tangent = path.getTangentAt(pathPoint).multiplyScalar(flowDirection).normalize(); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.copy(path.getPointAt(pathPoint)); dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent); dot.scale.setScalar(.96); });
+  updateSmokeTrails(REAL.centerChannelSmokes, flowTime * flowDirection, lowerNormalFlowPath && airflowActive);
   REAL.lowerDiffusionParticles.forEach(({ dot, start, end, angle, offset, wallRadius, radiusOffset }) => { const p = (flowTime * .09 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const radius = wallRadius + radiusOffset; dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, THREE.MathUtils.lerp(start.y, end.y, routeP), start.z + Math.cos(angle) * radius); dot.scale.setScalar(.82); dot.material.opacity = .82; });
   REAL.silicaFlowParticles.forEach(({ dot, start, end, angle, heightOffset, waveOffset, outerRadius }) => { const p = (flowTime * .055 + waveOffset) % 1; const inwardP = flowDirection === 1 ? p : 1 - p; const radius = THREE.MathUtils.lerp(outerRadius, .13, inwardP); const y = THREE.MathUtils.lerp(start.y + .10, end.y - .10, heightOffset); dot.visible = lowerNormalFlowPath && airflowActive; dot.position.set(start.x + Math.sin(angle) * radius, y, start.z + Math.cos(angle) * radius); dot.scale.setScalar(.76 + inwardP * .22); dot.material.opacity = .30 + inwardP * .44; });
   REAL.upperDiffusionParticles.forEach(({ dot, source, topY, angle, offset, wallRadius }) => { const p = (flowTime * .075 + offset) % 1; const routeP = flowDirection === 1 ? p : 1 - p; const spreadP = Math.min(1, routeP / .28); const convergeP = THREE.MathUtils.clamp((routeP - .76) / .24, 0, 1); const radius = THREE.MathUtils.lerp(.055, wallRadius, spreadP) * (1 - convergeP); const y = THREE.MathUtils.lerp(source.y, topY, routeP); dot.visible = upperFlowActive; dot.position.set(THREE.MathUtils.lerp(source.x, source.x + Math.sin(angle) * radius, spreadP), y, THREE.MathUtils.lerp(source.z, source.z + Math.cos(angle) * radius, spreadP)); dot.scale.setScalar(.70 + (1 - convergeP) * .16); dot.material.opacity = .30 + Math.min(1, spreadP * 1.5) * .48; });

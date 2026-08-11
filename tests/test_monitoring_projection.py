@@ -40,6 +40,27 @@ class MonitoringProjectionTests(unittest.TestCase):
         ]
         result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
         self.assertTrue(result["alarms"]["active"])
+        self.assertTrue(result["alarms"]["sensorModules"]["flow"])
+
+    def test_alarm_bits_map_to_the_corresponding_sensor_modules(self):
+        group_1 = (1 << 0) | (1 << 2) | (1 << 3) | (1 << 29) | (1 << 30)
+        metrics = [
+            item("input_register.alarm.error_group_0", 0),
+            item("input_register.alarm.error_group_1", group_1),
+            item("input_register.alarm.error_group_2", 0),
+        ]
+        result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
+        self.assertEqual(
+            result["alarms"]["sensorModules"],
+            {"pressure": True, "flow": True, "t1": True, "t3": True, "t2": True},
+        )
+
+        metrics[1] = item("input_register.alarm.error_group_1", 1 << 8)
+        upper_only = build_monitoring_snapshot({"metrics": metrics, "session": {}})
+        self.assertEqual(
+            upper_only["alarms"]["sensorModules"],
+            {"pressure": False, "flow": False, "t1": False, "t3": True, "t2": False},
+        )
 
     def test_enum_value_uses_display_label(self):
         metrics = [item("input_register.breath_state", 1, enumValues={0: "呼气", 1: "吸气"})]

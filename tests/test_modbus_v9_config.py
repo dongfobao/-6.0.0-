@@ -17,7 +17,7 @@ from modbus_v9_config import (
 
 class FakeClient:
     def __init__(self) -> None:
-        self.words = {0: 0x0900, 1: 1, 2: 9, 3: 0, 4: 0}
+        self.words = {0: 0x0901, 1: 1, 2: 9, 3: 0, 4: 0}
         self.writes: list[tuple[int, list[int]]] = []
 
     def read_holding_registers(self, address: int, count: int) -> list[int]:
@@ -37,6 +37,50 @@ class FakeClient:
 
 
 class ModbusV9ConfigTests(unittest.TestCase):
+    def test_discard_waits_until_staging_is_clean(self) -> None:
+        client = FakeClient()
+        client.words[1] = 0x0003
+        original_write = client.write_single_register
+
+        def discard(address: int, value: int) -> None:
+            original_write(address, value)
+            if address == 3 and value == COMMAND_DISCARD:
+                client.words[1] = 0x0001
+                client.words[4] = 0
+
+        client.write_single_register = discard  # type: ignore[method-assign]
+        status = V9ConfigTransaction(client, poll_interval_seconds=0).discard()
+        self.assertFalse(status.state & 0x0002)
+        self.assertEqual(client.writes[-1], (3, [COMMAND_DISCARD]))
+
+    def test_discard_requires_two_clean_status_confirmations(self) -> None:
+        client = FakeClient()
+        reads = 0
+        original_read = client.read_holding_registers
+
+        def read(address: int, count: int) -> list[int]:
+            nonlocal reads
+            reads += 1
+            return original_read(address, count)
+
+        client.read_holding_registers = read  # type: ignore[method-assign]
+        V9ConfigTransaction(client, poll_interval_seconds=0).discard()
+        self.assertGreaterEqual(reads, 2)
+
+    def test_commit_rejects_unrelated_generation_jump(self) -> None:
+        client = FakeClient()
+        original_write = client.write_single_register
+
+        def unrelated_commit(address: int, value: int) -> None:
+            original_write(address, value)
+            if address == 3 and value == COMMAND_COMMIT:
+                client.words[1] = 0x0005
+                client.words[2] = 11
+
+        client.write_single_register = unrelated_commit  # type: ignore[method-assign]
+        with self.assertRaisesRegex(ConfigTransactionError, "超时"):
+            V9ConfigTransaction(client, commit_timeout_seconds=0.1, poll_interval_seconds=0).commit()
+
     def test_stage_readback_and_commit(self) -> None:
         client = FakeClient()
         transaction = V9ConfigTransaction(client)

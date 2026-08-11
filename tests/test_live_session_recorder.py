@@ -9,10 +9,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from live_session_recorder import LiveSessionRecorder
-from session_archive import list_sessions
+from session_archive import _summarize_events, list_sessions
 
 
 class LiveSessionRecorderTests(unittest.TestCase):
+    def test_same_second_snapshots_are_coalesced_and_keep_latest_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            recorder = LiveSessionRecorder(Path(tmp_dir), {"id": "dev-1", "name": "A"})
+            timestamp = datetime(2026, 5, 22, 12, 0, 0)
+            recorder.record_environment_snapshot(timestamp, {"pressure": 1.0, "flow": None})
+            recorder.record_environment_snapshot(timestamp, {"pressure": 2.0, "flow": 3.0})
+            recorder.finalize()
+            rows = recorder.env_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[1].startswith("2026-05-22 12:00:00,2.00,3.00,"))
+
     def test_recorder_writes_analysis_compatible_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             recorder = LiveSessionRecorder(
@@ -35,7 +46,7 @@ class LiveSessionRecorderTests(unittest.TestCase):
             self.assertEqual(recorder.env_path.name, "sensor_2026_05_22.csv")
             self.assertIn(
                 "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity\n"
-                "2026-05-22 12:00:00,1.20,-1.50,25.00,44.00,0.00,0.00,0.00,0.00\n",
+                "2026-05-22 12:00:00,1.20,-1.50,25.00,44.00,,,,\n",
                 recorder.env_path.read_text(encoding="utf-8"),
             )
             self.assertIn("2026-05-22 12:00:00,0,-1.50,0.0,1", recorder.breath_path.read_text(encoding="utf-8"))
@@ -57,7 +68,7 @@ class LiveSessionRecorderTests(unittest.TestCase):
             self.assertTrue((exported_dir / "config.json").exists())
 
 
-    def test_export_omits_raw_and_traffic_debug_artifacts(self) -> None:
+    def test_export_omits_raw_and_keeps_abnormal_traffic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             recorder = LiveSessionRecorder(
@@ -73,15 +84,24 @@ class LiveSessionRecorderTests(unittest.TestCase):
                 datetime(2026, 5, 22, 12, 0, 0),
                 {"Pressure": 123, "Flow": -4.5},
             )
-            recorder.record_traffic_entry({"seq": 1, "requestHex": "01 03 00 00 00 01"})
+            recorder.record_traffic_entry({"seq": 1, "status": "error", "requestHex": "01 03 00 00 00 01"})
             recorder.finalize()
 
             exported_dir = recorder.export_to(root / "exports")
 
             self.assertTrue((exported_dir / "data_0").exists())
             self.assertTrue(any((exported_dir / "data_0").glob("sensor_*.csv")))
-            self.assertFalse(any((exported_dir / "data_0").glob("raw_*.csv")))
-            self.assertFalse((exported_dir / "traffic").exists())
+            self.assertTrue(any((exported_dir / "data_0").glob("raw_*.jsonl")))
+            self.assertTrue(any((exported_dir / "traffic").glob("traffic_*.csv")))
+
+    def test_stopped_archive_does_not_report_unclosed_heat_as_ongoing(self) -> None:
+        start = datetime(2026, 5, 22, 12, 0, 0)
+        summary = _summarize_events([
+            {"channel": "HTC1", "event": "加热开启", "_ts": start, "time": "2026-05-22 12:00:00"},
+        ], end_at=datetime(2026, 5, 22, 12, 1, 0), session_active=False)
+        htc1 = next(row for row in summary["channels"] if row["channel"] == "HTC1")
+        self.assertFalse(htc1["ongoing"])
+        self.assertEqual(htc1["activeSeconds"], 60.0)
 
     def test_export_rejects_target_inside_session_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -59,35 +60,50 @@ def _read_meta(session_dir: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _iter_heat_events(session_dir: Path) -> list[dict[str, Any]]:
+def _iter_heat_events(
+    session_dir: Path,
+    limit: int | None = None,
+    stats: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
     heat_dir = session_dir / "heat_events"
     if not heat_dir.exists():
         return []
-    events: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] | deque[dict[str, Any]]
+    events = deque(maxlen=max(1, limit)) if limit is not None else []
+    total = 0
     for csv_path in sorted(heat_dir.glob("heat_*.csv")):
         try:
-            lines = csv_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            handle = csv_path.open("r", encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for line in lines:
-            parts = [part.strip() for part in line.split(",", 3)]
-            if len(parts) < 3:
-                continue
-            ts = _parse_ts(parts[0])
-            if ts is None:
-                continue
-            events.append({
-                "time": _fmt_ts(ts),
-                "channel": parts[1],
-                "event": parts[2],
-                "detail": parts[3] if len(parts) > 3 else "",
-                "_ts": ts,
-            })
-    events.sort(key=lambda item: item["_ts"])
-    return events
+        with handle:
+            for line in handle:
+                parts = [part.strip() for part in line.split(",", 3)]
+                if len(parts) < 3:
+                    continue
+                ts = _parse_ts(parts[0])
+                if ts is None:
+                    continue
+                total += 1
+                events.append({
+                    "time": _fmt_ts(ts),
+                    "channel": parts[1],
+                    "event": parts[2],
+                    "detail": parts[3] if len(parts) > 3 else "",
+                    "_ts": ts,
+                })
+    result = list(events)
+    result.sort(key=lambda item: item["_ts"])
+    if stats is not None:
+        stats["total"] = total
+    return result
 
 
-def _summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_events(
+    events: list[dict[str, Any]],
+    end_at: datetime | None = None,
+    session_active: bool = False,
+) -> dict[str, Any]:
     channels: dict[str, dict[str, Any]] = {}
     for name in (*HEAT_CHANNELS, *VALVE_CHANNELS):
         channels[name] = {
@@ -112,8 +128,8 @@ def _summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         stats["lastEventTime"] = item.get("time") or ""
         if stats["kind"] == "heat":
             if event == "加热开启":
-                stats["openCount"] += 1
-                if isinstance(ts, datetime):
+                if isinstance(ts, datetime) and channel not in open_since:
+                    stats["openCount"] += 1
                     open_since[channel] = ts
             elif event == "加热关闭":
                 start = open_since.pop(channel, None)
@@ -123,7 +139,9 @@ def _summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             if event == "阀门状态变化":
                 stats["actionCount"] += 1
     for channel, start in open_since.items():
-        channels[channel]["ongoing"] = True
+        channels[channel]["ongoing"] = session_active
+        if end_at is not None and end_at >= start:
+            channels[channel]["activeSeconds"] += (end_at - start).total_seconds()
     summary_rows = []
     for name in (*HEAT_CHANNELS, *VALVE_CHANNELS):
         stats = channels[name]
@@ -147,6 +165,19 @@ def _build_session_index(session_dir: Path, meta: dict[str, Any], active_session
     recording = raw_status == "recording"
     if recording and active_session_names is not None and session_dir.name not in active_session_names:
         raw_status = "stopped"
+        if ended is None:
+            checkpoint_path = session_dir / "checkpoint.json"
+            if checkpoint_path.exists():
+                try:
+                    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                    ended = _parse_ts(checkpoint.get("updated_at")) if isinstance(checkpoint, dict) else None
+                except (OSError, json.JSONDecodeError):
+                    ended = None
+            if ended is None:
+                try:
+                    ended = datetime.fromtimestamp(max(path.stat().st_mtime for path in session_dir.rglob("*") if path.is_file()))
+                except (OSError, ValueError):
+                    ended = started
     duration_seconds: float | None = None
     if started is not None:
         end_point = ended or (datetime.now() if raw_status == "recording" else None)
@@ -165,7 +196,12 @@ def _build_session_index(session_dir: Path, meta: dict[str, Any], active_session
     }
 
 
-def list_sessions(sessions_root: Path | str, device_id: str | None = None, active_session_names: set[str] | None = None) -> dict[str, Any]:
+def list_sessions(
+    sessions_root: Path | str,
+    device_id: str | None = None,
+    active_session_names: set[str] | None = None,
+    limit: int = 200,
+) -> dict[str, Any]:
     root = Path(sessions_root)
     items: list[dict[str, Any]] = []
     if root.exists():
@@ -180,9 +216,11 @@ def list_sessions(sessions_root: Path | str, device_id: str | None = None, activ
                 continue
             items.append(entry)
     items.sort(key=lambda item: item["_sort"], reverse=True)
+    total = len(items)
+    items = items[:max(1, min(500, int(limit)))]
     for item in items:
         item.pop("_sort", None)
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": total}
 
 
 def get_session_detail(sessions_root: Path | str, name: str, active_session_names: set[str] | None = None) -> dict[str, Any]:
@@ -198,8 +236,15 @@ def get_session_detail(sessions_root: Path | str, name: str, active_session_name
         raise KeyError(f"会话缺少元数据: {safe_name}")
     index = _build_session_index(session_dir, meta, active_session_names=active_session_names)
     index.pop("_sort", None)
-    events = _iter_heat_events(session_dir)
-    summary = _summarize_events(events)
+    event_limit = 5000
+    event_stats: dict[str, int] = {}
+    events = _iter_heat_events(session_dir, limit=event_limit, stats=event_stats)
+    events_truncated = event_stats.get("total", len(events)) > len(events)
+    ended_at = _parse_ts(index.get("endedAt"))
+    summary_end = datetime.now() if index.get("status") == "recording" else ended_at
+    summary = _summarize_events(
+        events, end_at=summary_end, session_active=index.get("status") == "recording"
+    )
     for item in events:
         item.pop("_ts", None)
     config_path = session_dir / "config.json"
@@ -215,6 +260,9 @@ def get_session_detail(sessions_root: Path | str, name: str, active_session_name
         "session": index,
         "summary": summary,
         "events": events,
+        "eventsTruncated": events_truncated,
+        "eventLimit": event_limit,
+        "eventTotal": event_stats.get("total", len(events)),
         "channels": [*(HEAT_CHANNELS), *(VALVE_CHANNELS), SYSTEM_CHANNEL],
         "eventTypes": list(EVENT_TYPE_OPTIONS),
         "config": config_snapshot,

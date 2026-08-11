@@ -10,7 +10,7 @@ from collections import Counter
 from typing import Any
 
 
-PROTOCOL_VERSION_WORD = 0x0900
+PROTOCOL_VERSION_WORD = 0x0901
 
 _TYPE_WORDS = {
     "bool": 1,
@@ -73,7 +73,7 @@ def _point(
 
 
 REGISTER_CATALOG: list[dict[str, Any]] = [
-    _point("input_register.system.protocol_version", "协议版本", "input_register", 0, group="system", notes="固定值 0x0900"),
+    _point("input_register.system.protocol_version", "协议版本", "input_register", 0, group="system", notes="固定值 0x0901"),
     _point(
         "input_register.system.flags", "系统状态标志", "input_register", 1, "bitfield16", group="system",
         bit_definitions={0: "暂存有效", 1: "暂存已修改", 2: "最近提交成功", 4: "任意告警", 5: "HTC1运行", 6: "HTC2运行", 7: "防冻运行"},
@@ -322,6 +322,7 @@ for offset, key, label, data_type, unit, notes in _SCHEDULE_FIELDS:
     REGISTER_CATALOG.append(_holding(
         f"holding.schedule.{key}", label, 720 + offset, data_type, group="schedule",
         unit=unit, config_key=schedule_config_key, notes=notes,
+        writable=key != "task_count",
     ))
 REGISTER_CATALOG.append(_holding(
     "holding.schedule.operation", "任务增删操作", 748, "uint16", group="schedule",
@@ -498,6 +499,8 @@ for item in REGISTER_CATALOG:
     enum_values = _ENUM_MAPS.get(str(item["id"]))
     if enum_values:
         item["enumValues"] = enum_values
+        if item.get("writable"):
+            item["allowedValues"] = list(enum_values)
 
 _VALUE_CONSTRAINTS = {
     "holding.flow.no_change_alarm_days": (0, 365),
@@ -509,6 +512,21 @@ _VALUE_CONSTRAINTS = {
     "holding.logging.sensor_interval": (1, 86400),
     "holding.logging.retention_days": (0, 3650),
     "holding.communication.slave_id": (1, 247),
+    **{f"holding.sensor_{channel}.modbus_address": (1, 247) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.temperature_offset": (-50.0, 50.0) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.humidity_offset": (-100.0, 100.0) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.temperature_alarm_high": (-100.0, 200.0) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.temperature_alarm_low": (-100.0, 200.0) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.humidity_alarm_high": (0.0, 100.0) for channel in range(1, 4)},
+    **{f"holding.sensor_{channel}.humidity_alarm_low": (0.0, 100.0) for channel in range(1, 4)},
+    "holding.pressure.offset": (-1_000_000.0, 1_000_000.0),
+    "holding.pressure.alarm_high": (-1_000_000.0, 1_000_000.0),
+    "holding.pressure.alarm_low": (-1_000_000.0, 1_000_000.0),
+    "holding.flow.offset": (-1_000_000.0, 1_000_000.0),
+    "holding.flow.breath_high": (-1_000_000.0, 1_000_000.0),
+    "holding.flow.breath_low": (-1_000_000.0, 1_000_000.0),
+    "holding.antifreeze.open_temperature": (-100.0, 200.0),
+    "holding.antifreeze.close_temperature": (-100.0, 200.0),
     **{f"holding.sensor_{channel}.threshold_confirm_interval_seconds": (1, 86400) for channel in range(1, 4)},
     **{f"holding.sensor_{channel}.threshold_confirm_count": (1, 10) for channel in range(1, 4)},
     **{f"holding.sensor_{channel}.humidity_start_threshold": (0, 100) for channel in range(1, 4)},
@@ -547,6 +565,8 @@ for item in REGISTER_CATALOG:
         item["step"] = 0.01 if isinstance(minimum, float) else 1
     if point_id in _ALLOWED_VALUES:
         item["allowedValues"] = list(_ALLOWED_VALUES[point_id])
+    elif item.get("writable") and item.get("dataType") == "bool":
+        item["allowedValues"] = [0, 1]
 
 
 def _validate_catalog() -> None:
@@ -571,11 +591,19 @@ def get_register_catalog() -> list[dict[str, Any]]:
     return [dict(item) for item in REGISTER_CATALOG]
 
 
+def get_register_item(point_id: str) -> dict[str, Any]:
+    """按唯一点 ID 返回点表项，业务模块不得自行重复定义地址。"""
+    for item in REGISTER_CATALOG:
+        if item["id"] == point_id:
+            return dict(item)
+    raise KeyError(f"未知寄存器点: {point_id}")
+
+
 def get_register_catalog_summary() -> dict[str, Any]:
     group_counts = Counter(item["group"] for item in REGISTER_CATALOG)
     area_counts = Counter(item["area"] for item in REGISTER_CATALOG)
     return {
-        "protocolVersion": "9.0",
+        "protocolVersion": "9.1",
         "protocolWord": PROTOCOL_VERSION_WORD,
         "total": len(REGISTER_CATALOG),
         "readable": len(REGISTER_CATALOG),

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import threading
 import time
+import csv
+from functools import wraps
+import math
 from collections import deque
 from copy import deepcopy
 from dataclasses import asdict
@@ -13,7 +16,7 @@ from typing import Any, Iterable
 
 from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
-from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog
+from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_item
 from live_session_recorder import LiveSessionRecorder
 from modbus_v9_codec import decode_words, encode_words
 from modbus_v9_config import V9ConfigTransaction
@@ -33,18 +36,16 @@ HISTORY_POINT_IDS = (
 HISTORY_RAW_MAX_POINTS = 28800
 HISTORY_ARCHIVE_MAX_POINTS = 7 * 24 * 60
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
-_ENV_HISTORY_ROW_RE = re.compile(
-    r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\],/\*\s*"
-    r"([-+\d.eE]+),([-+\d.eE]+),([-+\d.eE]+),([-+\d.eE]+),?\s*\*/"
-)
-
-SCHEDULE_BASE_ADDRESS = 720
+SCHEDULE_BASE_ADDRESS = int(get_register_item("holding.schedule.selected_task")["address"])
 SCHEDULE_DATA_WORD_COUNT = 28
 SCHEDULE_WINDOW_WORD_COUNT = 29
-SCHEDULE_OPERATION_ADDRESS = 748
+SCHEDULE_OPERATION_ADDRESS = int(get_register_item("holding.schedule.operation")["address"])
 SCHEDULE_MAX_TASKS = 12
 SCHEDULE_OPERATION_ADD = 1
 SCHEDULE_OPERATION_DELETE_SELECTED = 2
+CONFIG_REGION_START = int(get_register_item("holding.sensor_1.enabled")["address"])
+RUNTIME_REGION_START = int(get_register_item("holding.runtime.remote_heat")["address"])
+RUNTIME_CONTROL_END = int(get_register_item("holding.runtime.reset")["addressEnd"])
 
 
 def _now() -> datetime:
@@ -62,6 +63,18 @@ def _safe_int(value: Any, default: int) -> int:
         return default
 
 
+def _strict_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} 必须是整数")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 必须是整数") from exc
+    if not math.isfinite(number) or not number.is_integer():
+        raise ValueError(f"{field_name} 必须是整数")
+    return int(number)
+
+
 def _parse_iso(value: Any) -> datetime | None:
     if not value:
         return None
@@ -76,10 +89,20 @@ def _device_port_key(device: dict[str, Any]) -> str:
     return address.upper()
 
 
+def _serialized_lifecycle(method: Any) -> Any:
+    @wraps(method)
+    def wrapped(self: "LiveAcquisitionService", *args: Any, **kwargs: Any) -> Any:
+        with self._lifecycle_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class LiveAcquisitionService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._io_lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._port_io_locks_guard = threading.Lock()
+        self._port_io_locks: dict[str, threading.RLock] = {}
         self._catalog = [item for item in get_register_catalog() if item.get("readable")]
         self._catalog_by_id = {item["id"]: dict(item) for item in self._catalog}
         self._default_polling_commands = build_default_polling_commands(self._catalog)
@@ -109,7 +132,13 @@ class LiveAcquisitionService:
             "state": LiveAcquisitionService._empty_device_state(device),
             "event_seq": 0,
             "traffic_seq": 0,
+            "protocol_rejected": False,
+            "active_failures": set(),
         }
+
+    def _port_io_lock(self, port_key: str) -> threading.RLock:
+        with self._port_io_locks_guard:
+            return self._port_io_locks.setdefault(port_key, threading.RLock())
 
     @staticmethod
     def _empty_device_state(device: dict[str, Any]) -> dict[str, Any]:
@@ -122,6 +151,8 @@ class LiveAcquisitionService:
             "last_error_at": None,
             "last_success_at": None,
             "last_attempt_at": None,
+            "recording_error": None,
+            "finalization_pending": False,
             "error_count": 0,
             "consecutive_error_count": 0,
             "request_count": 0,
@@ -176,15 +207,36 @@ class LiveAcquisitionService:
         session_root: Path | str | None = None,
         config_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        enabled_devices = [d for d in devices if bool(d.get("enabled", True))]
+        with self._lifecycle_lock:
+            return self._start_all_locked(devices, session_root, config_snapshot)
+
+    def _start_all_locked(
+        self,
+        devices: list[dict[str, Any]],
+        session_root: Path | str | None = None,
+        config_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        enabled_devices = [
+            d for d in devices
+            if d.get("enabled", True) is True or d.get("enabled", True) == 1
+        ]
         if not enabled_devices:
             raise ValueError("no enabled devices to start")
+        invalid_devices = [device for device in enabled_devices if not str(device.get("id") or "").strip()]
+        if invalid_devices:
+            raise ValueError("every enabled device must have a non-empty id")
+        device_ids = [str(device.get("id")) for device in enabled_devices]
+        if len(device_ids) != len(set(device_ids)):
+            raise ValueError("设备 ID 不能重复")
+        endpoints = [(_device_port_key(device), _safe_int(device.get("slaveId"), 1)) for device in enabled_devices]
+        if any(not port or not 1 <= slave_id <= 247 for port, slave_id in endpoints):
+            raise ValueError("设备串口和从站地址无效")
+        if len(endpoints) != len(set(endpoints)):
+            raise ValueError("同一串口上的从站地址不能重复")
 
         port_groups: dict[str, list[dict[str, Any]]] = {}
         for device in enabled_devices:
             device_id = str(device.get("id") or "")
-            if not device_id:
-                continue
             port_groups.setdefault(_device_port_key(device), []).append(device)
 
         # 重建受影响的串口时，保留其中原本仍在采集的设备。设备配置若变更
@@ -202,10 +254,39 @@ class LiveAcquisitionService:
             for device_id in requested_ids
             if device_id in active_port_by_device
         )
+        started_at = _now()
+        session_root_path = Path(session_root or ".")
+        prepared_slots: dict[str, dict[str, Any]] = {}
+        try:
+            for device in enabled_devices:
+                device_id = str(device.get("id") or "")
+                with self._lock:
+                    existing = self._device_slots.get(device_id)
+                    already_running = existing is not None and bool(existing["state"].get("running"))
+                if already_running:
+                    continue
+                prepared = self._empty_device_slot(device)
+                self._restore_recent_history(prepared, session_root_path, device_id, started_at)
+                prepared["recorder"] = LiveSessionRecorder(
+                    session_root_path, deepcopy(device), config_snapshot=config_snapshot
+                )
+                prepared["recorder"].record_heat_event(
+                    _now(), "系统", "采集开始", f"设备 {device.get('name') or device_id} 开始监控记录"
+                )
+                prepared_slots[device_id] = prepared
+        except Exception:
+            for prepared in prepared_slots.values():
+                recorder = prepared.get("recorder")
+                if recorder is not None:
+                    try:
+                        recorder.finalize(status="start_failed")
+                    except Exception:
+                        pass
+            raise
+
         previous = self._stop_port_runners(affected_ports)
 
         with self._lock:
-            started_at = _now()
             for port_key in affected_ports:
                 requested_devices = port_groups.get(port_key, [])
                 merged_devices: dict[str, dict[str, Any]] = {}
@@ -223,28 +304,25 @@ class LiveAcquisitionService:
                     continue
 
                 same_port_count = len(port_devices)
-                session_root_path = Path(session_root or ".")
                 for device in port_devices:
                     device_id = str(device.get("id") or "")
                     slot = self._device_slots.get(device_id)
                     if slot is not None and slot["state"].get("running"):
                         slot["config"] = deepcopy(device)
+                        if slot.get("recorder") is not None:
+                            slot["recorder"].device = deepcopy(device)
+                            if config_snapshot is not None:
+                                slot["recorder"].config_snapshot = deepcopy(config_snapshot)
                         slot["state"].update({
                             "device_name": device.get("name"),
                             "status_stale_after_ms": self._estimate_status_stale_after_ms(device, same_port_count),
                         })
                         continue
 
-                    self._device_slots[device_id] = self._empty_device_slot(device)
+                    self._device_slots[device_id] = prepared_slots.get(device_id) or self._empty_device_slot(device)
                     slot = self._device_slots[device_id]
-                    self._restore_recent_history(slot, session_root_path, device_id, started_at)
-                    slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
-                    try:
-                        slot["recorder"].record_heat_event(
-                            _now(), "系统", "采集开始", f"设备 {device.get('name') or device_id} 开始监控记录"
-                        )
-                    except Exception:
-                        pass
+                    if slot["recorder"] is None:
+                        slot["recorder"] = LiveSessionRecorder(session_root_path, deepcopy(device), config_snapshot=config_snapshot)
                     slot["state"].update({
                         "running": True,
                         "device_id": device_id,
@@ -269,16 +347,26 @@ class LiveAcquisitionService:
             return deepcopy(self._global_state)
 
     def stop_all(self) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            return self._stop_all_locked()
+
+    def _stop_all_locked(self) -> dict[str, Any]:
         with self._lock:
             port_keys = set(self._port_runners)
         self._stop_port_runners(port_keys)
         with self._lock:
-            for device_id in list(self._device_slots):
-                self._finalize_device_session(device_id)
+            device_ids = list(self._device_slots)
+        for device_id in device_ids:
+            self._finalize_device_session(device_id)
+        with self._lock:
             self._refresh_global_state()
             return deepcopy(self._global_state)
 
     def stop_devices(self, device_ids: Iterable[str]) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            return self._stop_devices_locked(device_ids)
+
+    def _stop_devices_locked(self, device_ids: Iterable[str]) -> dict[str, Any]:
         """只停止勾选的设备；同串口上未勾选的设备继续采集。"""
         targets = {str(value) for value in device_ids if str(value)}
         if not targets:
@@ -290,9 +378,9 @@ class LiveAcquisitionService:
                 if targets.intersection(str(item) for item in (runner.get("device_ids") or []))
             }
         previous = self._stop_port_runners(affected_ports)
+        for device_id in targets:
+            self._finalize_device_session(device_id)
         with self._lock:
-            for device_id in targets:
-                self._finalize_device_session(device_id)
             for port_key, old_device_ids in previous.items():
                 remaining = [
                     old_id
@@ -327,7 +415,17 @@ class LiveAcquisitionService:
             name=f"live-acq-{port_key}",
             daemon=True,
         )
-        runner["thread"].start()
+        try:
+            runner["thread"].start()
+        except Exception:
+            self._port_runners.pop(port_key, None)
+            for device in devices:
+                slot = self._device_slots.get(str(device.get("id") or ""))
+                if slot is not None:
+                    slot["state"]["running"] = False
+                    slot["state"]["finalization_pending"] = bool(slot.get("recorder") is not None)
+            self._refresh_global_state()
+            raise
 
     def _stop_port_runners(self, port_keys: set[str]) -> dict[str, list[str]]:
         """停止指定串口的轮询线程并关闭串口客户端，返回各串口原设备列表。
@@ -352,8 +450,7 @@ class LiveAcquisitionService:
             if client is not None:
                 try:
                     # 先关闭串口以打断可能阻塞的读操作，再等待轮询线程退出。
-                    with self._io_lock:
-                        client.close()
+                    client.close()
                 except Exception:
                     pass
             thread = runner.get("thread")
@@ -372,25 +469,36 @@ class LiveAcquisitionService:
         return previous
 
     def _finalize_device_session(self, device_id: str) -> None:
-        """结束指定设备的采集会话并归档记录器，调用方需持有 self._lock。"""
-        slot = self._device_slots.get(device_id)
-        if slot is None or not slot["state"].get("running"):
-            return
-        slot["state"]["running"] = False
-        slot["events"].append({
-            "id": slot["event_seq"] + 1,
-            "ts": _iso(_now()),
-            "type": "session_stopped",
-            "message": "session stopped by api",
-        })
-        slot["event_seq"] += 1
-        recorder = slot.get("recorder")
+        """结束指定设备的采集会话；磁盘归档不得占用全局状态锁。"""
+        with self._lock:
+            slot = self._device_slots.get(device_id)
+            if slot is None or not (slot["state"].get("running") or slot["state"].get("finalization_pending")):
+                return
+            was_running = bool(slot["state"].get("running"))
+            slot["state"]["running"] = False
+            slot["state"]["finalization_pending"] = True
+            if was_running:
+                slot["events"].append({
+                    "id": slot["event_seq"] + 1,
+                    "ts": _iso(_now()),
+                    "type": "session_stopped",
+                    "message": "session stopped by api",
+                })
+                slot["event_seq"] += 1
+            recorder = slot.get("recorder")
+            final_state = deepcopy(slot["state"])
         if recorder is not None:
             try:
-                recorder.record_heat_event(_now(), "系统", "采集停止", "上位机停止监控记录")
-            except Exception:
-                pass
-            recorder.finalize(status="stopped")
+                if was_running:
+                    recorder.record_heat_event(_now(), "系统", "采集停止", "上位机停止监控记录")
+                recorder.save_checkpoint(final_state, force=True)
+                recorder.finalize(status="stopped")
+                with self._lock:
+                    self._clear_recording_error(slot)
+                    slot["state"]["finalization_pending"] = False
+            except Exception as exc:
+                with self._lock:
+                    self._mark_recording_error(slot, exc)
 
     def _refresh_global_state(self) -> None:
         """根据各设备槽位的运行状态重建全局状态，调用方需持有 self._lock。"""
@@ -421,6 +529,7 @@ class LiveAcquisitionService:
 
     def _state_with_health(self, slot: dict[str, Any]) -> dict[str, Any]:
         state = deepcopy(slot["state"])
+        state["active_failure_count"] = len(slot.get("active_failures") or ())
         health, text = self._compute_health(state, _now())
         state["communication_health"] = health
         state["communication_text"] = text
@@ -435,6 +544,14 @@ class LiveAcquisitionService:
         stale_after_ms = max(15000, _safe_int(state.get("status_stale_after_ms"), 15000))
         consecutive_errors = max(0, _safe_int(state.get("consecutive_error_count"), 0))
         has_error = bool(state.get("last_error"))
+        active_failures = max(0, _safe_int(state.get("active_failure_count"), 0))
+
+        if state.get("recording_error"):
+            return "warn", "会话记录异常"
+        if active_failures:
+            if consecutive_errors >= 3:
+                return "error", "连续通信异常"
+            return "warn", "部分轮询异常"
 
         if last_success is not None:
             age_ms = (now - last_success).total_seconds() * 1000.0
@@ -454,14 +571,22 @@ class LiveAcquisitionService:
 
     @staticmethod
     def _estimate_status_stale_after_ms(device: dict[str, Any], same_port_count: int) -> int:
-        commands = [item for item in normalize_polling_commands(device.get("pollingCommands")) if item.get("autoPoll")]
+        settings = device.get("pollingSettings") if isinstance(device.get("pollingSettings"), dict) else {}
+        commands = [
+            item for item in normalize_polling_commands(device.get("pollingCommands"))
+            if item.get("autoPoll")
+        ]
         timeout_ms = max(100, _safe_int(device.get("timeoutMs"), 1200))
         retry_count = max(0, _safe_int(device.get("retryCount"), 0))
         port_count = max(1, same_port_count)
         worst_request_ms = timeout_ms * (retry_count + 1)
         per_device_delay_ms = sum(max(0, _safe_int(item.get("delayAfterMs"), 0)) for item in commands)
         estimated_cycle_ms = (worst_request_ms * max(1, len(commands)) * port_count) + (per_device_delay_ms * port_count)
-        return max(15000, min(120000, int(estimated_cycle_ms)))
+        max_interval_ms = max(
+            (_safe_int(group.get("intervalMs"), 0) for group in settings.values() if isinstance(group, dict)),
+            default=0,
+        )
+        return max(15000, int(estimated_cycle_ms + max_interval_ms))
 
     def get_snapshot(self, device_id: str | None = None) -> dict[str, Any]:
         slot = self._get_device_slot(device_id)
@@ -476,12 +601,18 @@ class LiveAcquisitionService:
                 "session": {"running": False},
             }
         with self._lock:
+            if not slot["state"].get("running"):
+                return {
+                    "deviceId": device_id, "snapshotAt": None, "ts": None,
+                    "metrics": [], "statuses": [], "controls": [],
+                    "session": self._state_with_health(slot),
+                }
             metrics = [self._catalog_item_with_value(item, slot["values"]) for item in self._catalog if item.get("area") == "input_register"]
             statuses = [self._catalog_item_with_value(item, slot["values"]) for item in self._catalog if item.get("area") == "discrete_input"]
             controls = [
                 self._catalog_item_with_value(item, slot["values"])
                 for item in self._catalog
-                if item.get("group") in {"control", "config", "task", "runtime_control", "diagnostic"}
+                if item.get("group") in {"control", "config", "task", "schedule", "runtime_control", "diagnostic"}
             ]
             return {
                 "deviceId": device_id,
@@ -506,6 +637,10 @@ class LiveAcquisitionService:
             return {"rows": [], "byMetric": {}, "availableDates": [], "availableRange": None, "range": {"start": start_at, "end": end_at}}
         start_time = _parse_iso(start_at)
         end_time = _parse_iso(end_at)
+        if start_at and start_time is None:
+            raise ValueError("曲线开始时间格式无效")
+        if end_at and end_time is None:
+            raise ValueError("曲线结束时间格式无效")
         if start_time is not None and end_time is not None and end_time < start_time:
             raise ValueError("曲线结束时间不能早于开始时间")
         cutoff = start_time.timestamp() if start_time is not None else time.time() - max(1000, window_ms) / 1000.0
@@ -568,24 +703,34 @@ class LiveAcquisitionService:
             return rows
         if limit <= 1:
             return [rows[-1]]
-        first_epoch = float(rows[0]["epoch"])
-        last_epoch = float(rows[-1]["epoch"])
-        if last_epoch <= first_epoch:
-            step = (len(rows) - 1) / (limit - 1)
-            return [rows[round(index * step)] for index in range(limit)]
-        bucket_width = (last_epoch - first_epoch) / (limit - 1)
+        if limit == 2:
+            return [rows[0], rows[-1]]
+        # Largest-Triangle-Three-Buckets：保留首尾及具有最大视觉面积的尖峰/谷值。
+        every = (len(rows) - 2) / (limit - 2)
         selected = [rows[0]]
-        next_boundary = first_epoch + bucket_width
-        candidate = rows[1]
-        for row in rows[1:-1]:
-            candidate = row
-            if float(row["epoch"]) >= next_boundary:
-                selected.append(candidate)
-                next_boundary = first_epoch + bucket_width * len(selected)
-                if len(selected) >= limit - 1:
-                    break
+        anchor_index = 0
+        for bucket in range(limit - 2):
+            avg_start = int((bucket + 1) * every) + 1
+            avg_end = min(int((bucket + 2) * every) + 1, len(rows))
+            avg_rows = rows[avg_start:avg_end] or [rows[-1]]
+            avg_x = sum(float(row["epoch"]) for row in avg_rows) / len(avg_rows)
+            avg_y = sum(float(row["value"]) for row in avg_rows) / len(avg_rows)
+            range_start = int(bucket * every) + 1
+            range_end = min(int((bucket + 1) * every) + 1, len(rows) - 1)
+            anchor = rows[anchor_index]
+            ax, ay = float(anchor["epoch"]), float(anchor["value"])
+            candidates = rows[range_start:range_end] or [rows[range_start]]
+            chosen = max(
+                candidates,
+                key=lambda row: abs(
+                    (ax - avg_x) * (float(row["value"]) - ay)
+                    - (ax - float(row["epoch"])) * (avg_y - ay)
+                ),
+            )
+            selected.append(chosen)
+            anchor_index = rows.index(chosen, range_start, range_end or None)
         selected.append(rows[-1])
-        return selected[:limit - 1] + [rows[-1]] if len(selected) > limit else selected
+        return selected
 
     @staticmethod
     def _append_history_point(
@@ -596,13 +741,15 @@ class LiveAcquisitionService:
         value: Any,
     ) -> None:
         row = {"ts": timestamp, "value": value, "epoch": epoch}
+        numeric_value = float(value)
+        if not math.isfinite(float(epoch)) or not math.isfinite(numeric_value):
+            return
         if slot["history"][metric_key] and float(slot["history"][metric_key][-1]["epoch"]) == epoch:
             slot["history"][metric_key][-1] = row
             return
         slot["history"][metric_key].append(row)
         archive = slot["history_archive"][metric_key]
         bucket_epoch = int(epoch // 60) * 60
-        numeric_value = float(value)
         if archive and int(float(archive[-1]["epoch"])) == bucket_epoch:
             bucket = archive[-1]
             bucket["_sum"] = float(bucket.get("_sum", bucket["value"])) + numeric_value
@@ -628,80 +775,84 @@ class LiveAcquisitionService:
             return 0
         cutoff = now.timestamp() - HISTORY_RETENTION_SECONDS
         restored = 0
+        pending: dict[str, dict[float, dict[str, Any]]] = {
+            key: {} for key in slot["history"]
+        }
+        cutoff_date = datetime.fromtimestamp(cutoff).date()
         meta_paths = sorted(session_root.glob("*/session_meta.json"))
         for meta_path in meta_paths:
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if str((meta.get("device") or {}).get("id") or "") != device_id:
+            if not isinstance(meta, dict):
+                continue
+            meta_device = meta.get("device")
+            if not isinstance(meta_device, dict) or str(meta_device.get("id") or "") != device_id:
+                continue
+            ended_at = _parse_iso(meta.get("ended_at"))
+            if ended_at is not None and ended_at.timestamp() < cutoff:
                 continue
             data_paths = sorted(meta_path.parent.glob("data_0/sensor_*.csv"))
-            data_paths.extend(sorted(meta_path.parent.glob("data_0/log_*.csv")))
             for data_path in data_paths:
+                date_match = re.search(r"sensor_(\d{4})_(\d{2})_(\d{2})\.csv$", data_path.name)
+                if date_match:
+                    try:
+                        file_date = datetime(*map(int, date_match.groups())).date()
+                    except ValueError:
+                        continue
+                    if file_date < cutoff_date:
+                        continue
                 try:
-                    with data_path.open("r", encoding="utf-8") as handle:
-                        for line in handle:
-                            csv_values = line.strip().split(",")
-                            if len(csv_values) == 9 and csv_values[0] != "timestamp":
-                                parsed = _parse_iso(csv_values[0])
-                                if parsed is None:
-                                    continue
-                                epoch = parsed.timestamp()
-                                if epoch < cutoff or epoch > now.timestamp() + 60:
-                                    continue
-                                try:
-                                    values = {
-                                        "pressure": float(csv_values[1]),
-                                        "flow": float(csv_values[2]),
-                                        "sensor_1.temperature": float(csv_values[3]),
-                                        "sensor_1.humidity": float(csv_values[4]),
-                                        "sensor_2.temperature": float(csv_values[5]),
-                                        "sensor_2.humidity": float(csv_values[6]),
-                                        "sensor_3.temperature": float(csv_values[7]),
-                                        "sensor_3.humidity": float(csv_values[8]),
-                                    }
-                                except ValueError:
-                                    continue
-                                for metric_key, value in values.items():
-                                    self._append_history_point(slot, metric_key, csv_values[0], epoch, value)
-                                    restored += 1
-                                continue
-                            match = _ENV_HISTORY_ROW_RE.match(line.strip())
-                            if match is None:
-                                continue
-                            timestamp = match.group(1)
+                    with data_path.open("r", encoding="utf-8", newline="") as handle:
+                        reader = csv.DictReader(handle)
+                        for record in reader:
+                            timestamp = str(record.get("timestamp") or "")
                             parsed = _parse_iso(timestamp)
                             if parsed is None:
                                 continue
                             epoch = parsed.timestamp()
                             if epoch < cutoff or epoch > now.timestamp() + 60:
                                 continue
-                            values: dict[str, float] = {
-                                "pressure": float(match.group(2)),
-                                "sensor_1.temperature": float(match.group(3)),
-                                "flow": float(match.group(4)),
-                                "sensor_1.humidity": float(match.group(5)),
+                            columns = {
+                                "pressure": "pressure",
+                                "flow": "flow_rate",
+                                "sensor_1.temperature": "t1_temperature",
+                                "sensor_1.humidity": "t1_humidity",
+                                "sensor_2.temperature": "t2_temperature",
+                                "sensor_2.humidity": "t2_humidity",
+                                "sensor_3.temperature": "t3_temperature",
+                                "sensor_3.humidity": "t3_humidity",
                             }
-                            if "|" in line:
+                            for metric_key, column in columns.items():
+                                raw_value = record.get(column)
+                                if raw_value in (None, ""):
+                                    continue
                                 try:
-                                    details = json.loads(line.split("|", 1)[1].strip())
+                                    value = float(raw_value)
                                 except (TypeError, ValueError):
-                                    details = {}
-                                for key in (
-                                    "sensor_1.temperature", "sensor_2.temperature", "sensor_3.temperature",
-                                    "sensor_1.humidity", "sensor_2.humidity", "sensor_3.humidity",
-                                ):
-                                    if key in details:
-                                        values[key] = float(details[key])
-                            for metric_key, value in values.items():
-                                self._append_history_point(slot, metric_key, timestamp, epoch, value)
-                                restored += 1
+                                    continue
+                                if not math.isfinite(value):
+                                    continue
+                                pending[metric_key][epoch] = {
+                                    "ts": timestamp, "epoch": epoch, "value": value,
+                                }
                 except OSError:
                     continue
+        for metric_key, rows_by_epoch in pending.items():
+            for epoch in sorted(rows_by_epoch):
+                row = rows_by_epoch[epoch]
+                self._append_history_point(slot, metric_key, row["ts"], epoch, row["value"])
+                restored += 1
         return restored
 
-    def get_events(self, device_id: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
+    def get_events(
+        self,
+        device_id: str | None = None,
+        limit: int = 80,
+        start_at: str | None = None,
+        end_at: str | None = None,
+    ) -> list[dict[str, Any]]:
         slot = self._get_device_slot(device_id)
         if slot is None:
             return []
@@ -709,7 +860,65 @@ class LiveAcquisitionService:
         with self._lock:
             all_events = [dict(item) for item in list(slot["events"])]
             meaningful = [ev for ev in all_events if ev.get("type") != "read_success"]
-            return meaningful[-capped_limit:]
+            recorder = slot.get("recorder")
+            session_root = recorder.sessions_root if recorder is not None else None
+        start_time = _parse_iso(start_at)
+        end_time = _parse_iso(end_at)
+        if start_at and start_time is None:
+            raise ValueError("事件开始时间格式无效")
+        if end_at and end_time is None:
+            raise ValueError("事件结束时间格式无效")
+        if start_time is not None or end_time is not None:
+            meaningful.extend(self._load_archived_events(
+                session_root, str(device_id or ""), start_time, end_time
+            ))
+        deduplicated: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for event in meaningful:
+            event_time = _parse_iso(event.get("ts"))
+            if start_time is not None and (event_time is None or event_time < start_time):
+                continue
+            if end_time is not None and (event_time is None or event_time > end_time):
+                continue
+            key = (str(event.get("ts") or ""), str(event.get("type") or ""), str(event.get("message") or ""))
+            deduplicated[key] = event
+        return sorted(deduplicated.values(), key=lambda event: str(event.get("ts") or ""))[-capped_limit:]
+
+    @staticmethod
+    def _load_archived_events(
+        session_root: Path | None,
+        device_id: str,
+        start_time: datetime | None,
+        end_time: datetime | None,
+    ) -> list[dict[str, Any]]:
+        if session_root is None or not session_root.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        for meta_path in session_root.glob("*/session_meta.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            device = meta.get("device") if isinstance(meta, dict) else None
+            if not isinstance(device, dict) or str(device.get("id") or "") != device_id:
+                continue
+            for event_path in sorted(meta_path.parent.glob("heat_events/heat_*.csv")):
+                try:
+                    with event_path.open("r", encoding="utf-8", newline="") as handle:
+                        for line_number, row in enumerate(csv.reader(handle), start=1):
+                            if len(row) < 3:
+                                continue
+                            timestamp = _parse_iso(row[0])
+                            if timestamp is None or (start_time is not None and timestamp < start_time) or (end_time is not None and timestamp > end_time):
+                                continue
+                            events.append({
+                                "id": f"archive:{meta_path.parent.name}:{event_path.name}:{line_number}",
+                                "ts": _iso(timestamp), "type": "heat_event",
+                                "message": f"{row[1]} {row[2]}",
+                                "details": {"channel": row[1], "event": row[2], "detail": row[3] if len(row) > 3 else ""},
+                            })
+                except OSError:
+                    continue
+        return events
 
     def get_command_traffic(self, device_id: str | None = None, limit: int = 160) -> list[dict[str, Any]]:
         capped_limit = max(1, min(limit, 1000))
@@ -733,7 +942,7 @@ class LiveAcquisitionService:
             return {
                 "config": [
                     builder(item) for item in self._catalog
-                    if item.get("area") == "holding_register" and 100 <= int(item.get("address") or 0) < 800
+                    if item.get("area") == "holding_register" and CONFIG_REGION_START <= int(item.get("address") or 0) < RUNTIME_REGION_START
                     and item.get("group") != "time_sync"
                     and item.get("id") != "holding.schedule.operation"
                 ],
@@ -742,20 +951,33 @@ class LiveAcquisitionService:
                 "transaction": [builder(item) for item in self._catalog if item.get("group") == "config_transaction"],
             }
 
+    def get_pending_connection_profile(self, device_id: str) -> dict[str, Any]:
+        slot = self._get_device_slot_required(device_id)
+        with self._lock:
+            return dict(slot.get("pending_connection_profile") or {})
+
     def write_runtime_control(self, device_id: str, item_id: str, value: Any) -> dict[str, Any]:
         item = self._catalog_by_id.get(item_id)
         if item is None or item.get("group") != "runtime_control":
             raise ValueError(f"不是即时运行控制点: {item_id}")
+        address = int(item.get("address") or -1)
+        address_end = int(item.get("addressEnd") or address)
+        if item.get("area") != "holding_register" or address < RUNTIME_REGION_START or address_end > RUNTIME_CONTROL_END:
+            raise ValueError(f"即时控制地址必须位于 HR800–807: {item_id}")
+        V9ConfigTransaction._validate_value_range(item, value)
         return self.write_value(device_id, item_id, value)
 
+    @_serialized_lifecycle
     def stage_config_value(self, device_id: str, item_id: str, value: Any) -> dict[str, Any]:
         with self._lock:
             item = dict(self._catalog_by_id.get(item_id) or {})
             slot = self._get_device_slot(device_id)
         if not item:
             raise KeyError(f"未知配置点: {item_id}")
+        if item_id in {"holding.schedule.task_count", "holding.schedule.operation"}:
+            raise ValueError(f"该寄存器只能通过定时任务专用接口操作: {item_id}")
         address = int(item.get("address") or 0)
-        if item.get("area") != "holding_register" or not 100 <= address < 800 or not item.get("writable"):
+        if item.get("area") != "holding_register" or not CONFIG_REGION_START <= address < RUNTIME_REGION_START or not item.get("writable"):
             raise ValueError(f"不是可暂存配置点: {item_id}")
         if slot is None or not slot["state"].get("running"):
             raise ValueError("设备采集会话尚未运行")
@@ -763,10 +985,11 @@ class LiveAcquisitionService:
         device = deepcopy(slot["config"])
         V9ConfigTransaction._validate_value_range(item, value)
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
+                self._validate_related_config_value(slot, item_id, value, client)
                 words = V9ConfigTransaction(client).stage_value(item, value)
                 decoded = decode_words(words, str(item["dataType"]))
             finally:
@@ -799,20 +1022,66 @@ class LiveAcquisitionService:
             "staged": True,
         }
 
+    def _validate_related_config_value(
+        self,
+        slot: dict[str, Any],
+        item_id: str,
+        value: Any,
+        client: LiveModbusClient | None = None,
+    ) -> None:
+        pairs = {
+            "holding.pressure.alarm_high": ("holding.pressure.alarm_low", "high"),
+            "holding.pressure.alarm_low": ("holding.pressure.alarm_high", "low"),
+            "holding.flow.breath_high": ("holding.flow.breath_low", "high"),
+            "holding.flow.breath_low": ("holding.flow.breath_high", "low"),
+            "holding.antifreeze.close_temperature": ("holding.antifreeze.open_temperature", "high"),
+            "holding.antifreeze.open_temperature": ("holding.antifreeze.close_temperature", "low"),
+        }
+        for channel in range(1, 4):
+            for metric in ("temperature", "humidity"):
+                high = f"holding.sensor_{channel}.{metric}_alarm_high"
+                low = f"holding.sensor_{channel}.{metric}_alarm_low"
+                pairs[high] = (low, "high")
+                pairs[low] = (high, "low")
+        relation = pairs.get(item_id)
+        if relation is None:
+            return
+        counterpart_id, role = relation
+        with self._lock:
+            counterpart = (slot["values"].get(counterpart_id) or {}).get("value")
+        if counterpart is None and client is not None:
+            counterpart_item = self._catalog_by_id[counterpart_id]
+            address = int(counterpart_item["address"])
+            word_length = int(counterpart_item.get("wordLength") or 1)
+            counterpart = decode_words(
+                client.read_holding_registers(address, word_length),
+                str(counterpart_item["dataType"]),
+            )
+        if counterpart is None:
+            raise ValueError(f"无法读取关联参数: {counterpart_id}")
+        current = float(value)
+        other = float(counterpart)
+        if (role == "high" and current <= other) or (role == "low" and current >= other):
+            raise ValueError(f"{item_id} 与 {counterpart_id} 的上下限关系无效")
+
+    @_serialized_lifecycle
     def select_schedule_task(self, device_id: str, task_number: Any) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
             raise ValueError("设备采集会话尚未运行")
-        selected = _safe_int(task_number, 0)
+        selected = _strict_int(task_number, "taskNumber")
         if selected < 1 or selected > SCHEDULE_MAX_TASKS:
             raise ValueError("定时任务序号必须在 1–12 之间")
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
+                transaction = V9ConfigTransaction(client)
+                if transaction.read_status().state & 0x0002:
+                    raise ValueError("当前已有未提交配置，不能切换定时任务浏览窗口")
                 current = self._refresh_schedule_from_client(device_id, slot, client)
                 task_count = int(current[1])
                 if selected > task_count:
@@ -821,10 +1090,12 @@ class LiveAcquisitionService:
                 refreshed = self._refresh_schedule_from_client(device_id, slot, client)
                 if int(refreshed[0]) != selected:
                     raise ModbusError("定时任务切换回读不一致")
+                transaction.discard()
             finally:
                 client.close()
         return self._schedule_result(slot)
 
+    @_serialized_lifecycle
     def mutate_schedule_tasks(self, device_id: str, action: str) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
@@ -839,7 +1110,7 @@ class LiveAcquisitionService:
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
@@ -869,17 +1140,18 @@ class LiveAcquisitionService:
             })
         return self._schedule_result(slot)
 
+    @_serialized_lifecycle
     def stage_schedule_task(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
             raise ValueError("设备采集会话尚未运行")
 
-        task_number = _safe_int(payload.get("taskNumber"), 0)
-        month = _safe_int(payload.get("month"), 0)
-        day = _safe_int(payload.get("day"), 0)
-        hour = _safe_int(payload.get("hour"), -1)
-        minute = _safe_int(payload.get("minute"), -1)
-        duration_days = _safe_int(payload.get("durationDays"), 0)
+        task_number = _strict_int(payload.get("taskNumber"), "taskNumber")
+        month = _strict_int(payload.get("month"), "month")
+        day = _strict_int(payload.get("day"), "day")
+        hour = _strict_int(payload.get("hour"), "hour")
+        minute = _strict_int(payload.get("minute"), "minute")
+        duration_days = _strict_int(payload.get("durationDays"), "durationDays")
         if task_number < 1 or task_number > SCHEDULE_MAX_TASKS:
             raise ValueError("定时任务序号必须在 1–12 之间")
         try:
@@ -916,12 +1188,14 @@ class LiveAcquisitionService:
         ):
             if not 0 <= start <= 100 or not 0 <= falling_stop <= 100:
                 raise ValueError(f"温湿度 {index} 的湿度阈值必须在 0–100 %RH")
+            if falling_stop >= start:
+                raise ValueError(f"温湿度{index}的回落停热阈值必须小于启动阈值")
             if not 0 < peak_drop <= 100:
                 raise ValueError(f"温湿度 {index} 的峰值回落幅度必须在 0–100 %RH")
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
@@ -934,13 +1208,13 @@ class LiveAcquisitionService:
 
                 words = list(current[:SCHEDULE_DATA_WORD_COUNT])
                 words[0] = task_number
-                words[2] = 1 if bool(payload.get("enabled")) else 0
+                words[2] = 1 if self._strict_bool(payload.get("enabled"), "enabled") else 0
                 words[3] = month
                 words[4] = day
                 words[5] = hour
                 words[6] = minute
                 words[7:9] = encode_words(duration_days, "uint32")
-                words[9] = 1 if bool(payload.get("humidityOverrideEnabled")) else 0
+                words[9] = 1 if self._strict_bool(payload.get("humidityOverrideEnabled"), "humidityOverrideEnabled") else 0
                 for sensor, value in enumerate(start_thresholds):
                     offset = 10 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
@@ -1006,20 +1280,48 @@ class LiveAcquisitionService:
             ]
         return {"ok": True, "staged": True, "config": rows}
 
+    @_serialized_lifecycle
     def sync_rtc_from_epoch(self, device_id: str, epoch_seconds: Any,
                             timezone_offset_minutes: Any = 0) -> dict[str, Any]:
+        epoch = _strict_int(epoch_seconds, "epochSeconds")
+        offset = _strict_int(timezone_offset_minutes, "timezoneOffsetMinutes")
+        if offset != 0:
+            raise ValueError("Unix 时间戳已经是 UTC 绝对时间，timezoneOffsetMinutes 必须为 0")
+        slot = self._get_device_slot_required(device_id)
+        if not slot["state"].get("running"):
+            raise ValueError("设备采集会话尚未运行")
+        device = deepcopy(slot["config"])
+        port_key = _device_port_key(device)
+        item = self._catalog_by_id["holding.system.rtc_sync_epoch"]
+        client = None
         try:
-            epoch = int(epoch_seconds)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("电脑时间不是有效的 Unix 秒") from exc
-        # 时区换算由下位机统一完成，避免浏览器和后台服务版本不一致时重复或遗漏换算。
-        self.stage_config_value(device_id, "holding.system.rtc_sync_epoch", epoch)
+            with self._port_io_lock(port_key):
+                self._close_runner_client_for_port(port_key)
+                client = self._open_manual_client(device, device_id)
+                transaction = V9ConfigTransaction(client)
+                if transaction.read_status().state & 0x0002:
+                    raise ValueError("当前已有未提交配置，请先提交或放弃后再同步 RTC")
+                words = transaction.stage_value(item, epoch)
+                try:
+                    status = transaction.commit()
+                except Exception:
+                    transaction.discard()
+                    raise
+        finally:
+            if client is not None:
+                client.close()
+        timestamp = _iso(_now())
+        with self._lock:
+            slot["values"][str(item["id"])] = {"value": epoch, "ts": timestamp}
         return {
             "ok": True,
             "epoch": epoch,
-            "transaction": self.execute_config_transaction(device_id, "commit"),
+            "timezoneOffsetMinutes": offset,
+            "words": words,
+            "transaction": {"status": asdict(status), "action": "commit"},
         }
 
+    @_serialized_lifecycle
     def execute_config_transaction(self, device_id: str, action: str) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
@@ -1030,12 +1332,20 @@ class LiveAcquisitionService:
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
-        with self._io_lock:
+        refresh_error = ""
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
                 transaction = V9ConfigTransaction(client)
                 status = transaction.commit() if normalized_action == "commit" else transaction.discard()
+                if normalized_action == "discard":
+                    try:
+                        for command in self._default_polling_commands:
+                            if command.get("sourceGroup") == "slow":
+                                self._poll_command(device_id, client, command)
+                    except Exception as exc:
+                        refresh_error = str(exc).strip() or exc.__class__.__name__
             finally:
                 client.close()
 
@@ -1066,6 +1376,7 @@ class LiveAcquisitionService:
             "status": payload,
             "restartRequired": restart_required,
             "connectionProfile": connection_profile,
+            "refreshError": refresh_error,
         }
 
     def _close_runner_client_for_port(self, port_key: str) -> None:
@@ -1088,6 +1399,7 @@ class LiveAcquisitionService:
         client.open()
         return client
 
+    @_serialized_lifecycle
     def send_debug_frame(
         self,
         device: dict[str, Any],
@@ -1101,8 +1413,27 @@ class LiveAcquisitionService:
         if not device_id:
             raise ValueError("device must have an id")
         request_bytes = self._parse_debug_hex(request_hex)
+        if not append_crc_bytes:
+            raise ValueError("诊断读取必须由程序自动追加 CRC")
+        if not expect_response:
+            raise ValueError("诊断读取必须等待并校验设备响应")
+        if len(request_bytes) != 6:
+            raise ValueError("诊断请求必须是 6 字节标准 Modbus 读取 PDU")
+        slave_id, function_code = request_bytes[0], request_bytes[1]
+        address = int.from_bytes(request_bytes[2:4], "big")
+        count = int.from_bytes(request_bytes[4:6], "big")
+        allowed_blocks = {
+            (int(item["functionCode"]), int(item["address"]), int(item["count"]))
+            for item in self._default_polling_commands
+        }
+        if slave_id != int(device.get("slaveId") or 0):
+            raise ValueError("诊断请求的从站地址与当前设备不一致")
+        if (function_code, address, count) not in allowed_blocks:
+            raise ValueError("仅允许读取点表声明的固定 Modbus V9.1 轮询块")
+        if response_timeout_ms is not None and not 50 <= int(response_timeout_ms) <= 30_000:
+            raise ValueError("诊断响应超时必须在 50–30000 ms 之间")
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
@@ -1126,6 +1457,7 @@ class LiveAcquisitionService:
             "status": expect_response and (response and "ok" or "no_response") or "sent",
         }
 
+    @_serialized_lifecycle
     def write_value(self, device_id: str, item_id: str, value: Any) -> dict[str, Any]:
         with self._lock:
             item = dict(self._catalog_by_id.get(item_id) or {})
@@ -1142,7 +1474,7 @@ class LiveAcquisitionService:
         runtime_feedback: dict[str, Any] = {}
 
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
@@ -1166,6 +1498,15 @@ class LiveAcquisitionService:
                         raise ModbusError(
                             f"加热模式回读不一致：写入 {decoded_value}，回读 {confirmed}"
                         )
+                elif item_id == "holding.runtime.remote_heat":
+                    feedback_item = self._catalog_by_id["input_register.output.remote_heat"]
+                    feedback_address = int(feedback_item["address"])
+                    feedback_words = client.read_input_registers(feedback_address, int(feedback_item["wordLength"]))
+                    confirmed = self._decode_value(feedback_item, feedback_words)
+                    runtime_feedback[item_id] = confirmed
+                    runtime_feedback["input_register.output.remote_heat"] = confirmed
+                    if int(confirmed) != int(decoded_value):
+                        raise ModbusError(f"远程加热回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
                 elif re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
                     runtime_feedback = self._read_runtime_valve_feedback(client)
                     if int(decoded_value) == 3:
@@ -1180,7 +1521,10 @@ class LiveAcquisitionService:
 
         timestamp = _iso(_now())
         with self._lock:
-            slot["values"][item_id] = {"value": decoded_value, "ts": timestamp}
+            if int(decoded_value) == 3 and re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
+                slot["values"].pop(item_id, None)
+            else:
+                slot["values"][item_id] = {"value": decoded_value, "ts": timestamp}
             for feedback_id, feedback_value in runtime_feedback.items():
                 slot["values"][feedback_id] = {"value": feedback_value, "ts": timestamp}
             slot["event_seq"] += 1
@@ -1191,9 +1535,8 @@ class LiveAcquisitionService:
                 "message": f"wrote {item_id} = {decoded_value}",
                 "details": {"itemId": item_id, "value": decoded_value},
             })
-            self._log_recorder_for_slot(slot, "I", f"write {item_id} = {decoded_value}")
             row = self._catalog_item_with_value(item, slot["values"])
-            return {
+            result = {
                 "ok": True,
                 "implemented": True,
                 "message": f"live value written: {item_id}",
@@ -1201,10 +1544,13 @@ class LiveAcquisitionService:
                 "runtimeFeedback": runtime_feedback,
                 "session": deepcopy(slot["state"]),
             }
+        self._log_recorder_for_slot(slot, "I", f"write {item_id} = {decoded_value}")
+        return result
 
     @staticmethod
     def _read_runtime_heat_feedback(client: LiveModbusClient) -> dict[str, Any]:
-        words = client.read_input_registers(304, 3)
+        start_address = int(get_register_item("input_register.output.htc1_mode")["address"])
+        words = client.read_input_registers(start_address, 3)
         return {
             "holding.runtime.htc1_mode": words[0],
             "holding.runtime.htc2_mode": words[1],
@@ -1215,12 +1561,13 @@ class LiveAcquisitionService:
         }
 
     def _read_runtime_valve_feedback(self, client: LiveModbusClient) -> dict[str, Any]:
-        start_address = 804
-        words = client.read_holding_registers(start_address, 17)
+        start_address = int(get_register_item("holding.runtime.valve_1")["address"])
+        end_address = int(get_register_item("holding.runtime.valve_action_limit")["addressEnd"])
+        words = client.read_holding_registers(start_address, end_address - start_address + 1)
         feedback: dict[str, Any] = {}
         for item in self._catalog:
             address = int(item.get("address") or -1)
-            if item.get("area") != "holding_register" or address < start_address or address > 820:
+            if item.get("area") != "holding_register" or address < start_address or address > end_address:
                 continue
             offset = address - start_address
             word_length = int(item.get("wordLength") or 1)
@@ -1246,19 +1593,24 @@ class LiveAcquisitionService:
         with self._lock:
             if slot["recorder"] is None:
                 raise ValueError(f"no live session recorded for device: {device_id}")
-            exported_dir = slot["recorder"].export_to(Path(export_root))
-            self._log_recorder_for_slot(slot, "I", f"session exported to {exported_dir}")
-            return {
-                "sessionDir": str(slot["recorder"].session_dir),
-                "exportDir": str(exported_dir),
-                "deviceId": device_id,
-                "deviceName": slot["config"].get("name"),
-            }
+            recorder = slot["recorder"]
+            session_dir = str(recorder.session_dir)
+            device_name = slot["config"].get("name")
+        exported_dir = recorder.export_to(Path(export_root))
+        self._log_recorder_for_slot(slot, "I", f"session exported to {exported_dir}")
+        return {
+            "sessionDir": session_dir,
+            "exportDir": str(exported_dir),
+            "deviceId": device_id,
+            "deviceName": device_name,
+        }
 
     def _catalog_item_with_value(self, item: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         row = dict(item)
         cached = values.get(item["id"]) or {}
         row["currentValue"] = cached.get("value")
+        if item.get("dataType") == "uint64" and row["currentValue"] is not None:
+            row["currentValue"] = str(row["currentValue"])
         row["value"] = row["currentValue"]
         row["updatedAt"] = cached.get("ts")
         return row
@@ -1333,11 +1685,33 @@ class LiveAcquisitionService:
 
     def _write_traffic_to_disk(self, slot: dict[str, Any], entry: dict[str, Any]) -> None:
         if slot["recorder"] is not None:
-            slot["recorder"].record_traffic_entry(entry)
+            try:
+                slot["recorder"].record_traffic_entry(entry)
+                self._clear_recording_error(slot)
+            except Exception as exc:
+                self._mark_recording_error(slot, exc)
 
     def _log_recorder_for_slot(self, slot: dict[str, Any], level: str, message: str) -> None:
         if slot["recorder"] is not None:
-            slot["recorder"].record_log(level, _now(), message)
+            try:
+                slot["recorder"].record_log(level, _now(), message)
+                self._clear_recording_error(slot)
+            except Exception as exc:
+                self._mark_recording_error(slot, exc)
+
+    @staticmethod
+    def _mark_recording_error(slot: dict[str, Any], exc: Exception) -> None:
+        message = str(exc).strip() or exc.__class__.__name__
+        slot["state"]["recording_error"] = message
+        slot["state"]["last_error"] = f"会话记录失败: {message}"
+        slot["state"]["last_error_at"] = _iso(_now())
+
+    @staticmethod
+    def _clear_recording_error(slot: dict[str, Any]) -> None:
+        slot["state"]["recording_error"] = None
+        if str(slot["state"].get("last_error") or "").startswith("会话记录失败"):
+            slot["state"]["last_error"] = None
+            slot["state"]["last_error_at"] = None
 
     def _run_port_loop(
         self,
@@ -1354,6 +1728,14 @@ class LiveAcquisitionService:
             device_id = str(device.get("id") or "")
             if device_id:
                 commands = [item for item in normalize_polling_commands(device.get("pollingCommands"), self._catalog) if item.get("autoPoll")]
+                settings = device.get("pollingSettings") if isinstance(device.get("pollingSettings"), dict) else {}
+                now_monotonic = time.monotonic()
+                for command in commands:
+                    group_key = str(command.get("sourceGroup") or "fast")
+                    group_settings = settings.get(group_key) if isinstance(settings.get(group_key), dict) else {}
+                    default_interval = {"fast": 1000, "standard": 5000, "slow": 30000}.get(group_key, 1000)
+                    command["_intervalMs"] = max(100, min(300_000, _safe_int(group_settings.get("intervalMs"), default_interval)))
+                    command["_nextDue"] = now_monotonic
                 commands_by_device[device_id] = commands
                 command_indexes[device_id] = 0
 
@@ -1421,12 +1803,24 @@ class LiveAcquisitionService:
                     continue
 
                 command_index = command_indexes.get(current_device_id, 0) % len(device_commands)
-                command = device_commands[command_index]
-                command_indexes[current_device_id] = (command_index + 1) % len(device_commands)
+                now_monotonic = time.monotonic()
+                command = None
+                for offset in range(len(device_commands)):
+                    candidate_index = (command_index + offset) % len(device_commands)
+                    candidate = device_commands[candidate_index]
+                    if float(candidate.get("_nextDue") or 0.0) <= now_monotonic:
+                        command = candidate
+                        command_indexes[current_device_id] = (candidate_index + 1) % len(device_commands)
+                        break
+                if command is None:
+                    next_due = min(float(item.get("_nextDue") or now_monotonic) for item in device_commands)
+                    switch_device()
+                    stop_event.wait(max(0.01, min(0.1, next_due - now_monotonic)))
+                    continue
 
                 # 串口打开也必须与手动报文共用同一把锁，否则手动调试关闭轮询客户端后，
                 # 轮询线程可能在手动帧尚未完成时抢先重新打开 COM 口。
-                with self._io_lock:
+                with self._port_io_lock(port_key):
                     c = ensure_client_for(current_device)
                 if c is None:
                     self._record_device_error(
@@ -1442,7 +1836,7 @@ class LiveAcquisitionService:
 
                 command_ok = True
                 try:
-                    with self._io_lock:
+                    with self._port_io_lock(port_key):
                         if c is None or getattr(c, "_serial", None) is None:
                             c = ensure_client_for(current_device)
                         if c is None:
@@ -1465,38 +1859,54 @@ class LiveAcquisitionService:
                         command=command.get("id"),
                         error=str(exc).strip() or exc.__class__.__name__,
                     )
-                    self._record_read_failure_traffic(current_device_id, str(command_label))
                     command_ok = False
 
                 if command_ok:
+                    command["_nextDue"] = time.monotonic() + float(command.get("_intervalMs") or 1000) / 1000.0
                     delay_ms = max(0, _safe_int(command.get("delayAfterMs"), 0))
                     if delay_ms and stop_event.wait(min(delay_ms / 1000.0, 5.0)):
                         break
                     switch_device()
                 else:
+                    command["_nextDue"] = time.monotonic() + min(1.0, float(command.get("_intervalMs") or 1000) / 1000.0)
                     switch_device()
                     stop_event.wait(0.25)
         finally:
             if client is not None:
                 client.close()
+            recorders: list[tuple[dict[str, Any], LiveSessionRecorder]] = []
             with self._lock:
                 runner = self._port_runners.get(port_key)
                 finalize_on_exit = True
                 if runner is not None and runner.get("stop_event") is stop_event:
                     runner["client"] = None
                     finalize_on_exit = bool(runner.get("finalize_on_exit", True))
+                    self._port_runners.pop(port_key, None)
                 for device_id in device_ids:
                     slot = self._device_slots.get(device_id)
                     if slot is not None and finalize_on_exit:
                         slot["state"]["running"] = False
+                        slot["state"]["finalization_pending"] = bool(slot["recorder"] is not None)
                         if slot["recorder"] is not None:
-                            slot["recorder"].finalize(status="stopped")
+                            recorders.append((slot, slot["recorder"]))
+                self._refresh_global_state()
+            for slot, recorder in recorders:
+                try:
+                    recorder.save_checkpoint(deepcopy(slot["state"]), force=True)
+                    recorder.finalize(status="stopped")
+                    with self._lock:
+                        slot["state"]["finalization_pending"] = False
+                except Exception as exc:
+                    with self._lock:
+                        self._mark_recording_error(slot, exc)
 
     def _record_device_error(self, device_id: str, message: str, event_type: str, **details: Any) -> None:
         slot = self._get_device_slot(device_id)
         if slot is None:
             return
         with self._lock:
+            failure_key = str(details.get("command") or event_type)
+            slot.setdefault("active_failures", set()).add(failure_key)
             slot["state"]["last_error_at"] = _iso(_now())
             slot["state"]["last_error"] = message
             slot["state"]["error_count"] = int(slot["state"].get("error_count") or 0) + 1
@@ -1509,7 +1919,7 @@ class LiveAcquisitionService:
                 "message": message,
                 "details": details,
             })
-            self._log_recorder_for_slot(slot, "E", message)
+        self._log_recorder_for_slot(slot, "E", message)
 
     def _record_open_failure_traffic(self, device_id: str) -> None:
         slot = self._get_device_slot(device_id)
@@ -1551,9 +1961,17 @@ class LiveAcquisitionService:
         now = _now()
         with self._lock:
             slot["state"]["last_success_at"] = _iso(now)
-            slot["state"]["last_error"] = None
-            slot["state"]["last_error_at"] = None
-            slot["state"]["consecutive_error_count"] = 0
+            failure_key = str(command.get("id") or command.get("name") or "command")
+            slot.setdefault("active_failures", set()).discard(failure_key)
+            slot["active_failures"].discard("serial_open_failed")
+            if not slot["active_failures"]:
+                slot["state"]["last_error"] = None
+                slot["state"]["last_error_at"] = None
+                slot["state"]["consecutive_error_count"] = 0
+            else:
+                slot["state"]["consecutive_error_count"] = max(
+                    1, int(slot["state"].get("consecutive_error_count") or 0)
+                )
             slot["state"]["last_snapshot_at"] = _iso(now)
             self._recompute_sample_counts(slot)
 
@@ -1563,9 +1981,16 @@ class LiveAcquisitionService:
 
     @staticmethod
     def _parse_debug_hex(request_hex: str) -> bytes:
-        cleaned = re.sub(r"(0x|[^0-9a-fA-F])", "", str(request_hex or ""), flags=re.IGNORECASE)
-        if not cleaned:
+        raw = str(request_hex or "").strip()
+        if not raw:
             raise ValueError("requestHex is required")
+        if re.fullmatch(r"[0-9a-fA-F]+", raw):
+            cleaned = raw
+        else:
+            tokens = raw.split()
+            if not tokens or any(re.fullmatch(r"(?:0x)?[0-9a-fA-F]{2}", token, re.IGNORECASE) is None for token in tokens):
+                raise ValueError("requestHex contains invalid characters")
+            cleaned = "".join(token[2:] if token.lower().startswith("0x") else token for token in tokens)
         if len(cleaned) % 2 != 0:
             raise ValueError("requestHex must contain an even number of hex digits")
         try:
@@ -1603,10 +2028,14 @@ class LiveAcquisitionService:
         client: LiveModbusClient,
         command: dict[str, Any],
         stop_event: threading.Event | None = None,
-    ) -> None:
+    ) -> bool:
         slot = self._get_device_slot(device_id)
         if slot is None or (stop_event is not None and stop_event.is_set()):
-            return
+            return False
+        is_protocol_command = int(command.get("functionCode") or 0) == 4 and int(command.get("address") or -1) == 0
+        with self._lock:
+            if slot.get("protocol_rejected") and not is_protocol_command:
+                return False
         with self._lock:
             slot["state"]["request_count"] = int(slot["state"].get("request_count") or 0) + 1
             slot["state"]["last_attempt_at"] = _iso(_now())
@@ -1615,6 +2044,7 @@ class LiveAcquisitionService:
         if block["items"] and str(command.get("decodeMode") or "catalog") == "catalog":
             self._apply_block_values(device_id, slot, block, values)
         self._record_command_success_event(slot, command, 1)
+        return True
 
     def _command_to_block(self, command: dict[str, Any]) -> dict[str, Any]:
         function_code = _safe_int(command.get("functionCode"), 0)
@@ -1658,9 +2088,13 @@ class LiveAcquisitionService:
             decoded = self._decode_value(item, chunk)
             if item["id"] in {"input_register.system.protocol_version", "holding.config.protocol_version"}:
                 if decoded != PROTOCOL_VERSION_WORD:
+                    with self._lock:
+                        slot["protocol_rejected"] = True
                     raise ModbusError(
                         f"Modbus 协议版本不匹配: 期望 0x{PROTOCOL_VERSION_WORD:04X}, 实际 0x{int(decoded or 0):04X}"
                     )
+                with self._lock:
+                    slot["protocol_rejected"] = False
             updates.append((item["id"], decoded))
         update_values = dict(updates)
         invalid_measurements: set[str] = set()
@@ -1679,8 +2113,9 @@ class LiveAcquisitionService:
                     metric_key = item_id.split(".", 1)[1]
                     if metric_key in slot["history"] and decoded is not None:
                         self._append_history_point(slot, metric_key, timestamp, epoch, decoded)
+        if set(update_values).intersection(HISTORY_POINT_IDS):
             self._save_to_recorder(slot, device_id, timestamp)
-            self._record_heat_events(slot, timestamp, update_values)
+        self._record_heat_events(slot, timestamp, update_values)
 
     def _record_heat_events(self, slot: dict[str, Any], timestamp: str, update_values: dict[str, Any]) -> None:
         """检测加热/阀门状态沿，向会话写入结构化 heat_events 记录。"""
@@ -1707,8 +2142,8 @@ class LiveAcquisitionService:
         def _emit(channel: str, event: str, detail: str = "") -> None:
             try:
                 recorder.record_heat_event(snapshot_ts, channel, event, detail)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._mark_recording_error(slot, exc)
             slot["event_seq"] += 1
             slot["events"].append({
                 "id": slot["event_seq"],
@@ -1782,7 +2217,7 @@ class LiveAcquisitionService:
         except ValueError:
             return
 
-        analog: dict[str, float] = {}
+        analog: dict[str, float | None] = {}
         source_keys = {
             "pressure": "pressure",
             "flow": "flow",
@@ -1793,34 +2228,63 @@ class LiveAcquisitionService:
             "sensor_2.humidity": "sensor_2.humidity",
             "sensor_3.humidity": "sensor_3.humidity",
         }
-        for key, source_key in source_keys.items():
-            cached = slot["values"].get(f"input_register.{source_key}") or {}
-            analog[key] = float(cached.get("value") or 0.0)
+        with self._lock:
+            for key, source_key in source_keys.items():
+                cached = slot["values"].get(f"input_register.{source_key}") or {}
+                raw_value = cached.get("value")
+                cached_at = _parse_iso(cached.get("ts"))
+                if cached_at is None or abs((snapshot_ts - cached_at).total_seconds()) > 2.5:
+                    raw_value = None
+                sensor_match = re.fullmatch(r"sensor_(\d)\.(temperature|humidity)", source_key)
+                if sensor_match:
+                    read_ok = slot["values"].get(f"input_register.sensor_{sensor_match.group(1)}.read_ok") or {}
+                    read_ok_at = _parse_iso(read_ok.get("ts"))
+                    if read_ok.get("value") is not True or read_ok_at is None or abs((snapshot_ts - read_ok_at).total_seconds()) > 2.5:
+                        raw_value = None
+                analog[key] = float(raw_value) if raw_value is not None else None
+            breath_state = (slot["values"].get("input_register.breath_state") or {}).get("value")
+            analog["breath_state"] = int(breath_state) if breath_state in {0, 1, 2} else None
+            raw_snapshot = {
+                item_id: cached.get("value")
+                for item_id, cached in slot["values"].items()
+                if isinstance(cached, dict)
+            }
 
         try:
             slot["recorder"].record_environment_snapshot(snapshot_ts, analog)
-        except Exception:
-            self._log_recorder_for_slot(slot, "E", f"env snapshot write failed for {device_id}")
+            slot["recorder"].record_raw_snapshot(snapshot_ts, raw_snapshot)
+            self._clear_recording_error(slot)
+        except Exception as exc:
+            self._mark_recording_error(slot, exc)
 
     def _save_checkpoint_if_due(self, device_id: str) -> None:
         with self._lock:
             slot = self._device_slots.get(device_id)
             if slot is None or slot.get("recorder") is None:
                 return
-            try:
-                slot["recorder"].save_checkpoint(slot["state"])
-            except Exception:
-                pass
+            recorder = slot["recorder"]
+            state = deepcopy(slot["state"])
+        try:
+            recorder.save_checkpoint(state)
+            self._clear_recording_error(slot)
+        except Exception as exc:
+            with self._lock:
+                self._mark_recording_error(slot, exc)
 
     def _recompute_sample_counts(self, slot: dict[str, Any]) -> None:
         values = slot["values"]
         metrics = sum(1 for item in self._catalog if item.get("area") == "input_register" and item["id"] in values)
         statuses = sum(1 for item in self._catalog if item.get("area") == "discrete_input" and item["id"] in values)
-        controls = sum(1 for item in self._catalog if item.get("group") == "control" and item["id"] in values)
+        controls = sum(1 for item in self._catalog if item.get("group") in {"runtime_control", "diagnostic"} and item["id"] in values)
         parameters = sum(
-            1 for item in self._catalog if item.get("group") in {"control", "config", "task"} and item["id"] in values
+            1 for item in self._catalog
+            if item.get("area") == "holding_register"
+            and CONFIG_REGION_START <= int(item.get("address") or -1) < RUNTIME_REGION_START
+            and item["id"] in values
         )
-        history = sum(len(rows) for rows in slot["history"].values())
+        history = sum(len(rows) for rows in slot["history"].values()) + sum(
+            len(rows) for rows in slot.get("history_archive", {}).values()
+        )
         slot["state"]["sample_counts"] = {
             "metrics": metrics,
             "statuses": statuses,
@@ -1867,6 +2331,7 @@ class LiveAcquisitionService:
             })
         return [group for group in grouped_items if group["blocks"]]
 
+    @_serialized_lifecycle
     def poll_slow_group(self, device_id: str) -> dict[str, Any]:
         slot = self._get_device_slot_required(device_id)
         if not slot["state"].get("running"):
@@ -1880,29 +2345,31 @@ class LiveAcquisitionService:
             return {"ok": True, "message": "no parameter polling commands", "blockCount": 0}
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
-        with self._io_lock:
+        with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
+                completed = 0
                 for command in parameter_commands:
-                    self._poll_command(device_id, client, command)
-                    delay_ms = max(0, _safe_int(command.get("delayAfterMs"), 0))
-                    if delay_ms:
-                        time.sleep(min(delay_ms / 1000.0, 5.0))
+                    if self._poll_command(device_id, client, command):
+                        completed += 1
             finally:
                 client.close()
-        now = _now()
-        with self._lock:
-            slot["state"]["last_success_at"] = _iso(now)
-            slot["state"]["last_error"] = None
-            slot["state"]["last_error_at"] = None
-            slot["state"]["consecutive_error_count"] = 0
-            slot["state"]["last_snapshot_at"] = _iso(now)
+        if completed != len(parameter_commands):
+            raise ModbusError("协议版本未通过，参数轮询未执行")
         return {
             "ok": True,
-            "message": f"polled {len(parameter_commands)} parameter commands",
-            "blockCount": len(parameter_commands),
+            "message": f"polled {completed} parameter commands",
+            "blockCount": completed,
         }
+
+    @staticmethod
+    def _strict_bool(value: Any, field_name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{field_name} 必须是布尔值")
 
     def _build_blocks(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sorted_items = sorted(
