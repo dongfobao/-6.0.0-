@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/digital-twin.css?v=8">
   <link rel="stylesheet" href="/valve-controls.css">
   <link rel="stylesheet" href="/trend-workbench.css">
+  <link rel="stylesheet" href="/analysis.css">
   <link rel="stylesheet" href="/sessions.css">
 </head>
 <body>
@@ -18,6 +19,7 @@
       <nav id="nav">
         <button class="nav-item active" data-page="overview">运行总览</button>
         <button class="nav-item" data-page="trends">实时曲线</button>
+        <button class="nav-item" data-page="analysis">数据分析</button>
         <button class="nav-item" data-page="sessions">运行会话</button>
         <button class="nav-item" data-page="control">远程控制</button>
         <button class="nav-item" data-page="configuration">参数配置</button>
@@ -89,6 +91,42 @@
           <select id="trendWindow" hidden aria-hidden="true"><option value="300000">最近5分钟</option><option value="900000" selected>最近15分钟</option><option value="3600000">最近1小时</option><option value="21600000">最近6小时</option></select>
       </section>
 
+
+      <section class="page" data-page-view="analysis">
+        <div class="trend-page-heading"><div><span>SESSION LOG ANALYSIS</span><h2>会话日志与曲线分析</h2><p>同时分析下位机 EasyLogger（SD 卡或串口）与上位机 Modbus V9 采集会话：环境、呼吸、运行日志、热事件、通信异常、配置快照、会话元数据和检查点。</p></div><div class="trend-live-badge offline"><i></i><div><strong>会话分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
+        <div class="panel analysis-import-panel">
+          <div class="analysis-import-actions">
+            <button id="analysisImportFolderBtn" class="button primary">导入会话文件夹</button>
+            <button id="analysisImportFilesBtn" class="button secondary">导入数据文件</button>
+            <button id="analysisClearBtn" class="button secondary">清空</button>
+          </div>
+          <p class="analysis-import-hint">可直接选择下位机 SD 卡导出的 logs/ 文件夹或 serial_output.log（含轮转文件）：按 EasyLogger 的级别、标签、设备时间解析，分类统计并显示。也可同时导入实时采集会话中的 data_0、breath_data、run、heat_events、traffic、config.json、session_meta.json 和 checkpoint.json；有设备时间的记录可通过筛选器标在曲线上，无设备时间的原始串口行仅参与列表与统计。</p>
+          <div id="analysisImportSummary" class="analysis-import-summary">尚未导入数据</div>
+          <div id="analysisRecognition" class="analysis-recognition"></div>
+          <input id="analysisFolderInput" type="file" webkitdirectory directory multiple hidden>
+          <input id="analysisFilesInput" type="file" multiple hidden>
+        </div>
+        <div class="panel trend-query-panel analysis-query-panel">
+          <div class="trend-query-section"><label class="trend-section-label">日期</label><select id="analysisDatePreset"><option value="">全部已导入日期</option></select></div>
+          <div class="trend-query-section trend-time-inputs"><label>开始时间<input id="analysisStart" type="datetime-local"></label><span>至</span><label>结束时间<input id="analysisEnd" type="datetime-local"></label><button id="analysisApplyRangeBtn" class="button primary">应用时间</button></div>
+          <div class="trend-query-section quick-range"><label class="trend-section-label">快捷范围</label><button class="button small secondary" data-analysis-window="900000">15 分钟</button><button class="button small secondary" data-analysis-window="3600000">1 小时</button><button class="button small secondary" data-analysis-window="21600000">6 小时</button><button class="button small secondary" data-analysis-window="86400000">24 小时</button><button class="button small secondary" data-analysis-window="604800000">7 天</button></div>
+        </div>
+        <div class="panel trend-series-panel"><div class="trend-series-head"><div><h3>显示曲线</h3><p>选择需要对比分析的测量量。</p></div></div><div id="analysisToggles" class="trend-toggles"></div></div>
+        <div id="analysisChartPanel" class="panel chart-panel trend-chart-panel">
+          <div class="trend-chart-toolbar"><div class="trend-tool-group"><button id="analysisUndoBtn" title="返回上一视图">↶ 上一步</button><button id="analysisResetBtn" title="重置视图 (R)">↻ 复位</button></div><div class="trend-tool-group"><button id="analysisPanLeftBtn" title="向左平移">←</button><button id="analysisZoomOutBtn" title="缩小时间轴 (-)">时间−</button><button id="analysisZoomInBtn" title="放大时间轴 (+)">时间＋</button><button id="analysisPanRightBtn" title="向右平移">→</button></div><div class="trend-tool-group"><button id="analysisTightenYBtn" title="放大纵轴波动">纵轴＋</button><button id="analysisRelaxYBtn" title="缩小纵轴波动">纵轴−</button></div><div class="trend-tool-group"><button id="analysisToggleLabelsBtn" title="显示曲线数值标签">数值</button><button id="analysisToggleKeyPointsBtn" class="active" title="显示最小、最大和最新点">关键点</button><button id="analysisToggleEventsBtn" class="active" title="在时间线上叠加日志节点">事件</button><button id="analysisLogBtn" title="日志显示和分析">日志</button><button id="analysisFullscreenBtn" title="全屏 (F)">全屏</button></div><div class="trend-tool-group"><button id="analysisExportPngBtn" title="导出当前图像">PNG</button><button id="analysisExportBtn" class="primary" title="导出当前视图数据">CSV</button></div></div>
+          <canvas id="analysisCanvas" class="interactive-chart"></canvas><div id="analysisChartEmpty" class="empty-overlay">请先导入会话数据</div>
+          <div id="analysisTooltip" class="analysis-tooltip hidden"></div>
+          <div class="trend-chart-hint">滚轮缩放 · 拖拽平移 · 悬浮查看精确值 · 顶部时间线叠加日志 · R/F/方向键快捷操作</div>
+        </div>
+        <div class="panel trend-stat-panel"><div class="panel-title"><div><h3>当前视图统计</h3><p>最新值、最小值、最大值、平均值与关键节点数量</p></div></div><div id="analysisStats" class="latest-grid"></div></div>
+        <div id="analysisLogPanel" class="panel analysis-log-panel hidden">
+          <div class="panel-title"><div><h3>日志显示与分析</h3><p>下位机 EasyLogger 日志按业务领域、严重级别和模块统计；筛选器控制带设备时间的曲线事件点，点击条目即可定位。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
+          <div id="analysisEventSummary" class="analysis-event-summary"></div>
+          <div id="analysisEventFilters" class="trend-toggles"></div>
+          <div id="analysisLevelFilters" class="trend-toggles"></div>
+          <div id="analysisLogList" class="event-list analysis-log-list"></div>
+        </div>
+      </section>
 
       <section class="page" data-page-view="sessions">
         <div class="trend-page-heading"><div><span>RUN SESSION ARCHIVE</span><h2>运行会话记录</h2><p>永久保存的历次采集会话：阀门开闭、加热启停、湿度会话起止等详细事件，随时查阅。</p></div><div class="trend-live-badge offline"><i></i><div><strong>历史归档</strong><small id="sessionsSummaryText">未加载</small></div></div></div>
@@ -174,6 +212,7 @@
   <script src="/vendor/GLTFLoader.legacy.js"></script>
   <script src="/digital-twin.js?v=101"></script>
   <script src="/app.js"></script>
+  <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>
 </body>
 </html>

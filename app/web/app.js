@@ -10,7 +10,7 @@ const state = {
   trendEventFilters: new Set(["session_start","session_stop","heat_on","heat_off","humidity","valve_state","config","schedule","other"]), configModule: "sensor_1",
 };
 
-const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",sessions:"运行会话",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
+const PAGE_TITLES = {overview:"运行总览",trends:"实时曲线",analysis:"数据分析",sessions:"运行会话",control:"远程控制",configuration:"参数配置",alarms:"告警事件",diagnostics:"通信诊断",devices:"设备管理"};
 const TREND_EVENT_CATEGORIES = {
   session_start:  { name: "采集开始",    color: "#4ade80", match: /采集开始|session_started/ },
   session_stop:   { name: "采集停止",    color: "#22c55e", match: /采集停止|session_stopped/ },
