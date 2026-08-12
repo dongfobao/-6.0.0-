@@ -62,9 +62,6 @@ def build_default_polling_commands(catalog: list[dict[str, Any]] | None = None) 
     source_catalog = [dict(item) for item in (catalog or get_register_catalog())]
     commands: list[dict[str, Any]] = []
     for group, function_code, start_id, count, auto_poll, delay_ms, name in _DEFAULT_BLOCKS:
-        # 慢速配置块也必须进入调度；sourceGroup 的间隔已经限制了总线负载。
-        if group == "slow":
-            auto_poll = True
         address = int(get_register_item(start_id)["address"])
         commands.append({
             "id": f"v9.{group}.fc{function_code}.{address}.{count}",

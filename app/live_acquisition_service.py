@@ -1964,14 +1964,13 @@ class LiveAcquisitionService:
             failure_key = str(command.get("id") or command.get("name") or "command")
             slot.setdefault("active_failures", set()).discard(failure_key)
             slot["active_failures"].discard("serial_open_failed")
+            # 连续失败描述的是相邻 Modbus 请求，而不是某个轮询块累计失败的
+            # 次数。任意请求成功都应立即打断连续失败；尚未恢复的其他块仍由
+            # active_failures 保留，并在健康状态中显示为“部分轮询异常”。
+            slot["state"]["consecutive_error_count"] = 0
             if not slot["active_failures"]:
                 slot["state"]["last_error"] = None
                 slot["state"]["last_error_at"] = None
-                slot["state"]["consecutive_error_count"] = 0
-            else:
-                slot["state"]["consecutive_error_count"] = max(
-                    1, int(slot["state"].get("consecutive_error_count") or 0)
-                )
             slot["state"]["last_snapshot_at"] = _iso(now)
             self._recompute_sample_counts(slot)
 
@@ -2312,7 +2311,16 @@ class LiveAcquisitionService:
         word_length = int(item.get("wordLength") or 1)
         if len(raw_values) < word_length:
             return None
-        value = decode_words([int(word) for word in raw_values[:word_length]], str(item.get("dataType") or "uint16"))
+        words = [int(word) for word in raw_values[:word_length]]
+        data_type = str(item.get("dataType") or "uint16")
+        if data_type == "float32" and len(words) == 2:
+            # 固件用 IEEE-754 NaN 表示尚未产生的运行时浮点量（例如尚未
+            # 开始加热会话时的起始湿度和预测峰值）。报文通信本身是成功的，
+            # 上位机应将这种值投影为“暂无数据”，不能把整块轮询判为异常。
+            raw_float = ((words[0] & 0xFFFF) << 16) | (words[1] & 0xFFFF)
+            if raw_float & 0x7F800000 == 0x7F800000:
+                return None
+        value = decode_words(words, data_type)
         return round(value, 4) if isinstance(value, float) else value
 
     def _build_group_schedule(self, device: dict[str, Any]) -> list[dict[str, Any]]:

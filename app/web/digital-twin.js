@@ -786,7 +786,7 @@ function buildModelBypassFlow(pipeMeshes) {
   REAL.heatBypassSmoke = addSmokeTrail(path, .011, .52, .012, .42);
 }
 
-function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, upperWorkPortNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode, lowerPipeNode) {
+function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValveNode, upperWorkPortGuideNode, upperValveHousingNode, sensorNode, outletNode, drainValveNode, lowerGlassNode, silicaGridNode, upperGlassNode, insulationNode, upperSilicaNode, drainBaseNode, oilPlateNode, visibleOilCupNode, lowerPipeNode) {
   const localCenterOf = object => rig.worldToLocal(centerOf(object));
   const oilCover = localCenterOf(oilCoverNode || oilCupNode || drainValveNode);
   const oil = localCenterOf(oilCupNode || oilCoverNode || drainValveNode);
@@ -841,14 +841,16 @@ function buildRealProcessEffects(oilCoverNode, oilCupNode, heaterNode, upperValv
   // 空气经侧壁和硅胶向内汇聚后，才从这里沿中心气道持续进入上阀腔体。
   const centerChannelStartY = coreEntry.y + Math.max(.22, Math.min(.38, lowerGlassSize.y * .12));
   const centerChannelStart = new THREE.Vector3(coreX, centerChannelStartY, coreZ);
-  // 工作位气口是上阀腔体左侧朝下的圆孔，使用真实模型“传感器堵头（董）-1”的下沿定位。
-  const workPortVertices = verticesInRig(upperWorkPortNode);
-  const workPortBox = workPortVertices.length ? new THREE.Box3().setFromPoints(workPortVertices) : null;
-  const workPortCenter = workPortBox?.getCenter(new THREE.Vector3())
+  // “传感器堵头（董）-2”仅确定横向方向；真正的工作气口在其正下方，属于“传感器盒体-1”壳体。
+  const workPortGuideVertices = verticesInRig(upperWorkPortGuideNode);
+  const workPortGuideBox = workPortGuideVertices.length ? new THREE.Box3().setFromPoints(workPortGuideVertices) : null;
+  const valveHousingVertices = verticesInRig(upperValveHousingNode);
+  const valveHousingBox = valveHousingVertices.length ? new THREE.Box3().setFromPoints(valveHousingVertices) : null;
+  const workPortCenter = workPortGuideBox?.getCenter(new THREE.Vector3())
     || upper.clone().add(new THREE.Vector3(-.22, -.07, 0));
   const valveChamberEnd = new THREE.Vector3(
     workPortCenter.x,
-    workPortBox ? workPortBox.min.y + .012 : workPortCenter.y,
+    valveHousingBox ? valveHousingBox.min.y + .010 : workPortCenter.y - .05,
     workPortCenter.z,
   );
   const centerSmokeCount = 7;
@@ -1082,6 +1084,7 @@ function loadCadAssembly() {
     let oilCupNode = null;
     let heaterNode = null;
     let sensorNode = null;
+    let upperValveHousingNode = null;
     let outletNode = null;
     let lowerGlassNode = null;
     let upperGlassNode = null;
@@ -1095,10 +1098,10 @@ function loadCadAssembly() {
       const nodeName = `${object.name} ${object.parent?.name || ""}`;
       if (/component_04_/.test(nodeName)) namedLabelNodes.pressure ||= object;
       if (/component_05_/.test(nodeName)) namedLabelNodes.flow ||= object;
-      // 上阀两侧的“传感器堵头-1/-2”分别对应左、右温湿度；
+      // 旁路管上方的“传感器堵头-1”对应右温湿度，另一侧“-2”对应左温湿度。
       // component_06/07 是上传感器仓内同一只上温湿度传感器的两个结构件。
-      if (/component_21_/.test(nodeName)) namedLabelNodes.t1 ||= object;
-      if (/component_22_/.test(nodeName)) namedLabelNodes.t2 ||= object;
+      if (/component_22_/.test(nodeName)) namedLabelNodes.t1 ||= object;
+      if (/component_21_/.test(nodeName)) namedLabelNodes.t2 ||= object;
       if (/component_(06|07)_/.test(nodeName)) (namedLabelNodes.t3 ||= []).push(object);
       if (/component_16_/.test(nodeName) && !lowerGlassNode) lowerGlassNode = object;
       const isGlassShell = object.userData?.digital_twin_role === "outer_shell" || /component_(16|36|51|52)_/.test(nodeName) || nodeName.includes("400玻璃管");
@@ -1125,6 +1128,7 @@ function loadCadAssembly() {
       if (/component_28_/.test(nodeName) && !insulationNode) insulationNode = object;
       if (/component_(29|31)_/.test(nodeName) && !upperSilicaNode) upperSilicaNode = object;
       if (/component_(23|24|25)_/.test(nodeName) && !sensorNode) sensorNode = object;
+      if (/component_24_/.test(nodeName) && !upperValveHousingNode) upperValveHousingNode = object;
       if (/component_(01|02|18|19)_/.test(nodeName) && !outletNode) outletNode = object;
     });
     cadModel.add(gltf.scene);
@@ -1152,13 +1156,13 @@ function loadCadAssembly() {
       let replacementOilPlateNode = null;
       let replacementOilCupNode = null;
       let replacementLowerPipeNode = null;
-      let replacementUpperWorkPortNode = null;
+      const replacementUpperWorkPortNodes = [];
       replacement.scene.traverse(object => {
         if (!object.isMesh) return;
         const role = object.userData?.digital_twin_role || "structure";
         const sourceFile = object.userData?.source_file || "";
         const businessFunction = object.userData?.digital_twin_function || "";
-        if (/传感器堵头（董）-1\.STL/.test(sourceFile)) replacementUpperWorkPortNode ||= object;
+        if (/传感器堵头（董）-2\.STL/.test(sourceFile)) replacementUpperWorkPortNodes.push(object);
         if (businessFunction === "lower_outer_retaining_mesh") {
           object.visible = false;
           return;
@@ -1185,8 +1189,8 @@ function loadCadAssembly() {
                 : role === "support" ? cadMaterials.support
                  : cadMaterials.structure;
         const sensorAlarmKeys = [];
-        if (/传感器堵头.*-1\.STL/.test(sourceFile)) sensorAlarmKeys.push("t1");
-        if (/传感器堵头.*-2\.STL/.test(sourceFile)) sensorAlarmKeys.push("t2");
+        if (/传感器堵头.*-2\.STL/.test(sourceFile)) sensorAlarmKeys.push("t1");
+        if (/传感器堵头.*-1\.STL/.test(sourceFile)) sensorAlarmKeys.push("t2");
         if (/温湿度传感器/.test(sourceFile)) sensorAlarmKeys.push("t3");
         if (/压力-1\.STL/.test(sourceFile)) sensorAlarmKeys.push("pressure");
         if (/流量监测器/.test(sourceFile)) sensorAlarmKeys.push("flow");
@@ -1202,6 +1206,14 @@ function loadCadAssembly() {
       });
       cadModel.add(replacement.scene);
       cadModel.updateMatrixWorld(true);
+      // 新总装会把同一堵头拆成内外两个网格；选择包围体最大的完整外形，避开内部小零件。
+      const replacementUpperWorkPortNode = replacementUpperWorkPortNodes.reduce((largest, candidate) => {
+        const candidateSize = new THREE.Box3().setFromObject(candidate).getSize(new THREE.Vector3());
+        const largestSize = largest
+          ? new THREE.Box3().setFromObject(largest).getSize(new THREE.Vector3())
+          : new THREE.Vector3();
+        return candidateSize.lengthSq() > largestSize.lengthSq() ? candidate : largest;
+      }, null);
       if (REAL.upperValve && REAL.drainValve) {
         buildRealProcessEffects(
           oilCoverNode,
@@ -1209,6 +1221,7 @@ function loadCadAssembly() {
           heaterNode,
           REAL.upperValve,
           replacementUpperWorkPortNode,
+          upperValveHousingNode,
           sensorNode,
           outletNode,
           REAL.drainValve,
@@ -1310,7 +1323,15 @@ function positionTwinDataLabels(){
     const side=projected.x<50?"left":"right";
     items[key]={key,node,leader:twinLeaderNodes[key],side,left:side==="left"?horizontalMargin:100-horizontalMargin,desired:Math.max(verticalMargin,Math.min(100-verticalMargin,projected.y)),height:(node.offsetHeight+10)/height*100,verticalMargin};
   });
-  if(items.t1&&items.t2)items.t2.desired=items.t1.desired;
+  if(items.t1&&items.t2){
+    // 左右温湿度的实体锚点很接近；按当前屏幕横向位置分配标签侧，保证两条直线永不交叉。
+    const t1Target=projectPoint(twinLabelTargets.t1),t2Target=projectPoint(twinLabelTargets.t2);
+    const leftItem=t1Target.x<=t2Target.x?items.t1:items.t2;
+    const rightItem=leftItem===items.t1?items.t2:items.t1;
+    leftItem.side="left";leftItem.left=Math.max(7,(leftItem.node.offsetWidth/2+10)/width*100);
+    rightItem.side="right";rightItem.left=100-Math.max(7,(rightItem.node.offsetWidth/2+10)/width*100);
+    items.t2.desired=items.t1.desired;
+  }
   Object.values(items).forEach(item=>sides[item.side].push(item));
   Object.values(sides).forEach(group=>{
     group.sort((a,b)=>a.desired-b.desired);

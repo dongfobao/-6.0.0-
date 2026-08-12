@@ -78,6 +78,28 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertAlmostEqual(slot["values"]["input_register.sensor_1.humidity"]["value"], 41.7, places=1)
         self.assertEqual(slot["values"]["input_register.sensor_1.status"]["value"], 1)
 
+    def test_unavailable_runtime_float_does_not_fail_the_successful_poll_block(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        command = next(
+            item for item in service._default_polling_commands
+            if item["address"] == 214 and item["functionCode"] == 4
+        )
+        block = service._command_to_block(command)
+        words = [0] * 36
+        words[2:4] = [0x7FC0, 0x0000]
+        words[20:22] = [0x0000, 0x007B]
+
+        service._apply_block_values("dev-a", slot, block, words)
+
+        self.assertIsNone(
+            slot["values"]["input_register.heat_session_1.start_humidity"]["value"]
+        )
+        self.assertEqual(
+            slot["values"]["input_register.runtime.htc1_cumulative_seconds"]["value"],
+            123,
+        )
+
     def test_adding_device_waits_for_old_poller_before_merged_session(self):
         service = SlowStopService()
         service.start_all([{"id": "old", "name": "old", "address": "COM1", "enabled": True}])
@@ -1087,6 +1109,28 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         slot["active_failures"].add("block-a")
         state = service._state_with_health(slot)
         self.assertEqual(state["communication_health"], "warn")
+
+    def test_successful_command_breaks_consecutive_failures_but_keeps_other_block_warning(self):
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "address": "COM1"})
+        slot["state"]["running"] = True
+        failed_command = service._default_polling_commands[0]
+        successful_command = service._default_polling_commands[1]
+
+        for _ in range(3):
+            service._record_device_error(
+                "dev-a",
+                "一个轮询块失败",
+                "read_failed",
+                command=failed_command["id"],
+            )
+        service._record_command_success_event(slot, successful_command, 1)
+
+        state = service._state_with_health(slot)
+        self.assertEqual(state["consecutive_error_count"], 0)
+        self.assertEqual(state["active_failure_count"], 1)
+        self.assertEqual(state["communication_health"], "warn")
+        self.assertEqual(state["communication_text"], "部分轮询异常")
 
     def test_debug_hex_rejects_characters_instead_of_deleting_them(self):
         with self.assertRaises(ValueError):
