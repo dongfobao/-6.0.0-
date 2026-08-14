@@ -1132,6 +1132,39 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(state["communication_health"], "warn")
         self.assertEqual(state["communication_text"], "部分轮询异常")
 
+    def test_fleet_status_identifies_offline_partial_poll_and_point_failures(self):
+        service = LiveAcquisitionService()
+        offline = service._ensure_device_slot({"id": "offline", "name": "整机断联", "address": "COM1"})
+        offline["state"].update({"running": True, "consecutive_error_count": 3})
+        service._record_device_error("offline", "串口无响应", "serial_open_failed", error="timeout")
+
+        partial = service._ensure_device_slot({"id": "partial", "name": "局部异常", "address": "COM2"})
+        partial["state"].update({"running": True, "last_success_at": datetime.now().isoformat(sep=" ")})
+        service._record_device_error(
+            "partial", "流量块失败", "read_failed", command="v9.fast.fc4.200.14",
+            command_name="压力、流量与呼吸状态", function_code=4, address=200, count=14,
+            source_group="fast", error="timeout",
+        )
+
+        point = service._ensure_device_slot({"id": "point", "name": "测点异常", "address": "COM3"})
+        point["state"].update({"running": True, "last_success_at": datetime.now().isoformat(sep=" ")})
+        point["values"]["input_register.sensor_2.read_ok"] = {"value": False, "ts": "2026-08-13 10:00:00"}
+        point["values"]["input_register.sensor_2.status"] = {"value": 1, "ts": "2026-08-13 10:00:00"}
+
+        fleet = service.get_fleet_status([
+            {"id": "offline", "name": "整机断联", "address": "COM1"},
+            {"id": "partial", "name": "局部异常", "address": "COM2"},
+            {"id": "point", "name": "测点异常", "address": "COM3"},
+            {"id": "idle", "name": "未启动", "address": "COM4"},
+        ])
+
+        self.assertEqual(fleet["offline"]["issue_kind"], "device_offline")
+        self.assertEqual(fleet["partial"]["issue_kind"], "partial_poll")
+        self.assertEqual(fleet["partial"]["poll_diagnostics"][0]["address"], 200)
+        self.assertEqual(fleet["point"]["issue_kind"], "partial_data")
+        self.assertEqual(fleet["point"]["data_issues"][0]["name"], "温湿度2")
+        self.assertEqual(fleet["idle"]["issue_kind"], "idle")
+
     def test_debug_hex_rejects_characters_instead_of_deleting_them(self):
         with self.assertRaises(ValueError):
             LiveAcquisitionService._parse_debug_hex("GG 01 03 00 00 00 01")

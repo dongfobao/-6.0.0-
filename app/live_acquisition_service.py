@@ -134,6 +134,7 @@ class LiveAcquisitionService:
             "traffic_seq": 0,
             "protocol_rejected": False,
             "active_failures": set(),
+            "poll_diagnostics": {},
         }
 
     def _port_io_lock(self, port_key: str) -> threading.RLock:
@@ -527,13 +528,106 @@ class LiveAcquisitionService:
         with self._lock:
             return {device_id: self._state_with_health(slot) for device_id, slot in self._device_slots.items()}
 
+    def get_fleet_status(self, devices: Iterable[dict[str, Any]]) -> dict[str, Any]:
+        """返回完整设备清单状态，包括从未启动、已禁用和当前无槽位的设备。"""
+        result: dict[str, Any] = {}
+        for device in devices:
+            device_id = str(device.get("id") or "")
+            if not device_id:
+                continue
+            slot = self._get_device_slot(device_id)
+            if slot is None:
+                state = self._empty_device_state(device)
+                state.update({
+                    "enabled": bool(device.get("enabled", True)),
+                    "address": str(device.get("address") or ""),
+                    "slave_id": _safe_int(device.get("slaveId"), 1),
+                    "active_failure_count": 0,
+                    "data_issue_count": 0,
+                    "data_issues": [],
+                    "poll_diagnostics": [],
+                    "issue_kind": "disabled" if not device.get("enabled", True) else "idle",
+                })
+                result[device_id] = state
+                continue
+            with self._lock:
+                state = self._state_with_health(slot)
+            state.update({
+                "enabled": bool(device.get("enabled", True)),
+                "address": str(device.get("address") or ""),
+                "slave_id": _safe_int(device.get("slaveId"), 1),
+            })
+            result[device_id] = state
+        return result
+
     def _state_with_health(self, slot: dict[str, Any]) -> dict[str, Any]:
         state = deepcopy(slot["state"])
-        state["active_failure_count"] = len(slot.get("active_failures") or ())
+        active_failures = set(slot.get("active_failures") or ())
+        diagnostics = deepcopy(slot.get("poll_diagnostics") or {})
+        state["active_failure_count"] = len(active_failures)
+        state["poll_diagnostics"] = sorted(
+            diagnostics.values(),
+            key=lambda item: (not bool(item.get("active")), str(item.get("name") or item.get("id") or "")),
+        )
+        state["data_issues"] = self._build_data_issues(slot)
+        state["data_issue_count"] = len(state["data_issues"])
+        state["issue_kind"] = self._classify_issue_kind(state)
         health, text = self._compute_health(state, _now())
         state["communication_health"] = health
         state["communication_text"] = text
         return state
+
+    @staticmethod
+    def _build_data_issues(slot: dict[str, Any]) -> list[dict[str, Any]]:
+        """生成设备内部的测点级异常，不与整机串口失败混为一谈。"""
+        issues: list[dict[str, Any]] = []
+        values = slot.get("values") or {}
+        for index in range(1, 4):
+            prefix = f"input_register.sensor_{index}"
+            read_ok = values.get(f"{prefix}.read_ok") or {}
+            status = values.get(f"{prefix}.status") or {}
+            if read_ok.get("value") is False or (
+                status.get("value") is not None and int(status.get("value") or 0) != 0
+            ):
+                issues.append({
+                    "key": f"sensor_{index}",
+                    "name": f"温湿度{index}",
+                    "kind": "point_invalid",
+                    "text": "传感器无有效数据",
+                    "status": status.get("value"),
+                    "updated_at": read_ok.get("ts") or status.get("ts"),
+                })
+        for point_id, name in (
+            ("input_register.pressure_status", "压力"),
+            ("input_register.flow_status", "流量"),
+        ):
+            point = values.get(point_id) or {}
+            if point.get("value") is not None and int(point.get("value") or 0) != 0:
+                issues.append({
+                    "key": point_id.removeprefix("input_register.").removesuffix("_status"),
+                    "name": name,
+                    "kind": "point_invalid",
+                    "text": "测量数据无效",
+                    "status": point.get("value"),
+                    "updated_at": point.get("ts"),
+                })
+        return issues
+
+    @staticmethod
+    def _classify_issue_kind(state: dict[str, Any]) -> str:
+        if not state.get("running"):
+            return "idle"
+        if state.get("recording_error"):
+            return "recording"
+        if int(state.get("consecutive_error_count") or 0) >= 3:
+            return "device_offline"
+        if state.get("last_success_at") is None:
+            return "no_data"
+        if int(state.get("active_failure_count") or 0) > 0:
+            return "partial_poll"
+        if int(state.get("data_issue_count") or 0) > 0:
+            return "partial_data"
+        return "healthy"
 
     @staticmethod
     def _compute_health(state: dict[str, Any], now: datetime) -> tuple[str, str]:
@@ -545,6 +639,7 @@ class LiveAcquisitionService:
         consecutive_errors = max(0, _safe_int(state.get("consecutive_error_count"), 0))
         has_error = bool(state.get("last_error"))
         active_failures = max(0, _safe_int(state.get("active_failure_count"), 0))
+        data_issues = max(0, _safe_int(state.get("data_issue_count"), 0))
 
         if state.get("recording_error"):
             return "warn", "会话记录异常"
@@ -552,6 +647,8 @@ class LiveAcquisitionService:
             if consecutive_errors >= 3:
                 return "error", "连续通信异常"
             return "warn", "部分轮询异常"
+        if data_issues:
+            return "warn", "个别数据异常"
 
         if last_success is not None:
             age_ms = (now - last_success).total_seconds() * 1000.0
@@ -1857,6 +1954,11 @@ class LiveAcquisitionService:
                         _format_error_message(f"read failed for {command_label}", exc),
                         "read_failed",
                         command=command.get("id"),
+                        command_name=command_label,
+                        function_code=command.get("functionCode"),
+                        address=command.get("address"),
+                        count=command.get("count"),
+                        source_group=command.get("sourceGroup"),
                         error=str(exc).strip() or exc.__class__.__name__,
                     )
                     command_ok = False
@@ -1907,7 +2009,21 @@ class LiveAcquisitionService:
         with self._lock:
             failure_key = str(details.get("command") or event_type)
             slot.setdefault("active_failures", set()).add(failure_key)
-            slot["state"]["last_error_at"] = _iso(_now())
+            timestamp = _iso(_now())
+            diagnostic = slot.setdefault("poll_diagnostics", {}).setdefault(failure_key, {})
+            diagnostic.update({
+                "id": failure_key,
+                "name": str(details.get("command_name") or failure_key),
+                "function_code": details.get("function_code"),
+                "address": details.get("address"),
+                "count": details.get("count"),
+                "source_group": details.get("source_group"),
+                "active": True,
+                "failure_count": int(diagnostic.get("failure_count") or 0) + 1,
+                "last_failure_at": timestamp,
+                "last_error": str(details.get("error") or message),
+            })
+            slot["state"]["last_error_at"] = timestamp
             slot["state"]["last_error"] = message
             slot["state"]["error_count"] = int(slot["state"].get("error_count") or 0) + 1
             slot["state"]["consecutive_error_count"] = int(slot["state"].get("consecutive_error_count") or 0) + 1
@@ -1964,6 +2080,21 @@ class LiveAcquisitionService:
             failure_key = str(command.get("id") or command.get("name") or "command")
             slot.setdefault("active_failures", set()).discard(failure_key)
             slot["active_failures"].discard("serial_open_failed")
+            diagnostic = slot.setdefault("poll_diagnostics", {}).setdefault(failure_key, {
+                "id": failure_key,
+                "name": str(command.get("name") or failure_key),
+                "function_code": command.get("functionCode"),
+                "address": command.get("address"),
+                "count": command.get("count"),
+                "source_group": command.get("sourceGroup"),
+                "failure_count": 0,
+            })
+            diagnostic["active"] = False
+            diagnostic["last_success_at"] = _iso(now)
+            serial_diagnostic = slot.setdefault("poll_diagnostics", {}).get("serial_open_failed")
+            if serial_diagnostic is not None:
+                serial_diagnostic["active"] = False
+                serial_diagnostic["last_success_at"] = _iso(now)
             # 连续失败描述的是相邻 Modbus 请求，而不是某个轮询块累计失败的
             # 次数。任意请求成功都应立即打断连续失败；尚未恢复的其他块仍由
             # active_failures 保留，并在健康状态中显示为“部分轮询异常”。

@@ -36,10 +36,6 @@
         <div class="top-actions">
           <select id="deviceSelect" aria-label="当前显示设备" title="选择要查看数据的设备（显示/查询始终为单台）"></select>
           <span id="connectionBadge" class="status-badge idle"><i></i><span>待采集</span></span>
-          <span class="monitor-device-group">
-            <button id="monitorDeviceBtn" class="button secondary" type="button" title="勾选需要同时采集记录的设备；同串口多台设备会顺序轮询并分别保存会话">采集设备 ▾</button>
-            <div id="monitorDeviceDropdown" class="monitor-device-dropdown hidden"></div>
-          </span>
           <button id="startBtn" class="button primary" title="启动勾选设备的采集">启动监控</button>
           <button id="stopBtn" class="button danger ghost" title="停止勾选设备的采集">停止</button>
         </div>
@@ -190,7 +186,7 @@
       </section>
 
       <section class="page" data-page-view="devices">
-        <div class="panel-title page-panel-title"><div><h2>设备管理</h2><p>配置串口、从站地址和轮询参数</p></div><button id="addDeviceBtn" class="button primary">添加设备</button></div>
+        <div class="panel-title page-panel-title"><div><h2>设备管理</h2><p>在设备卡片中勾选参与统一采集的设备，并查看每台设备自己的通信状态</p></div><button id="addDeviceBtn" class="button primary">添加设备</button></div>
         <div id="deviceCards" class="device-grid"></div>
       </section>
     </main>
@@ -210,7 +206,7 @@
   </dialog>
   <script src="/vendor/three.legacy.js"></script>
   <script src="/vendor/GLTFLoader.legacy.js"></script>
-  <script src="/digital-twin.js?v=101"></script>
+  <script src="/digital-twin.js?v=104"></script>
   <script src="/app.js"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>

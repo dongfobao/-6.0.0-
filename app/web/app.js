@@ -5,6 +5,7 @@ const state = {
   bootstrap: null, devices: [], selectedDeviceId: null, snapshot: null,
   series: { byMetric: {}, rows: [] }, parameters: [], events: [], traffic: [], trafficLoading: false,
   deviceStatuses: {}, monitorSelection: new Set(),
+  deviceCardsSignature: "",
   activePage: "overview", refreshTimer: null, trendTimer: null, trendRequestId: 0, liveRequestId: 0, parameterRequestId: 0, eventRequestId: 0, trafficRequestId: 0,
   trendQuery: {windowMs: 900000, start: null, end: null}, trendViewport: null, trendViewportHistory: [], trendDrag: null, trendSelectionDraft: null, trendShowLabels: false, trendShowKeyPoints: true, trendShowEvents: true, trendYScale: 1,
   trendEventFilters: new Set(["session_start","session_stop","heat_on","heat_off","humidity","valve_state","config","schedule","other"]), configModule: "sensor_1",
@@ -64,7 +65,8 @@ async function bootstrap(){
   state.bootstrap=await api("/api/bootstrap");
   state.devices=state.bootstrap.devices.devices||[];
   state.selectedDeviceId=state.bootstrap.devices.selectedDeviceId || state.devices[0]?.id || null;
-  state.monitorSelection=new Set(state.selectedDeviceId?[state.selectedDeviceId]:[]);
+  const runningIds=Object.entries(state.bootstrap.deviceStatuses||{}).filter(([,status])=>status?.running).map(([id])=>id);
+  state.monitorSelection=new Set(runningIds.length?runningIds:(state.selectedDeviceId?[state.selectedDeviceId]:[]));
   renderDeviceSelector();renderDevices();renderTrendToggles();buildControlButtons();
   await refreshAll();
   clearInterval(state.refreshTimer); state.refreshTimer=setInterval(refreshLive,1000);
@@ -72,9 +74,19 @@ async function bootstrap(){
 }
 
 function renderDeviceSelector(){
-  $("deviceSelect").innerHTML=state.devices.length?state.devices.map(d=>`<option value="${esc(d.id)}" ${d.id===state.selectedDeviceId?"selected":""} ${d.enabled?"":"disabled"}>${esc(d.name)} · ${esc(d.address)} / ${d.slaveId}${d.enabled?"":"（已禁用）"}</option>`).join(""):`<option value="">请先添加设备</option>`;
+  $("deviceSelect").innerHTML=state.devices.length?state.devices.map(d=>{const s=state.deviceStatuses?.[d.id],mark=s?.communication_health==="error"?"● ":s?.communication_health==="warn"?"▲ ":s?.communication_health==="ok"?"✓ ":"";return `<option value="${esc(d.id)}" ${d.id===state.selectedDeviceId?"selected":""} ${d.enabled?"":"disabled"}>${mark}${esc(d.name)} · ${esc(d.address)} / ${d.slaveId}${d.enabled?"":"（已禁用）"}</option>`}).join(""):`<option value="">请先添加设备</option>`;
 }
 
+function fleetIssueMeta(status={}){
+  const kind=status.issue_kind||"idle",activeBlocks=(status.poll_diagnostics||[]).filter(item=>item.active),dataIssues=status.data_issues||[];
+  if(kind==="device_offline"||kind==="no_data")return {level:"error",title:"整机无数据",detail:status.last_error||"尚未收到任何有效 Modbus 数据"};
+  if(kind==="partial_poll")return {level:"warn",title:"部分数据块不通",detail:activeBlocks.map(item=>`${item.name}${item.function_code?`（FC${String(item.function_code).padStart(2,"0")} ${item.address}/${item.count}）`:""}`).join("；")||status.last_error||"存在失败轮询块"};
+  if(kind==="partial_data")return {level:"warn",title:"个别测点无效",detail:dataIssues.map(item=>item.name).join("、")||"存在无效测量值"};
+  if(kind==="recording")return {level:"warn",title:"记录异常",detail:status.recording_error||"会话文件写入失败"};
+  if(kind==="healthy")return {level:"ok",title:"数据正常",detail:`最近接收 ${status.last_success_at||"--"}`};
+  if(kind==="disabled")return {level:"idle",title:"已禁用",detail:"设备未参与统一采集"};
+  return {level:"idle",title:status.running?"等待首次数据":"未启动采集",detail:status.running?"已启动，尚未收到有效数据":"设备当前未采集"};
+}
 async function refreshAll(){await Promise.allSettled([refreshLive(),refreshParameters(),refreshEvents(),refreshTraffic(),refreshSeries()]);}
 async function refreshLive(){
   if(!state.selectedDeviceId){renderEmptySnapshot();return;}
@@ -92,42 +104,13 @@ function renderAcquisitionStatus(payload){
   state.deviceStatuses=payload.devices||{};
   const status=state.deviceStatuses[state.selectedDeviceId];
   setConnection(status?.communication_health||"idle",status?.communication_text||"待采集");
-  updateMonitorDeviceStates();
+  renderDeviceSelector();
+  if(state.activePage==="devices")renderDevices();
   updateMonitorButtons();
 }
 function pruneMonitorSelection(){
   const valid=new Set(state.devices.map(d=>d.id));
   state.monitorSelection=new Set([...state.monitorSelection].filter(id=>valid.has(id)));
-  if(!state.monitorSelection.size&&state.selectedDeviceId)state.monitorSelection.add(state.selectedDeviceId);
-}
-function renderMonitorDevicePicker(){
-  pruneMonitorSelection();
-  const host=$("monitorDeviceDropdown");
-  host.innerHTML=state.devices.length?state.devices.map(d=>{
-    const checked=state.monitorSelection.has(d.id)?"checked":"";
-    const running=Boolean(state.deviceStatuses?.[d.id]?.running);
-    return `<label class="monitor-device-item"><input type="checkbox" data-monitor-device="${esc(d.id)}" ${checked}><span class="monitor-device-meta"><strong>${esc(d.name)}</strong><small>${esc(d.address)} · 从站 ${d.slaveId}</small></span><i class="monitor-device-state ${running?"on":""}">${running?"采集中":"未采集"}</i></label>`;
-  }).join(""):'<div class="empty-state">暂无设备，请先在设备管理中添加</div>';
-  host.querySelectorAll("input[data-monitor-device]").forEach(input=>{
-    input.addEventListener("change",()=>{
-      input.checked?state.monitorSelection.add(input.dataset.monitorDevice):state.monitorSelection.delete(input.dataset.monitorDevice);
-      updateMonitorDeviceStates();
-      updateMonitorButtons();
-    });
-    input.addEventListener("click",(e)=>e.stopPropagation());
-  });
-  updateMonitorDeviceStates();
-  updateMonitorButtons();
-}
-function updateMonitorDeviceStates(){
-  const dropdown=$("monitorDeviceDropdown");
-  if(dropdown)dropdown.querySelectorAll("input[data-monitor-device]").forEach(input=>{
-    const running=Boolean(state.deviceStatuses?.[input.dataset.monitorDevice]?.running);
-    const badge=input.closest(".monitor-device-item")?.querySelector(".monitor-device-state");
-    if(badge){badge.classList.toggle("on",running);badge.textContent=running?"采集中":"未采集";}
-  });
-  const btn=$("monitorDeviceBtn");
-  if(btn)btn.textContent=`采集设备 (${state.monitorSelection.size}) ▾`;
 }
 function updateMonitorButtons(){
   const checked=[...state.monitorSelection];
@@ -511,11 +494,10 @@ async function sendDebugFrame(){
 }
 function renderDiagnostics(){const c=state.snapshot?.communication,s=state.snapshot?.session;if(!c)return;$("diagnosticStats").innerHTML=[["通信健康",c.text,""],["连续失败",fmt(c.failureCount.value,0),"次"],["请求总数",fmt(s?.request_count,0),"次"],["最近成功",s?.last_success_at||"--",""]].map(([name,value,unit])=>`<article class="hero-card"><span>${name}</span><strong>${esc(value)}</strong><em>${unit}</em></article>`).join("");}
 
-function renderDevices(){const selected=state.selectedDeviceId;$("deviceCards").innerHTML=state.devices.length?state.devices.map(d=>`<article class="device-card ${d.id===selected?"selected":""}"><div class="card-head"><h3>${esc(d.name)}</h3><span class="state-pill ${d.enabled?'ok':''}">${d.enabled?'已启用':'已禁用'}</span></div><div class="device-meta"><span>端口</span><strong>${esc(d.address)}</strong><span>从站</span><strong>${d.slaveId}</strong><span>串口</span><strong>${d.baudrate} ${d.parity}81</strong><span>协议</span><strong>V9 RTU</strong></div><div class="device-actions"><button class="button small primary" data-select-device="${esc(d.id)}" ${d.enabled?"":"disabled"}>选择</button><button class="button small secondary" data-edit-device="${esc(d.id)}">编辑</button><button class="button small danger ghost" data-delete-device="${esc(d.id)}">删除</button></div></article>`).join(""):'<div class="empty-state panel">暂无设备，点击“添加设备”开始配置。</div>';
+function renderDevices(){pruneMonitorSelection();const selected=state.selectedDeviceId,signature=JSON.stringify(state.devices.map(d=>{const s=state.deviceStatuses?.[d.id]||{};return [d.id,d.name,d.address,d.slaveId,d.enabled,d.id===selected,state.monitorSelection.has(d.id),s.running,s.issue_kind,s.communication_health,s.consecutive_error_count,(s.poll_diagnostics||[]).filter(x=>x.active).map(x=>x.id),(s.data_issues||[]).map(x=>x.key)]}));if(signature===state.deviceCardsSignature)return;state.deviceCardsSignature=signature;$("deviceCards").innerHTML=state.devices.length?state.devices.map(d=>{const status=state.deviceStatuses?.[d.id]||{issue_kind:d.enabled?"idle":"disabled"},meta=fleetIssueMeta(status),blocks=(status.poll_diagnostics||[]).filter(item=>item.active),issues=status.data_issues||[],checked=state.monitorSelection.has(d.id);return `<article class="device-card ${d.id===selected?"selected":""} health-${meta.level}"><div class="card-head"><div><h3>${esc(d.name)}</h3><small>${esc(d.address)} · 从站 ${d.slaveId}</small></div><span class="state-pill ${meta.level==='ok'?'ok':meta.level==='error'?'fault':''}">${esc(meta.title)}</span></div><label class="device-monitor-choice ${d.enabled?'':'disabled'}"><input type="checkbox" data-monitor-device="${esc(d.id)}" ${checked?'checked':''} ${d.enabled?'':'disabled'}><span><strong>参与统一采集</strong><small>${status.running?'当前正在采集，取消勾选后可用顶部“停止”结束':'勾选后使用顶部“启动监控”'}</small></span></label><div class="device-health-detail"><div><span>通信状态</span><strong>${esc(meta.title)}</strong></div><p>${esc(meta.detail)}</p>${blocks.length||issues.length?`<div class="device-issue-tags">${blocks.map(item=>`<span>${esc(item.name)} · FC${String(item.function_code||'--').padStart(2,'0')} ${item.address??'--'}/${item.count??'--'}</span>`).join('')}${issues.map(item=>`<span>${esc(item.name)} · ${esc(item.text)}</span>`).join('')}</div>`:''}<small>最近成功：${esc(status.last_success_at||'--')}　连续失败：${Number(status.consecutive_error_count||0)} 次</small></div><div class="device-meta"><span>串口参数</span><strong>${d.baudrate} ${d.parity}81</strong><span>协议</span><strong>V9 RTU</strong></div><div class="device-actions"><button class="button small primary" data-select-device="${esc(d.id)}" ${d.enabled?"":"disabled"}>显示此设备</button><button class="button small secondary" data-edit-device="${esc(d.id)}">编辑</button><button class="button small danger ghost" data-delete-device="${esc(d.id)}">删除</button></div></article>`}).join(""):'<div class="empty-state panel">暂无设备，点击“添加设备”开始配置。</div>';
   document.querySelectorAll("[data-select-device]").forEach(b=>b.addEventListener("click",()=>selectDevice(b.dataset.selectDevice)));
   document.querySelectorAll("[data-edit-device]").forEach(b=>b.addEventListener("click",()=>openDeviceDialog(state.devices.find(d=>d.id===b.dataset.editDevice))));
   document.querySelectorAll("[data-delete-device]").forEach(b=>b.addEventListener("click",()=>deleteDevice(b.dataset.deleteDevice)));
-  renderMonitorDevicePicker();
 }
 async function openDeviceDialog(device=null){
   try{const bootstrap=await api("/api/bootstrap");state.bootstrap={...(state.bootstrap||{}),...bootstrap};}catch(error){showNotice(`串口列表刷新失败：${error.message}`,"error");}
@@ -529,7 +511,7 @@ async function deleteDevice(id){if(!confirm("确定删除该设备配置？"))re
 
 async function startMonitoring(){
   const ids=[...state.monitorSelection].filter(id=>state.devices.some(d=>d.id===id&&d.enabled));
-  if(!ids.length)return showNotice("请先在“采集设备”中勾选要监控的设备","error");
+  if(!ids.length)return showNotice("请先在“设备管理”卡片中勾选参与采集的设备","error");
   try{
     await api("/api/acquisition/start",{method:"POST",body:JSON.stringify({deviceIds:ids})});
     showNotice(`监控已启动：${ids.length} 台设备同时采集，数据分别保存`);
@@ -549,13 +531,12 @@ async function stopMonitoring(){
     await refreshLive();
   }catch(error){showNotice(error.message,"error");}
 }
-function switchPage(page){state.activePage=page;document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.page===page));document.querySelectorAll(".page").forEach(n=>n.classList.toggle("active",n.dataset.pageView===page));$("pageTitle").textContent=PAGE_TITLES[page];if(page==="trends"){state.trendHover=null;state.trendHoverEvent=null;refreshSeries();}if(page==="configuration")refreshParameters();if(page==="alarms")refreshEvents();if(page==="diagnostics")refreshTraffic();if(page==="sessions"&&typeof sessionArchiveRefresh==="function")sessionArchiveRefresh();}
+function switchPage(page){state.activePage=page;document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.page===page));document.querySelectorAll(".page").forEach(n=>n.classList.toggle("active",n.dataset.pageView===page));$("pageTitle").textContent=PAGE_TITLES[page];if(page==="trends"){state.trendHover=null;state.trendHoverEvent=null;refreshSeries();}if(page==="configuration")refreshParameters();if(page==="alarms")refreshEvents();if(page==="diagnostics")refreshTraffic();if(page==="devices")renderDevices();if(page==="sessions"&&typeof sessionArchiveRefresh==="function")sessionArchiveRefresh();}
 
 function bind(){
   document.querySelectorAll(".nav-item").forEach(n=>n.addEventListener("click",()=>switchPage(n.dataset.page)));
   $("deviceSelect").addEventListener("change",()=>selectDevice($("deviceSelect").value));$("startBtn").addEventListener("click",startMonitoring);$("stopBtn").addEventListener("click",stopMonitoring);
-  $("monitorDeviceBtn").addEventListener("click",(e)=>{e.stopPropagation();$("monitorDeviceDropdown").classList.toggle("hidden");});
-  document.addEventListener("click",(e)=>{if(!e.target.closest(".monitor-device-group"))$("monitorDeviceDropdown").classList.add("hidden");});
+  $("deviceCards").addEventListener("change",event=>{const input=event.target.closest("input[data-monitor-device]");if(!input)return;input.checked?state.monitorSelection.add(input.dataset.monitorDevice):state.monitorSelection.delete(input.dataset.monitorDevice);updateMonitorButtons();});
   $("refreshTrendBtn").addEventListener("click",refreshSeries);$("trendWindow").addEventListener("change",()=>applyTrendWindow(Number($("trendWindow").value)));document.querySelectorAll("[data-trend-window]").forEach(button=>button.addEventListener("click",()=>applyTrendWindow(Number(button.dataset.trendWindow))));$("applyTrendRangeBtn").addEventListener("click",applyTrendRangeFromInputs);$("zoomInTrendBtn").addEventListener("click",()=>zoomTrend(.65));$("zoomOutTrendBtn").addEventListener("click",()=>zoomTrend(1.55));$("resetTrendZoomBtn").addEventListener("click",resetTrendViewport);$("exportTrendBtn").addEventListener("click",exportTrendCsv);setupTrendInteractions();bindTrendWorkbench();window.addEventListener("resize",()=>state.activePage==="trends"&&drawTrendChart());
   $("resetAllValvesBtn").addEventListener("click",()=>writeControl("holding.runtime.reset",7));
   $("refreshConfigBtn").addEventListener("click",async()=>{try{await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId:state.selectedDeviceId})});await refreshParameters();showNotice("参数读取完成");}catch(e){showNotice(e.message,"error");}});

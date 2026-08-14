@@ -65,6 +65,7 @@ def _serial_ports() -> list[dict[str, str]]:
 def build_bootstrap_payload() -> dict[str, Any]:
     devices = load_live_devices(LIVE_DEVICES_PATH)
     service = _service()
+    device_items = devices.get("devices", [])
     return {
         "app": {
             "name": "YLDQ 6.0 远程监控系统",
@@ -77,7 +78,7 @@ def build_bootstrap_payload() -> dict[str, Any]:
         "catalogSummary": get_register_catalog_summary(),
         "pollingPlan": build_default_polling_commands(),
         "acquisition": service.get_status(),
-        "deviceStatuses": service.get_device_status(),
+        "deviceStatuses": service.get_fleet_status(device_items),
     }
 
 
@@ -135,7 +136,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/catalog":
             return self._json({"summary": get_register_catalog_summary(), "items": get_register_catalog()})
         if path == "/api/acquisition/status":
-            return self._json({"global": service.get_status(), "devices": service.get_device_status()})
+            devices = load_live_devices(LIVE_DEVICES_PATH).get("devices", [])
+            return self._json({"global": service.get_status(), "devices": service.get_fleet_status(devices)})
         if path == "/api/monitor/snapshot":
             devices = load_live_devices(LIVE_DEVICES_PATH)
             device_id = device_id or devices.get("selectedDeviceId")

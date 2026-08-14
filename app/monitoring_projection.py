@@ -126,6 +126,11 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "t3": alarm_bit(8) or alarm_bit(28) or alarm_bit(30),
         "t2": alarm_bit(29),
     }
+    equipment_module_alarms = {
+        # 功率板过热或任一路主加热输出故障，都应突出单管设备的 HTC 三角加热架。
+        "heater": alarm_bit(4) or alarm_bit(5) or alarm_bit(6),
+        "antifreeze": alarm_bit(7),
+    }
     control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
     controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
     runtime_valves = []
@@ -201,6 +206,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "active": alarm_active,
             "groups": alarm_items,
             "sensorModules": sensor_module_alarms,
+            "equipmentModules": equipment_module_alarms,
         },
         "communication": {
             "online": _take(by_id, "input_register.communication.online"),

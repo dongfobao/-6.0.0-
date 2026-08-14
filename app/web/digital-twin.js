@@ -121,7 +121,7 @@ cadModel.visible = false;
 rig.add(cadModel);
 const realEffects = new THREE.Group();
 rig.add(realEffects);
-const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], sensorAlarmMeshes: { t1: [], t2: [], t3: [], pressure: [], flow: [] }, centerChannelSmokes: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, oilSurface: null, oilBubbles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
+const REAL = { upperValve: null, drainValve: null, visualUpperValves: [], visualDrainValves: [], bypassMeshes: [], heatMeshes: [], shellMeshes: [], antifreezeAlarmMeshes: [], sensorAlarmMeshes: { t1: [], t2: [], t3: [], pressure: [], flow: [] }, centerChannelSmokes: [], lowerDiffusionParticles: [], silicaFlowParticles: [], upperDiffusionParticles: [], upperSilicaParticles: [], sensorParticles: [], inletSmokeTrails: [], lowerSmokeTrails: [], heatBypassSmoke: null, oilVolume: null, oilSurface: null, oilBubbles: [], waterParticles: [], slopeWaterParticles: [], steamParticles: [], heatShells: [], condensationDrops: [], valveDrops: [], airTube: null, sensorTube: null, heatLight: null, upperHalo: null, drainHalo: null, upperMotion: null, drainMotion: null };
 const VALVE_ANIMATION = {
   upper: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
   drain: { axis: 0, startAxis: 0, lastStable: null, target: null, wasMoving: false },
@@ -1169,7 +1169,10 @@ function loadCadAssembly() {
         }
         const isUpperMovingValve = /传感器动.*双向电磁阀/.test(sourceFile);
         const isDrainMovingValve = /新下传感器.*双向电磁阀/.test(sourceFile);
+        // 新下传感器阀主体是斜面底盘下方的小型阀体；真正与玻璃罩近似等径的
+        // 排水阀门、防冻加热仓斜面底盘，在模型中命名为“下链接座(塑料）”。
         const isDrainSlopeHousing = /新下传感器.*阀主体|阀主体1\.8\.3/.test(sourceFile);
+        const isAntifreezeChamber = /下链接座/.test(sourceFile);
         const isValveHardware = /双向电磁阀|阀主体|微动开关/.test(sourceFile) && !isDrainSlopeHousing;
         const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile) || isDrainSlopeHousing;
         const isBypassPipe = businessFunction === "heat_bypass_pipe";
@@ -1198,6 +1201,10 @@ function loadCadAssembly() {
           object.userData.sensorNormalMaterial ||= object.material;
           REAL.sensorAlarmMeshes[key].push(object);
         });
+        if (isAntifreezeChamber) {
+          object.userData.antifreezeNormalMaterial ||= object.material;
+          REAL.antifreezeAlarmMeshes.push(object);
+        }
         object.renderOrder = isBypassPipe ? 10 : isValveHardware ? 9 : (isDrainChamber || role === "outer_shell") ? 5 : role === "desiccant" ? 4 : 7;
         if (isBypassPipe) REAL.bypassMeshes.push(object);
         if (isHeatingElement) REAL.heatMeshes.push(object);
@@ -1251,7 +1258,12 @@ function loadCadAssembly() {
   });
 }
 
-function value(point) { const n = Number(point?.value); return Number.isFinite(n) ? n : null; }
+function value(point) {
+  const raw = point?.value;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
 function valveState(valve) { return { position: value(valve?.position), moving: value(valve?.actuatorState) === 1, fault: value(valve?.faultReason) > 0 || value(valve?.actuatorState) === 2, label: valve?.position?.displayValue || "无有效数据" }; }
 function outputState(snapshot, key) { return value((snapshot?.outputs || []).find(item => item.key === key)?.state); }
 function setStatus(rows) { statusHost.innerHTML = rows.map(([name, text, state]) => `<div><dt>${name}</dt><dd class="${state || ""}">${text}</dd></div>`).join(""); }
@@ -1274,6 +1286,17 @@ function sensorAlarmStates(snapshot) {
     // 全局湿度/温度越限只由上温湿度传感器产生，分别对应 bit8 和 bit28。
     t3: alarmBit(snapshot, 8) || alarmBit(snapshot, 28) || alarmBit(snapshot, 30),
     t2: alarmBit(snapshot, 29),
+  };
+}
+
+function equipmentAlarmStates(snapshot) {
+  const projected = snapshot?.alarms?.equipmentModules;
+  if (projected && typeof projected === "object") {
+    return { heater: Boolean(projected.heater), antifreeze: Boolean(projected.antifreeze) };
+  }
+  return {
+    heater: alarmBit(snapshot, 4) || alarmBit(snapshot, 5) || alarmBit(snapshot, 6),
+    antifreeze: alarmBit(snapshot, 7),
   };
 }
 
@@ -1389,13 +1412,17 @@ function animateRealProcess(now, snapshot) {
   });
   updateValveMotionVisual(REAL.upperMotion, VALVE_ANIMATION.upper, upper, upperTargetPosition, visualTime);
   updateValveMotionVisual(REAL.drainMotion, VALVE_ANIMATION.drain, drain, drainTargetPosition, visualTime);
-  REAL.heatMeshes.forEach(mesh => { mesh.material = heat === 1 ? materials.heated : cadMaterials.heater; });
-  materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
-  materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
-  const sensorAlarms = sensorAlarmStates(snapshot);
+  const equipmentAlarms = equipmentAlarmStates(snapshot);
   const alarmPulse = .5 + .5 * Math.sin(visualTime * 7.5);
   cadMaterials.sensorAlarm.color.setRGB(.58 + alarmPulse * .40, .025 + alarmPulse * .035, .025 + alarmPulse * .035);
   cadMaterials.sensorAlarm.emissiveIntensity = .75 + alarmPulse * 1.65;
+  REAL.heatMeshes.forEach(mesh => { mesh.material = equipmentAlarms.heater ? cadMaterials.sensorAlarm : heat === 1 ? materials.heated : cadMaterials.heater; });
+  materials.heated.emissive.setHex(heat === 1 ? 0xf05a18 : 0x000000);
+  materials.heated.emissiveIntensity = heat === 1 ? 1.35 : 0;
+  REAL.antifreezeAlarmMeshes.forEach(mesh => {
+    mesh.material = equipmentAlarms.antifreeze ? cadMaterials.sensorAlarm : mesh.userData.antifreezeNormalMaterial;
+  });
+  const sensorAlarms = sensorAlarmStates(snapshot);
   Object.entries(REAL.sensorAlarmMeshes).forEach(([key, meshes]) => {
     meshes.forEach(mesh => { mesh.material = sensorAlarms[key] ? cadMaterials.sensorAlarm : mesh.userData.sensorNormalMaterial; });
   });
