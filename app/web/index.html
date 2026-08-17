@@ -116,7 +116,7 @@
         </div>
         <div class="panel trend-stat-panel"><div class="panel-title"><div><h3>当前视图统计</h3><p>最新值、最小值、最大值、平均值与关键节点数量</p></div></div><div id="analysisStats" class="latest-grid"></div></div>
         <div id="analysisLogPanel" class="panel analysis-log-panel hidden">
-          <div class="panel-title"><div><h3>日志显示与分析</h3><p>下位机 EasyLogger 日志按业务领域、严重级别和模块统计；筛选器控制带设备时间的曲线事件点，点击条目即可定位。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
+          <div class="panel-title"><div><h3>日志显示与分析</h3><p>事件筛选器根据导入的下位机 SD 卡运行日志动态生成，只把阀门动作、加热启停、定时任务和明确异常等关键业务节点标到曲线上；普通初始化与状态日志不计为事件。</p></div><button id="analysisLogCloseBtn" class="button small secondary">收起</button></div>
           <div id="analysisEventSummary" class="analysis-event-summary"></div>
           <div id="analysisEventFilters" class="trend-toggles"></div>
           <div id="analysisLevelFilters" class="trend-toggles"></div>

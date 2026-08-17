@@ -41,7 +41,7 @@ const TREND_META = {
   "sensor_1.humidity": ["湿度1","#38bdf8","%RH"], "sensor_2.humidity": ["湿度2","#818cf8","%RH"], "sensor_3.humidity": ["湿度3","#a78bfa","%RH"],
   pressure:["压力","#c084fc","kPa"], flow:["流量","#2dd4bf","L/min"],
 };
-const activeTrends = new Set(["sensor_1.temperature","sensor_2.temperature","sensor_3.temperature","sensor_1.humidity","sensor_2.humidity","sensor_3.humidity"]);
+const activeTrends = new Set(["sensor_1.humidity","sensor_2.humidity","sensor_3.humidity"]);
 const pendingControls = new Set();
 const HEAT_MODE_CONTROLS = [
   {itemId:"holding.runtime.htc1_mode",outputKey:"htc1"},

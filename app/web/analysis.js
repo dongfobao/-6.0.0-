@@ -4,7 +4,7 @@
   // 统一传感器 CSV：timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity。
   // 同时兼容已保存的旧版上位机 ENV 行，确保历史会话仍可分析。
   const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*,?\/\*\s*(.*?)\s*\*\/(?:\s*\|\s*(\{.*\}))?\s*$/;
-  const RUN_ROW_RE = /^([AIDEWV])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
+  const RUN_ROW_RE = /^([AIDEWVU])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
 
   const METRICS = [
     { key: "pressure", name: "压力", unit: "kPa", color: "#a78bfa" },
@@ -27,6 +27,7 @@
     communication: { name: "通信异常", color: "#facc15" },
     config: { name: "配置", color: "#a78bfa" },
     storage: { name: "存储/日志", color: "#34d399" },
+    schedule: { name: "定时任务", color: "#22d3ee" },
     safety: { name: "安全/看门狗", color: "#fb7185" },
     system: { name: "系统", color: "#a78bfa" },
   };
@@ -48,10 +49,14 @@
   const source = { envRows: [], breathRows: [], runRows: [], firmwareRows: [], heatRows: [], trafficRows: [], config: null, meta: null, checkpoint: null };
   const ui = {
     imported: false,
-    activeMetrics: new Set(METRICS.map((metric) => metric.key)),
+    activeMetrics: new Set([
+      "sensor_1.humidity",
+      "sensor_2.humidity",
+      "sensor_3.humidity",
+    ]),
     events: [],
-    typeFilter: new Set(Object.keys(EVENT_TYPES)),
-    levelFilter: new Set(Object.keys(LOG_LEVELS)),
+    typeFilter: new Set(),
+    levelFilter: new Set(),
     showEvents: true,
     logOpen: false,
     view: { start: 0, end: 0 },
@@ -65,7 +70,15 @@
     drag: null,
   };
 
-  const parseTs = (text) => new Date(text.replace(" ", "T")).getTime();
+  const parseTs = (text) => {
+    const value = String(text || "").trim();
+    const deviceTime = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value);
+    if (deviceTime) {
+      const [, year, month, day, hour, minute, second] = deviceTime.map(Number);
+      if (year < 2000 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return NaN;
+    }
+    return new Date(value.replace(" ", "T")).getTime();
+  };
   const pad2 = (n) => String(n).padStart(2, "0");
   const fmtTime = (ts) => {
     const d = new Date(ts);
@@ -175,7 +188,7 @@
 
   function parseFirmwareText(text) {
     const rows = [];
-    for (const rawLine of text.split(/\r?\n/)) {
+    for (const rawLine of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
       const line = rawLine.trim().replace(/\x1b\[[0-9;]*m/g, "");
       if (!line || line.startsWith("#") || /^={5,}$/.test(line)) continue;
       const parsed = parseRunText(line);
@@ -299,47 +312,83 @@
     return { start, end: end + 1000 };
   }
 
-  // ============================ 关键节点提取（V9 日志语义） ============================
+  // ============================ 关键节点提取（V9.1 当前下位机日志语义） ============================
+  function eventFromRow(row, type, title) {
+    return {
+      type,
+      title: title || row.message,
+      detail: row.message,
+      level: row.level || "U",
+      module: row.tag || "SERIAL",
+    };
+  }
+
+  function withoutLogMarker(message) {
+    return message.replace(/^\[[^\]]+\]\s*/, "");
+  }
+
   function classifyRunRow(row) {
-    const msg = row.message;
+    const msg = String(row.message || "").trim();
+    if (!msg) return null;
     let m = msg.match(/^write\s+holding\.runtime\.valve_(\d)\s*=\s*(\d+)/);
     if (m) {
       const valve = VALVE_NAMES[m[1]] || `阀门${m[1]}`;
       const action = VALVE_ACTIONS[m[2]] || `命令${m[2]}`;
-      return { type: "valve", title: `${valve} ${action}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
+      return eventFromRow(row, "valve", `${valve} ${action}`);
     }
     m = msg.match(/^write\s+holding\.runtime\.(htc1_mode|htc2_mode|antifreeze_mode)\s*=\s*(\d+)/);
     if (m) {
       const name = HEAT_NAMES[m[1]] || m[1];
       const mode = HEAT_MODES[m[2]] || `模式${m[2]}`;
-      return { type: "heat", title: `${name} ${mode}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
+      return eventFromRow(row, "heat", `${name} ${mode}`);
     }
     m = msg.match(/^write\s+holding\.runtime\.remote_heat\s*=\s*(\w+)/);
     if (m) {
       const on = /^(true|1)$/i.test(m[1]);
-      return { type: "heat", title: `远程加热${on ? "启用" : "关闭"}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
+      return eventFromRow(row, "heat", `远程加热${on ? "启用" : "关闭"}`);
     }
     m = msg.match(/^write\s+holding\.runtime\.reset\s*=\s*(\d+)/);
-    if (m) return { type: "system", title: `阀门故障复位（${m[1]}）`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
+    if (m) return eventFromRow(row, "valve", `阀门故障复位（${m[1]}）`);
     m = msg.match(/^write\s+(\S+)\s*=\s*(\S+)/);
     if (m) {
       const runtime = m[1].startsWith("holding.runtime.");
-      return { type: runtime ? "system" : "config", title: `${runtime ? "运行控制" : "参数暂存"} ${m[1]} = ${m[2]}`, detail: msg, level: row.level, module: row.tag || "YLDQ" };
+      return eventFromRow(row, runtime ? "system" : "config", `${runtime ? "运行控制" : "参数暂存"} ${m[1]} = ${m[2]}`);
     }
+
+    // 当前固件把 EasyLogger 原文缓冲写入 run/log_N.csv。只有带明确业务标记、
+    // 明确启停/到位语义或故障语义的行才进入曲线事件，初始化信息不再冒充业务事件。
+    if (/^\[VALVE(?:-(?:GUARD|POS|MANUAL|INIT|CAL|MAINT|TEST))?\]/i.test(msg)) {
+      if (/服务就绪|监控器启动|延迟配置已应用/.test(msg)) return null;
+      if (/^\[VALVE-CAL\]/i.test(msg) && !/开始|请求|通过|失败|未到位/.test(msg)) return null;
+      m = msg.match(/^\[VALVE-POS\]\s*(.+?)\s+到位\s+(.+)$/i);
+      if (m) return eventFromRow(row, "valve", `${m[1]} 已到位 ${m[2]}`);
+      m = msg.match(/^\[VALVE-POS\]\s*(.+?)\s+第(\d+)次尝试\s+target=(.+)$/i);
+      if (m) return eventFromRow(row, "valve", `${m[1]} 开始移动至 ${m[3]}（第${m[2]}次）`);
+      return eventFromRow(row, "valve", withoutLogMarker(msg));
+    }
+
+    if (/^\[(?:OUTPUT|ANTIFREEZE|HEAT|HotCtrl)\]/i.test(msg)) {
+      m = msg.match(/^\[OUTPUT\]\s*(.+?)\s+(开启|关闭)$/i);
+      if (m) return eventFromRow(row, "heat", `${m[1]} ${m[2]}`);
+      return eventFromRow(row, "heat", withoutLogMarker(msg));
+    }
+
+    if (/^\[MANUAL-OUTPUT\]/i.test(msg) && /加热|HTC|防冻|antifreeze/i.test(msg)) {
+      return eventFromRow(row, "heat", withoutLogMarker(msg));
+    }
+
+    if (/定时任务(?:启动|结束)|调度器：?(?:任务启动|任务结束)/.test(msg)) {
+      return eventFromRow(row, "schedule", msg);
+    }
+
     const lower = `${row.tag || ""} ${msg}`.toLowerCase();
-    let type = "system";
-    if (/valve|阀门|阀位/.test(lower)) type = "valve";
-    else if (/heat|heating|htc|加热|防冻/.test(lower)) type = "heat";
-    else if (/humid|sht|湿度/.test(lower)) type = "humidity";
-    else if (/breath|呼吸/.test(lower)) type = "breath";
-    else if (/pressure|flow|sensor|i2c|adc|crc|压力|流量|传感器/.test(lower)) type = "sensor";
-    else if (/modbus|uart|rs485|tcp|network|lwip|lte|wapi|iec\d*|通信|网络|远程/.test(lower)) type = "communication";
-    else if (/config|json|参数|配置/.test(lower)) type = "config";
-    else if (/fatfs|sd.?card|storage|file|日志|存储|文件/.test(lower)) type = "storage";
+    let type = null;
+    if (/modbus|uart|rs485|serial|tcp|network|lwip|lte|wapi|iec\d*|read failed|timeout waiting|no response|通信|网络/.test(lower)) type = "communication";
     else if (/watchdog|wdg|stack|fatal|assert|reset|hardfault|cfsr|hfsr|看门狗|堆栈|致命|复位/.test(lower)) type = "safety";
-    else if (row.level === "A" || row.level === "E" || /failed|error|timeout|失败|错误|超时/.test(lower)) type = "alarm";
+    else if (row.level === "A" || row.level === "E" || /报警|故障|failed|error|失败|错误/.test(lower)) type = "alarm";
+    if (!type) return null;
     const title = msg.length > 70 ? `${msg.slice(0, 70)}…` : msg;
-    return { type, title, detail: msg, level: row.level || "U", module: row.tag || "SERIAL" };
+    return eventFromRow(row, type, title);
   }
 
   function buildEvents() {
@@ -352,10 +401,12 @@
     if (Number.isFinite(endedAt)) events.push({ id: "session-stop", ts: endedAt, type: "system", title: "采集会话结束", detail: `${deviceName} 会话状态：${meta.status || "unknown"}`, level: "I", module: "会话", sourceType: "meta" });
     source.runRows.forEach((row, index) => {
       const info = classifyRunRow(row);
+      if (!info) return;
       events.push({ id: `run-${index}`, ts: row.ts, type: info.type, title: info.title, detail: info.detail, level: info.level, module: info.module, sourceType: "run" });
     });
     source.firmwareRows.forEach((row, index) => {
       const info = classifyRunRow(row);
+      if (!info) return;
       events.push({ id: `firmware-${index}`, ts: row.ts, type: info.type, title: info.title, detail: info.detail, level: info.level, module: info.module, sourceType: "firmware" });
     });
     source.heatRows.forEach((row, index) => {
@@ -450,10 +501,19 @@
   }
 
   function renderEventFilters() {
-    $("analysisEventFilters").innerHTML = Object.entries(EVENT_TYPES).map(([key, meta]) => {
+    const eventTypeCounts = {};
+    const levelCounts = {};
+    ui.events.forEach((event) => {
+      eventTypeCounts[event.type] = (eventTypeCounts[event.type] || 0) + 1;
+      const level = event.level || "U";
+      levelCounts[level] = (levelCounts[level] || 0) + 1;
+    });
+    const eventTypes = Object.entries(EVENT_TYPES).filter(([key]) => eventTypeCounts[key]);
+    const logLevels = Object.entries(LOG_LEVELS).filter(([key]) => levelCounts[key]);
+    $("analysisEventFilters").innerHTML = eventTypes.length ? eventTypes.map(([key, meta]) => {
       const checked = ui.typeFilter.has(key) ? "checked" : "";
-      return `<label class="trend-toggle"><input type="checkbox" data-event-type="${key}" ${checked}><i style="width:10px;height:10px;border-radius:50%;background:${meta.color};display:inline-block"></i>${meta.name}</label>`;
-    }).join("");
+      return `<label class="trend-toggle"><input type="checkbox" data-event-type="${key}" ${checked}><i style="width:10px;height:10px;border-radius:50%;background:${meta.color};display:inline-block"></i>${meta.name} (${eventTypeCounts[key]})</label>`;
+    }).join("") : '<span class="analysis-filter-empty">导入下位机 SD 卡运行日志后生成事件类型</span>';
     $("analysisEventFilters").querySelectorAll("input").forEach((input) => {
       input.addEventListener("change", () => {
         if (input.checked) ui.typeFilter.add(input.dataset.eventType);
@@ -463,10 +523,10 @@
         draw();
       });
     });
-    $("analysisLevelFilters").innerHTML = Object.entries(LOG_LEVELS).map(([key, meta]) => {
+    $("analysisLevelFilters").innerHTML = logLevels.length ? logLevels.map(([key, meta]) => {
       const checked = ui.levelFilter.has(key) ? "checked" : "";
-      return `<label class="trend-toggle"><input type="checkbox" data-log-level="${key}" ${checked}><i style="width:10px;height:10px;border-radius:3px;background:${meta.color};display:inline-block"></i>${meta.name}</label>`;
-    }).join("");
+      return `<label class="trend-toggle"><input type="checkbox" data-log-level="${key}" ${checked}><i style="width:10px;height:10px;border-radius:3px;background:${meta.color};display:inline-block"></i>${meta.name} (${levelCounts[key]})</label>`;
+    }).join("") : '<span class="analysis-filter-empty">暂无可筛选的日志级别</span>';
     $("analysisLevelFilters").querySelectorAll("input").forEach((input) => {
       input.addEventListener("change", () => {
         if (input.checked) ui.levelFilter.add(input.dataset.logLevel);
@@ -492,9 +552,9 @@
       const module = e.module || "未知";
       moduleCounts[module] = (moduleCounts[module] || 0) + 1;
     });
-    $("analysisEventSummary").innerHTML = Object.entries(EVENT_TYPES).map(([key, meta]) =>
+    $("analysisEventSummary").innerHTML = Object.entries(EVENT_TYPES).filter(([key]) => counts[key]).map(([key, meta]) =>
       `<span class="analysis-event-chip"><i style="background:${meta.color}"></i>${meta.name}<strong>${counts[key] || 0}</strong></span>`
-    ).join("") + Object.entries(LOG_LEVELS).map(([key, meta]) =>
+    ).join("") + Object.entries(LOG_LEVELS).filter(([key]) => levelCounts[key]).map(([key, meta]) =>
       `<span class="analysis-event-chip"><i style="background:${meta.color}"></i>${meta.name}<strong>${levelCounts[key] || 0}</strong></span>`
     ).join("") + Object.entries(moduleCounts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([module, count]) =>
       `<span class="analysis-event-chip">${esc(module)}<strong>${count}</strong></span>`
