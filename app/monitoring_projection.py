@@ -45,10 +45,13 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     items = [item for item in snapshot.get("metrics", []) if isinstance(item, dict)]
     by_id = {str(item.get("id")): item for item in items if item.get("id")}
     channels = []
-    for channel in range(1, 4):
+    sensor_roles = (("left", "左温湿度"), ("right", "右温湿度"), ("upper", "上温湿度"))
+    for channel, (sensor_role, sensor_name) in enumerate(sensor_roles, start=1):
         prefix = f"input_register.sensor_{channel}"
         channels.append({
             "channel": channel,
+            "role": sensor_role,
+            "name": sensor_name,
             "temperature": _take(by_id, f"{prefix}.temperature"),
             "humidity": _take(by_id, f"{prefix}.humidity"),
             "status": _take(by_id, f"{prefix}.status"),
@@ -56,11 +59,12 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         })
 
     valves = []
-    valve_names = ("上阀", "左阀", "右阀")
-    for channel, valve_name in enumerate(valve_names, start=1):
+    valve_roles = (("upper", "上阀"), ("left", "左阀"), ("right", "右阀"))
+    for channel, (valve_role, valve_name) in enumerate(valve_roles, start=1):
         prefix = f"input_register.valve_{channel}"
         valves.append({
             "channel": channel,
+            "role": valve_role,
             "name": valve_name,
             "displayState": _take(by_id, f"{prefix}.display_state"),
             "actuatorState": _take(by_id, f"{prefix}.actuator_state"),
@@ -72,12 +76,13 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         })
 
     heat_sessions = []
-    for side in range(1, 3):
+    for side, side_role in enumerate(("left", "right"), start=1):
         prefix = f"input_register.heat_session_{side}"
         flags_item = _take(by_id, f"{prefix}.session_flags")
         flags_value = int(flags_item.get("value") or 0)
         heat_sessions.append({
             "channel": side,
+            "role": side_role,
             "runSeconds": _take(by_id, f"{prefix}.session_run_seconds"),
             "startHumidity": _take(by_id, f"{prefix}.start_humidity"),
             "predictedPeakHumidity": _take(by_id, f"{prefix}.predicted_peak_humidity"),
@@ -134,10 +139,11 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
     controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
     runtime_valves = []
-    for channel, valve_name in enumerate(valve_names, start=1):
+    for channel, (valve_role, valve_name) in enumerate(valve_roles, start=1):
         prefix = f"holding.runtime.valve_{channel}"
         runtime_valves.append({
             "channel": channel,
+            "role": valve_role,
             "name": valve_name,
             "command": _take(controls_by_id, prefix),
             "faultReason": _take(controls_by_id, f"{prefix}_diagnostic_fault"),

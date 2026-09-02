@@ -297,6 +297,36 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(result["words"], [0x4148, 0x0000])
         self.assertEqual(client.words[103], 0x4148)
 
+    def test_double_mode_is_rejected_before_staging_when_htc2_is_disabled(self):
+        class ConfigClient:
+            def __init__(self):
+                self.writes = []
+
+            def read_holding_registers(self, address, count):
+                values = {
+                    100: 1, 101: 0,
+                    121: 1, 122: 0,
+                    500: 1, 502: 0,
+                }
+                return [values.get(address + offset, 0) for offset in range(count)]
+
+            def write_single_register(self, address, value):
+                self.writes.append((address, value))
+
+            def close(self):
+                pass
+
+        service = LiveAcquisitionService()
+        slot = service._ensure_device_slot({"id": "dev-a", "name": "A", "address": "COM1"})
+        slot["state"]["running"] = True
+        client = ConfigClient()
+
+        with patch.object(service, "_open_manual_client", return_value=client):
+            with self.assertRaisesRegex(ValueError, "加热通道2必须启用"):
+                service.stage_config_value("dev-a", "holding.dehumidification.mode", 1)
+
+        self.assertEqual(client.writes, [])
+
     def test_select_schedule_task_reads_the_complete_selected_window(self):
         class ScheduleClient:
             def __init__(self):

@@ -112,6 +112,12 @@ def classify_part(low: np.ndarray, high: np.ndarray) -> tuple[str, str | None, i
     center = (low + high) / 2
     sx, sy, sz = (float(value) for value in size)
     cx, cy, cz = (float(value) for value in center)
+    # 统一以人站在设备正面、面对控制盒为观察基准。当前三维相机看到的是
+    # 控制盒背向视角，因此模型画面左右与人员面对控制盒时左右镜像：源模型
+    # X=-63.37 mm 的画面左筒是右路（通道 2），X=136.63 mm 的画面右筒
+    # 才是左路（通道 1）。协议仍保持 T1/HTC1/左排水阀=左路，
+    # T2/HTC2/右排水阀=右路。
+    channel = 2 if abs(cx + 63.37) <= abs(cx - 136.63) else 1
 
     cylindrical = abs(sx - sy) <= 8
     # 中文 STEP 中的右玻璃罩、上变色硅胶罩、油杯，以及传感器仓外壳。
@@ -121,13 +127,14 @@ def classify_part(low: np.ndarray, high: np.ndarray) -> tuple[str, str | None, i
     oil_cup = cylindrical and 70 <= sx <= 80 and 75 <= sz <= 85 and cz > 300
     sensor_chamber_shell = 108 <= sx <= 120 and 108 <= sy <= 120 and 48 <= sz <= 60 and cz < -120
     if oil_cup:
-        channel = 1 if cx < 36 else 2
         return "outer_shell", f"oil_cup_{channel}", channel
     if sensor_chamber_shell:
         return "outer_shell", "sensor_chamber_shell", None
     if upper_glass:
         return "outer_shell", "central_upper_desiccant_chamber", None
-    if main_glass or upper_desiccant_cover:
+    if main_glass:
+        return "outer_shell", f"main_process_glass_{channel}", channel
+    if upper_desiccant_cover:
         return "outer_shell", "transparent_process_shell", None
     # 中文 STEP 中“呼吸传感器:1”的实体。旁边较小的圆件是通气孔，
     # 流量标签必须锚定传感器本体，不能锚定通气孔或连接管道。
@@ -155,11 +162,20 @@ def classify_part(low: np.ndarray, high: np.ndarray) -> tuple[str, str | None, i
     if upper_humidity_sensor:
         return "valve_or_sensor", "upper_humidity_sensor", None
 
-    channel = 1 if abs(cx + 63.37) <= abs(cx - 136.63) else 2
     column_distance = min(abs(cx + 63.37), abs(cx - 136.63))
     upper_valve_housing = 380 <= sx <= 400 and 180 <= sy <= 200 and 70 <= sz <= 82 and -45 <= cz <= -15
     if upper_valve_housing:
         return "outer_shell", "upper_valve_housing", None
+    # 左右排水阀舱最下方的薄盖板，各有三组三孔，共九个真实进气孔。
+    drain_inlet_plate = (
+        cylindrical
+        and 178 <= sx <= 186
+        and 3 <= sz <= 7
+        and 304 <= cz <= 311
+        and column_distance <= 5
+    )
+    if drain_inlet_plate:
+        return "support", f"drain_inlet_plate_{channel}", channel
     drain_chamber_shell = (
         cylindrical
         and 178 <= sx <= 190
@@ -204,10 +220,13 @@ def classify_part(low: np.ndarray, high: np.ndarray) -> tuple[str, str | None, i
     if 5 <= cz <= 260 and column_distance <= 58 and max(sx, sy) <= 145 and heater_triangle:
         return "heater_frame", f"heat_channel_{channel}", channel
 
-    # 左右堵塞子分别是上阀两个稳定位置，运动轴为总装 X 轴。
+    # STEP 中的“左右堵塞子:1/:2”沿用了旧单管总装的“传感器堵头-1/-2”结构。
+    # 画面左右与面对控制盒的实物左右镜像：较小 X 的实体对应右温湿度 T2，
+    # 较大 X 的实体对应左温湿度 T1。它们不是上阀的阀位限位点。
     if 10 <= sx <= 13 and 15 <= sy <= 20 and 15 <= sz <= 20 and -30 <= cz <= -15:
-        function = "upper_valve_stop_left" if cx < 40 else "upper_valve_stop_right"
-        return "valve_or_sensor", function, None
+        if cx < 40:
+            return "valve_or_sensor", "right_humidity_sensor", 2
+        return "valve_or_sensor", "left_humidity_sensor", 1
     # 上阀双向电磁阀壳体；阀位指示应覆盖在该壳体中心，而不是右侧的横向移动阀芯上。
     if 35 <= sx <= 43 and 18 <= sy <= 24 and 34 <= sz <= 42 and -35 <= cz <= -24:
         return "valve_or_sensor", "upper_valve_solenoid", None

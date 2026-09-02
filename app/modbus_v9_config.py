@@ -19,6 +19,14 @@ COMMAND_COMMIT = 0xC6A6
 COMMAND_DISCARD = 0xD15C
 ERROR_SAVE_PENDING = 5
 
+ERROR_DESCRIPTIONS = {
+    1: "配置命令无效",
+    2: "整份配置校验失败，请检查工作模式所需的传感器和输出通道是否已启用",
+    3: "配置持久化保存失败",
+    4: "配置应用到运行控制失败",
+    ERROR_SAVE_PENDING: "配置仍在保存中",
+}
+
 
 class RegisterClient(Protocol):
     def read_holding_registers(self, address: int, count: int) -> list[int]: ...
@@ -116,12 +124,26 @@ class V9ConfigTransaction:
     def commit(self) -> ConfigStatus:
         before = self.read_status()
         expected_generation = (before.generation + 1) & 0xFFFF
-        self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_COMMIT)
+        try:
+            self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_COMMIT)
+        except Exception as exc:
+            # 下位机在拒绝提交时按 Modbus 规范返回异常码 4；真正的配置事务
+            # 错误同时写入 HR4。补读 HR0-HR4，避免界面只显示无意义的
+            # “modbus exception code: 4”。
+            try:
+                rejected_status = self.read_status()
+            except Exception:
+                raise exc
+            if rejected_status.error:
+                raise ConfigTransactionError(
+                    self._error_message(rejected_status.error)
+                ) from exc
+            raise
         deadline = time.monotonic() + self.commit_timeout_seconds
         while True:
             status = self.read_status()
             if status.error not in (0, ERROR_SAVE_PENDING):
-                raise ConfigTransactionError(f"配置提交失败，错误码: {status.error}")
+                raise ConfigTransactionError(self._error_message(status.error))
             generation_advanced = status.generation == expected_generation
             commit_succeeded = bool(status.state & 0x0004)
             staging_dirty = bool(status.state & 0x0002)
@@ -130,6 +152,11 @@ class V9ConfigTransaction:
             if time.monotonic() >= deadline:
                 raise ConfigTransactionError("配置提交超时，未收到下位机持久化成功确认")
             time.sleep(self.poll_interval_seconds)
+
+    @staticmethod
+    def _error_message(error: int) -> str:
+        description = ERROR_DESCRIPTIONS.get(int(error), "未知错误")
+        return f"配置提交失败，错误码: {int(error)}（{description}）"
 
     def discard(self) -> ConfigStatus:
         self.client.write_single_register(CONFIG_COMMAND_ADDRESS, COMMAND_DISCARD)

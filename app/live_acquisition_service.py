@@ -1126,6 +1126,43 @@ class LiveAcquisitionService:
         value: Any,
         client: LiveModbusClient | None = None,
     ) -> None:
+        def related_value(related_id: str) -> Any:
+            with self._lock:
+                current_value = (slot["values"].get(related_id) or {}).get("value")
+            if current_value is not None:
+                return current_value
+            if client is None:
+                raise ValueError(f"无法读取关联参数: {related_id}")
+            related_item = self._catalog_by_id[related_id]
+            related_address = int(related_item["address"])
+            related_length = int(related_item.get("wordLength") or 1)
+            return decode_words(
+                client.read_holding_registers(related_address, related_length),
+                str(related_item["dataType"]),
+            )
+
+        # 双管不是一个孤立的显示选项：固件会同时校验左右温湿度传感器及
+        # 两路加热输出。应在暂存模式时直接说明缺失项，不能等提交后只收到
+        # Modbus 异常码 4，也不能让 3D 先显示一个无法持久化的双管状态。
+        if item_id == "holding.dehumidification.mode" and int(value) == 1:
+            requirements = (
+                ("holding.sensor_1.enabled", True, "温湿度1必须启用"),
+                ("holding.sensor_1.bus", 0, "温湿度1必须使用 UART 总线"),
+                ("holding.sensor_2.enabled", True, "温湿度2必须启用"),
+                ("holding.sensor_2.bus", 0, "温湿度2必须使用 UART 总线"),
+                ("holding.output.htc1_enabled", True, "加热通道1必须启用"),
+                ("holding.output.htc2_enabled", True, "加热通道2必须启用"),
+            )
+            missing = [
+                message
+                for related_id, expected, message in requirements
+                if related_value(related_id) != expected
+            ]
+            if missing:
+                raise ValueError(
+                    "切换双管模式前请先完成关联配置：" + "；".join(missing)
+                )
+
         pairs = {
             "holding.pressure.alarm_high": ("holding.pressure.alarm_low", "high"),
             "holding.pressure.alarm_low": ("holding.pressure.alarm_high", "low"),
@@ -1144,18 +1181,7 @@ class LiveAcquisitionService:
         if relation is None:
             return
         counterpart_id, role = relation
-        with self._lock:
-            counterpart = (slot["values"].get(counterpart_id) or {}).get("value")
-        if counterpart is None and client is not None:
-            counterpart_item = self._catalog_by_id[counterpart_id]
-            address = int(counterpart_item["address"])
-            word_length = int(counterpart_item.get("wordLength") or 1)
-            counterpart = decode_words(
-                client.read_holding_registers(address, word_length),
-                str(counterpart_item["dataType"]),
-            )
-        if counterpart is None:
-            raise ValueError(f"无法读取关联参数: {counterpart_id}")
+        counterpart = related_value(counterpart_id)
         current = float(value)
         other = float(counterpart)
         if (role == "high" and current <= other) or (role == "low" and current >= other):

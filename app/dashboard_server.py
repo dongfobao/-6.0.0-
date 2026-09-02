@@ -20,6 +20,7 @@ from live_device_store import (
 )
 from live_polling_commands import build_default_polling_commands
 from live_modbus_client import ModbusError
+from modbus_v9_config import ConfigTransactionError
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_catalog_summary
 from monitoring_projection import build_monitoring_snapshot
 from session_archive import get_session_detail, list_sessions
@@ -351,7 +352,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _error(self, exc: Exception) -> None:
         if isinstance(exc, KeyError):
             status = HTTPStatus.NOT_FOUND
-        elif isinstance(exc, (ValueError, json.JSONDecodeError)):
+        elif isinstance(exc, (ValueError, json.JSONDecodeError, ConfigTransactionError)):
             status = HTTPStatus.BAD_REQUEST
         elif isinstance(exc, ModbusError):
             status = HTTPStatus.BAD_GATEWAY

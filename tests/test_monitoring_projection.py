@@ -29,8 +29,20 @@ class MonitoringProjectionTests(unittest.TestCase):
         result = build_monitoring_snapshot({"deviceId": "dev-1", "metrics": metrics, "session": {}})
         self.assertEqual(len(result["environmentChannels"]), 3)
         self.assertEqual(result["environmentChannels"][2]["temperature"]["value"], 23.0)
+        self.assertEqual(
+            [(channel["channel"], channel["role"], channel["name"]) for channel in result["environmentChannels"]],
+            [(1, "left", "左温湿度"), (2, "right", "右温湿度"), (3, "upper", "上温湿度")],
+        )
         self.assertEqual(len(result["valves"]), 3)
         self.assertEqual(result["valves"][1]["position"]["value"], 2)
+        self.assertEqual(
+            [(valve["channel"], valve["role"], valve["name"]) for valve in result["valves"]],
+            [(1, "upper", "上阀"), (2, "left", "左阀"), (3, "right", "右阀")],
+        )
+        self.assertEqual(
+            [(session["channel"], session["role"]) for session in result["heatSessions"]],
+            [(1, "left"), (2, "right")],
+        )
 
     def test_alarm_summary_detects_any_nonzero_group(self):
         metrics = [

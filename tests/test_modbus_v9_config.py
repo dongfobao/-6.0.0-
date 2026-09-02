@@ -144,6 +144,22 @@ class ModbusV9ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigTransactionError, "错误码: 3"):
             transaction.commit()
 
+    def test_commit_decodes_firmware_error_after_modbus_exception(self) -> None:
+        client = FakeClient()
+
+        def reject_commit(address: int, value: int) -> None:
+            if address == 3 and value == COMMAND_COMMIT:
+                client.words[1] = 0x0003
+                client.words[4] = 2
+                raise RuntimeError("modbus exception code: 4")
+
+        client.write_single_register = reject_commit  # type: ignore[method-assign]
+        with self.assertRaisesRegex(
+            ConfigTransactionError,
+            "错误码: 2.*整份配置校验失败",
+        ):
+            V9ConfigTransaction(client).commit()
+
     def test_commit_waits_while_save_is_pending(self) -> None:
         class PendingClient(FakeClient):
             def __init__(self) -> None:
