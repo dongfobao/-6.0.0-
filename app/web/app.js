@@ -65,10 +65,11 @@ async function bootstrap(){
   state.bootstrap=await api("/api/bootstrap");
   state.devices=state.bootstrap.devices.devices||[];
   state.selectedDeviceId=state.bootstrap.devices.selectedDeviceId || state.devices[0]?.id || null;
+  state.deviceStatuses=state.bootstrap.deviceStatuses||{};
   const runningIds=Object.entries(state.bootstrap.deviceStatuses||{}).filter(([,status])=>status?.running).map(([id])=>id);
   state.monitorSelection=new Set(runningIds.length?runningIds:(state.selectedDeviceId?[state.selectedDeviceId]:[]));
   renderDeviceSelector();renderDevices();renderTrendToggles();buildControlButtons();
-  await refreshAll();
+  await refreshAll({readDeviceConfig:true});
   clearInterval(state.refreshTimer); state.refreshTimer=setInterval(refreshLive,1000);
   clearInterval(state.trendTimer); state.trendTimer=setInterval(()=>state.activePage==="trends"&&refreshSeries(),5000);
 }
@@ -87,7 +88,7 @@ function fleetIssueMeta(status={}){
   if(kind==="disabled")return {level:"idle",title:"已禁用",detail:"设备未参与统一采集"};
   return {level:"idle",title:status.running?"等待首次数据":"未启动采集",detail:status.running?"已启动，尚未收到有效数据":"设备当前未采集"};
 }
-async function refreshAll(){await Promise.allSettled([refreshLive(),refreshParameters(),refreshEvents(),refreshTraffic(),refreshSeries()]);}
+async function refreshAll({readDeviceConfig=false}={}){await Promise.allSettled([refreshLive(),refreshParameters({readDevice:readDeviceConfig}),refreshEvents(),refreshTraffic(),refreshSeries()]);}
 async function refreshLive(){
   if(!state.selectedDeviceId){renderEmptySnapshot();return;}
   const deviceId=state.selectedDeviceId,requestId=++state.liveRequestId;
@@ -361,7 +362,9 @@ function renderValveControls(runtimeValves=[]){
     const valve=byChannel.get(channel)||{}, command=Number(valve.command?.value ?? 0), fault=Number(valve.faultReason?.value ?? 0), pending=pendingControls.has(`holding.runtime.valve_${channel}`);
     const faultText=valve.faultReason?.displayValue || (fault?`故障 ${fault}`:"无故障"), source=valve.effectiveSource?.displayValue || "--", seconds=valve.remoteSeconds?.value;
     const detail=fault===8?"开路：请检查阀门线圈、接线端子及驱动输出。":"";
-    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""} ${guardActive?"guard-active":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。回原点校准为一次性触发命令，期间该阀显示为运动中。</p><div class="segmented">${[[0,"释放"],[1,"原位"],[2,"工作位"]].map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)||(guardActive&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><button class="button small secondary valve-home-cal" data-control="holding.runtime.valve_${channel}" data-value="3" ${pending||guardActive?"disabled":""}>回原点校准</button><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
+    // 左、右排水阀：原位为排水打开，工作位为堵住排水口；上阀不使用这组排水语义。
+    const commandOptions=channel===1?[[0,"释放"],[1,"原位"],[2,"工作位"]]:[[0,"释放"],[1,"原位（排水开）"],[2,"工作位（排水关）"]];
+    return `<article class="panel control-card valve-control-card ${fault?"has-fault":""} ${guardActive?"guard-active":""}"><h3>${esc(valve.name||fallbackNames[channel-1])}</h3><p>三选一远程命令；每次写入均回读下位机确认。${channel===1?"回原点校准为一次性触发命令，期间该阀显示为运动中。":"排水阀原位表示排水打开，工作位表示堵住排水口。"}</p><div class="segmented">${commandOptions.map(([value,label])=>`<button data-control="holding.runtime.valve_${channel}" data-value="${value}" class="${command===value?"selected":""}" ${pending||(fault&&value!==0)||(guardActive&&value!==0)?"disabled":""}>${label}</button>`).join("")}</div><button class="button small secondary valve-home-cal" data-control="holding.runtime.valve_${channel}" data-value="3" ${pending||guardActive?"disabled":""}>回原点校准</button><div class="valve-control-status ${fault?"fault":""}"><span>当前选定：${esc(valve.command?.displayValue||"--")}</span><span>生效源：${esc(source)}</span><span>远程剩余：${seconds===undefined||seconds===null?"--":`${fmt(seconds,0)} 秒`}</span><strong>${esc(faultText)}${detail?`；${esc(detail)}`:""}</strong></div></article>`;
   }).join("");
   document.querySelectorAll("[data-control^='holding.runtime.valve_']").forEach(button=>button.addEventListener("click",()=>writeControl(button.dataset.control,Number(button.dataset.value))));
 }
@@ -380,7 +383,7 @@ async function writeControl(itemId,value){
   finally{pendingControls.delete(itemId);renderHeatModeControls(state.snapshot?.outputs||[]);renderValveControls(state.snapshot?.runtimeValves||[]);}
 }
 
-async function refreshParameters(){if(!state.selectedDeviceId){state.parameters=[];return renderConfigTable();}const deviceId=state.selectedDeviceId,requestId=++state.parameterRequestId;try{const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(deviceId)}`);if(requestId!==state.parameterRequestId||deviceId!==state.selectedDeviceId)return;state.parameters=payload.config||[];renderConfigGroups();renderConfigTable();}catch(error){if(requestId===state.parameterRequestId)showNotice(error.message,"error");}}
+async function refreshParameters({readDevice=false}={}){if(!state.selectedDeviceId){state.parameters=[];window.digitalTwin?.setDehumidificationMode(null);return renderConfigTable();}const deviceId=state.selectedDeviceId,requestId=++state.parameterRequestId;window.digitalTwin?.setDehumidificationMode(null);try{if(readDevice){await api("/api/config/refresh",{method:"POST",body:JSON.stringify({deviceId})});}const payload=await api(`/api/config/parameters?deviceId=${encodeURIComponent(deviceId)}`);if(requestId!==state.parameterRequestId||deviceId!==state.selectedDeviceId)return;state.parameters=payload.config||[];const dehumidificationMode=state.parameters.find(item=>item.id==="holding.dehumidification.mode")?.currentValue;window.digitalTwin?.setDehumidificationMode(dehumidificationMode);renderConfigGroups();renderConfigTable();}catch(error){if(requestId===state.parameterRequestId){window.digitalTwin?.setDehumidificationMode(null);showNotice(error.message,"error");}}}
 const CONFIG_MODULES=[
   ["sensor_1","温湿度 1"],["sensor_2","温湿度 2"],["sensor_3","温湿度 3"],
   ["pressure","压力传感器"],["flow","流量与呼吸"],["valve","阀门设置"],
@@ -505,8 +508,8 @@ async function openDeviceDialog(device=null){
 }
 function renderPortOptions(selected){const ports=state.bootstrap?.serialPorts||[], knownPorts=state.devices.map(device=>device.address), values=[...new Set([selected,...knownPorts,...ports.map(p=>p.device)].filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}));$("devicePort").innerHTML=values.map(p=>`<option value="${esc(p)}" ${p===selected?"selected":""}>${esc(p)} ${esc(ports.find(x=>x.device===p)?.description||"已保存端口")}</option>`).join("");}
 async function saveDevice(event){event.preventDefault();const id=$("deviceId").value;const payload={name:$("deviceName").value,address:$("devicePort").value,slaveId:Number($("deviceSlave").value),baudrate:Number($("deviceBaud").value),parity:$("deviceParity").value,timeoutMs:Number($("deviceTimeout").value),enabled:$("deviceEnabled").checked};try{const result=await api(id?`/api/devices/${encodeURIComponent(id)}`:"/api/devices",{method:id?"PUT":"POST",body:JSON.stringify(payload)});$("deviceDialog").close();await reloadDevices(result.id||id);showNotice("设备配置已保存");}catch(error){showNotice(error.message,"error");}}
-async function reloadDevices(preferred=null){const payload=await api("/api/devices");state.devices=payload.devices||[];state.selectedDeviceId=preferred||payload.selectedDeviceId||state.devices[0]?.id||null;state.liveRequestId++;state.parameterRequestId++;state.eventRequestId++;state.trafficRequestId++;state.trendRequestId++;if(typeof sessionArchiveReset==="function")sessionArchiveReset(state.selectedDeviceId);renderDeviceSelector();renderDevices();await refreshAll();}
-async function selectDevice(id){try{await api(`/api/devices/${encodeURIComponent(id)}/select`,{method:"POST",body:"{}"});state.selectedDeviceId=id;state.liveRequestId++;state.parameterRequestId++;state.eventRequestId++;state.trafficRequestId++;state.trendRequestId++;if(typeof sessionArchiveReset==="function")sessionArchiveReset(id);renderDeviceSelector();renderDevices();await refreshAll();}catch(error){showNotice(error.message,"error");renderDeviceSelector();}}
+async function reloadDevices(preferred=null){const payload=await api("/api/devices");state.devices=payload.devices||[];state.selectedDeviceId=preferred||payload.selectedDeviceId||state.devices[0]?.id||null;state.liveRequestId++;state.parameterRequestId++;state.eventRequestId++;state.trafficRequestId++;state.trendRequestId++;if(typeof sessionArchiveReset==="function")sessionArchiveReset(state.selectedDeviceId);renderDeviceSelector();renderDevices();await refreshAll({readDeviceConfig:true});}
+async function selectDevice(id){try{await api(`/api/devices/${encodeURIComponent(id)}/select`,{method:"POST",body:"{}"});state.selectedDeviceId=id;state.liveRequestId++;state.parameterRequestId++;state.eventRequestId++;state.trafficRequestId++;state.trendRequestId++;if(typeof sessionArchiveReset==="function")sessionArchiveReset(id);renderDeviceSelector();renderDevices();await refreshAll({readDeviceConfig:true});}catch(error){showNotice(error.message,"error");renderDeviceSelector();}}
 async function deleteDevice(id){if(!confirm("确定删除该设备配置？"))return;try{await api(`/api/devices/${encodeURIComponent(id)}`,{method:"DELETE"});await reloadDevices();showNotice("设备已删除");}catch(error){showNotice(error.message,"error");}}
 
 async function startMonitoring(){
@@ -515,7 +518,7 @@ async function startMonitoring(){
   try{
     await api("/api/acquisition/start",{method:"POST",body:JSON.stringify({deviceIds:ids})});
     showNotice(`监控已启动：${ids.length} 台设备同时采集，数据分别保存`);
-    await refreshAll();
+    await refreshAll({readDeviceConfig:true});
   }catch(error){showNotice(error.message,"error");}
 }
 async function stopMonitoring(){
