@@ -521,12 +521,13 @@ function buildValveMotionVisual(object, parent = realEffects, options = {}) {
   const movingLabel = makeValveTextSprite("切换中", "#fde68a");
   const faultLabel = makeValveTextSprite("未到位", "#fecaca");
   const labelOffset = options.drain ? .22 : 0;
-  originLabel.position.set(-span - labelOffset, .142, 0);
-  workLabel.position.set(span + labelOffset, .142, 0);
+  const originSide = options.reverseAxis ? 1 : -1;
+  originLabel.position.set(originSide * (span + labelOffset), .142, 0);
+  workLabel.position.set(-originSide * (span + labelOffset), .142, 0);
   movingLabel.position.set(0, .228, 0);
   faultLabel.position.set(0, .228, 0);
   group.add(originLabel, workLabel, movingLabel, faultLabel);
-  return { group, span, rail, railMaterial, ports, marker, markerMaterial, arrows, originLabel, workLabel, movingLabel, faultLabel };
+  return { group, span, reverseAxis: Boolean(options.reverseAxis), rail, railMaterial, ports, marker, markerMaterial, arrows, originLabel, workLabel, movingLabel, faultLabel };
 }
 
 function commandedValvePosition(snapshot, channelIndex, state, tracker) {
@@ -568,7 +569,8 @@ function updateValveMotionVisual(visual, tracker, state, targetPosition, visualT
   const focus = state.moving || state.fault;
   // 无有效反馈时仍保留低亮度的两端位置示意，避免客户找不到阀芯运动轴线。
   visual.group.visible = true;
-  visual.marker.position.x = tracker.axis * visual.span;
+  const visualAxis = visual.reverseAxis ? -1 : 1;
+  visual.marker.position.x = tracker.axis * visual.span * visualAxis;
   visual.markerMaterial.color.setHex(state.fault ? 0xef4444 : state.moving ? 0xfbbf24 : 0xb8d5df);
   visual.markerMaterial.emissive.setHex(state.fault ? 0x650000 : state.moving ? 0x6b3b00 : 0x0b3444);
   visual.markerMaterial.emissiveIntensity = state.fault ? .95 : state.moving ? .82 : .44;
@@ -583,14 +585,16 @@ function updateValveMotionVisual(visual, tracker, state, targetPosition, visualT
       ringOpacity = .62 + Math.sin(visualTime * 4) * .24;
       sealOpacity = .26;
     } else if (state.moving) {
-      color = targetPosition === index ? 0xfbbf24 : 0x64748b;
-      ringOpacity = targetPosition === index ? .64 + Math.sin(visualTime * 5) * .22 : .28;
-      sealOpacity = targetPosition === index ? .22 : .08;
+      const targetPort = targetPosition === null ? null : visual.reverseAxis ? 1 - targetPosition : targetPosition;
+      color = targetPort === index ? 0xfbbf24 : 0x64748b;
+      ringOpacity = targetPort === index ? .64 + Math.sin(visualTime * 5) * .22 : .28;
+      sealOpacity = targetPort === index ? .22 : .08;
     } else if (knownPosition !== null) {
       // 圆圈只表示阀芯位置：当前所在端红色高亮，另一端灰色低亮，禁止用蓝色造成“双位置有效”的误解。
-      color = knownPosition === index ? 0xef4444 : 0x64748b;
-      ringOpacity = knownPosition === index ? .92 : .26;
-      sealOpacity = knownPosition === index ? .52 : .05;
+      const currentPort = visual.reverseAxis ? 1 - knownPosition : knownPosition;
+      color = currentPort === index ? 0xef4444 : 0x64748b;
+      ringOpacity = currentPort === index ? .92 : .26;
+      sealOpacity = currentPort === index ? .52 : .05;
     }
     port.ringMaterial.color.setHex(color);
     port.sealMaterial.color.setHex(color);
@@ -598,7 +602,7 @@ function updateValveMotionVisual(visual, tracker, state, targetPosition, visualT
     port.sealMaterial.opacity = sealOpacity;
   });
 
-  const direction = targetPosition === null ? 0 : targetPosition === 1 ? 1 : -1;
+  const direction = targetPosition === null ? 0 : (targetPosition === 1 ? 1 : -1) * visualAxis;
   visual.arrows.forEach((arrow, index) => {
     arrow.visible = state.moving && !state.fault && direction !== 0;
     if (!arrow.visible) return;
@@ -1549,8 +1553,9 @@ function loadCadAssembly() {
         object.userData.baseX = object.position.x;
         object.userData.baseZ = object.position.z;
       });
-      REAL.upperMotion = buildValveMotionVisual(REAL.visualUpperValves[0] || REAL.upperValve);
-      REAL.drainMotion = buildValveMotionVisual(REAL.visualDrainValves[0] || REAL.drainValve, realEffects, { drain: true });
+      // 单管实物模型的阀门运动轴与协议 position 编号方向相反，叠加层需左右翻转。
+      REAL.upperMotion = buildValveMotionVisual(REAL.visualUpperValves[0] || REAL.upperValve, realEffects, { reverseAxis: true });
+      REAL.drainMotion = buildValveMotionVisual(REAL.visualDrainValves[0] || REAL.drainValve, realEffects, { drain: true, reverseAxis: true });
       MODEL.singleLoaded = true;
       applyModelMode();
     }, undefined, error => console.warn("新版真实总装模型加载失败。", error));
@@ -1747,11 +1752,17 @@ function update(snapshot) {
       || (heatStates[2] === 1 && rightVisualValve.position === 0)
     : leftValve.moving || leftValve.fault || (heatStates[1] === 1 && leftValve.position === 0);
   drainCallout?.classList.toggle("active", drainCalloutActive);
-  const heatLabel = MODEL.mode === "double" ? "HTC1 / HTC2" : "HTC1";
   const valveText = item => item.fault ? "故障" : item.moving ? "切换中" : item.label;
+  const heatText = state => state === 1 ? "加热中" : state === 2 ? "闪烁" : state === 3 ? "切换中" : "关闭";
   const rows = [["上阀", valveText(upper), upper.fault ? "fault" : ""],["左排水阀", drainValveText(leftVisualValve), leftVisualValve.fault ? "fault" : ""]];
   if (MODEL.mode === "double") rows.push(["右排水阀", drainValveText(rightVisualValve), rightVisualValve.fault ? "fault" : ""]);
-  rows.push([heatLabel, heat === 1 ? "加热中" : heat === 2 ? "闪烁" : heat === 3 ? "切换中" : "关闭", heat === 1 ? "active" : ""],["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]);
+  if (MODEL.mode === "double") {
+    rows.push(["HTC1", heatText(heatStates[1]), heatStates[1] === 1 ? "active" : ""]);
+    rows.push(["HTC2", heatText(heatStates[2]), heatStates[2] === 1 ? "active" : ""]);
+  } else {
+    rows.push(["HTC1", heatText(heat), heat === 1 ? "active" : ""]);
+  }
+  rows.push(["气流", `${snapshot?.process?.flow?.displayValue ?? "--"} ${snapshot?.process?.flow?.unit || "L/min"}`, breath === 2 ? "" : "active"]);
   setStatus(rows);
 }
 
