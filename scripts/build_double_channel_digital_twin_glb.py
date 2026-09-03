@@ -162,6 +162,19 @@ def classify_part(low: np.ndarray, high: np.ndarray) -> tuple[str, str | None, i
     if upper_humidity_sensor:
         return "valve_or_sensor", "upper_humidity_sensor", None
 
+    # 中文 STEP 中“压力传感器”对应上传感器仓前侧的独立模块。
+    # 必须单独标注，不能把仓内其余接头、支架和走线件全部当作压力模块闪烁。
+    pressure_sensor = (
+        46 <= sx <= 54
+        and 38 <= sy <= 45
+        and 26 <= sz <= 32
+        and 40 <= cx <= 55
+        and -35 <= cy <= -18
+        and -170 <= cz <= -155
+    )
+    if pressure_sensor:
+        return "valve_or_sensor", "pressure_sensor", None
+
     column_distance = min(abs(cx + 63.37), abs(cx - 136.63))
     upper_valve_housing = 380 <= sx <= 400 and 180 <= sy <= 200 and 70 <= sz <= 82 and -45 <= cz <= -15
     if upper_valve_housing:

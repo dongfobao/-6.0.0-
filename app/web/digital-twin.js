@@ -132,6 +132,8 @@ const MODEL = {
   doubleEffects: null,
   doubleEffectMap: new WeakMap(),
   doubleHeatMeshes: { 1: [], 2: [] },
+  doubleAntifreezeAlarmMeshes: [],
+  doubleSensorAlarmMeshes: { t1: [], t2: [], t3: [], pressure: [], flow: [] },
   doubleSpecificEffects: new THREE.Group(),
   doubleOilVisuals: [],
   doubleOilCupCenters: [],
@@ -1614,13 +1616,14 @@ function loadCadAssembly() {
 
 function loadDoubleCadAssembly() {
   if (!THREE.GLTFLoader) return;
-  new THREE.GLTFLoader().load("/assets/yldq-5-double-pipe.glb?v=13", gltf => {
+  new THREE.GLTFLoader().load("/assets/yldq-5-double-pipe.glb?v=14", gltf => {
     const oilCupMeshes = [];
     const oilCupChannelMeshes = { 1: [], 2: [] };
     const drainChannelMeshes = { 1: [], 2: [] };
     const upperValveMeshes = [];
     const flowSensorMeshes = [];
     const upperHumiditySensorMeshes = [];
+    const pressureSensorMeshes = [];
     const sideHumiditySensorMeshes = { 1: [], 2: [] };
     const heaterChannelMeshes = { 1: [], 2: [] };
     const processGlassMeshes = { 1: [], 2: [] };
@@ -1662,10 +1665,24 @@ function loadDoubleCadAssembly() {
       if (businessFunction === "upper_valve") MODEL.doubleUpperMovingValves.push(object);
       if (businessFunction === "flow_sensor") flowSensorMeshes.push(object);
       if (businessFunction === "upper_humidity_sensor") upperHumiditySensorMeshes.push(object);
+      if (businessFunction === "pressure_sensor") pressureSensorMeshes.push(object);
       if (businessFunction === "left_humidity_sensor") sideHumiditySensorMeshes[1].push(object);
       if (businessFunction === "right_humidity_sensor") sideHumiditySensorMeshes[2].push(object);
+      const sensorAlarmKey = businessFunction === "flow_sensor" ? "flow"
+        : businessFunction === "upper_humidity_sensor" ? "t3"
+          : businessFunction === "left_humidity_sensor" ? "t1"
+            : businessFunction === "right_humidity_sensor" ? "t2"
+              : businessFunction === "pressure_sensor" ? "pressure" : null;
+      if (sensorAlarmKey) {
+        object.userData.sensorNormalMaterial ||= object.material;
+        MODEL.doubleSensorAlarmMeshes[sensorAlarmKey].push(object);
+      }
       if (businessFunction === `upper_fixed_plate_${channel}` && (channel === 1 || channel === 2)) fixedPlateMeshes[channel].push(object);
       if (businessFunction === "central_upper_desiccant_chamber") upperChamberMeshes.push(object);
+      if (isDrainChamberShell) {
+        object.userData.antifreezeNormalMaterial ||= object.material;
+        MODEL.doubleAntifreezeAlarmMeshes.push(object);
+      }
     });
     doubleCadModel.add(gltf.scene);
     rig.updateMatrixWorld(true);
@@ -1688,6 +1705,14 @@ function loadDoubleCadAssembly() {
         .multiplyScalar(1 / upperHumiditySensorMeshes.length);
       DOUBLE_LABEL_TARGETS.t3.copy(upperHumidityTarget);
       if (MODEL.mode === "double") twinLabelTargets.t3.copy(upperHumidityTarget);
+    }
+    if (pressureSensorMeshes.length) {
+      const pressureTarget = pressureSensorMeshes
+        .map(object => rig.worldToLocal(centerOf(object)))
+        .reduce((sum, point) => sum.add(point), new THREE.Vector3())
+        .multiplyScalar(1 / pressureSensorMeshes.length);
+      DOUBLE_LABEL_TARGETS.pressure.copy(pressureTarget);
+      if (MODEL.mode === "double") twinLabelTargets.pressure.copy(pressureTarget);
     }
     [1, 2].forEach(channel => {
       const meshes = sideHumiditySensorMeshes[channel];
@@ -2066,8 +2091,14 @@ function animateRealProcess(now, snapshot) {
   REAL.antifreezeAlarmMeshes.forEach(mesh => {
     mesh.material = equipmentAlarms.antifreeze ? cadMaterials.sensorAlarm : mesh.userData.antifreezeNormalMaterial;
   });
+  MODEL.doubleAntifreezeAlarmMeshes.forEach(mesh => {
+    mesh.material = equipmentAlarms.antifreeze ? cadMaterials.sensorAlarm : mesh.userData.antifreezeNormalMaterial;
+  });
   const sensorAlarms = sensorAlarmStates(snapshot);
   Object.entries(REAL.sensorAlarmMeshes).forEach(([key, meshes]) => {
+    meshes.forEach(mesh => { mesh.material = sensorAlarms[key] ? cadMaterials.sensorAlarm : mesh.userData.sensorNormalMaterial; });
+  });
+  Object.entries(MODEL.doubleSensorAlarmMeshes).forEach(([key, meshes]) => {
     meshes.forEach(mesh => { mesh.material = sensorAlarms[key] ? cadMaterials.sensorAlarm : mesh.userData.sensorNormalMaterial; });
   });
   const airflowActive = activeBreath || measuredFlow;

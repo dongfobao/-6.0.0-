@@ -55,6 +55,15 @@ class DoubleModelMappingTests(unittest.TestCase):
             ("outer_shell", "oil_cup_1", 1),
         )
 
+    def test_pressure_sensor_is_not_grouped_with_the_whole_upper_structure(self):
+        low = np.array([22.4854, -46.6749, -176.9190], dtype=np.float32)
+        high = np.array([72.3640, -5.4454, -148.0810], dtype=np.float32)
+
+        self.assertEqual(
+            MODULE.classify_part(low, high),
+            ("valve_or_sensor", "pressure_sensor", None),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
