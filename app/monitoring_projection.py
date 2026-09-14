@@ -1,4 +1,4 @@
-"""将 V9 点值投影为远程监控界面需要的稳定视图模型。"""
+"""将V10四区点值投影为远程监控界面视图模型。"""
 
 from __future__ import annotations
 
@@ -41,9 +41,20 @@ def _take(by_id: dict[str, dict[str, Any]], point_id: str) -> dict[str, Any]:
     return _project_item(by_id.get(point_id) or {"id": point_id, "name": point_id})
 
 
+def _synthetic(point_id: str, name: str, value: Any, updated_at: Any = None,
+               enum_values: dict[int, str] | None = None) -> dict[str, Any]:
+    return _project_item({"id": point_id, "name": name, "currentValue": value,
+                          "updatedAt": updated_at, "dataType": "enum16",
+                          "enumValues": enum_values or {}})
+
+
 def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] | None = None) -> dict[str, Any]:
     items = [item for item in snapshot.get("metrics", []) if isinstance(item, dict)]
     by_id = {str(item.get("id")): item for item in items if item.get("id")}
+    status_items = [item for item in snapshot.get("statuses", []) if isinstance(item, dict)]
+    by_id.update({str(item.get("id")): item for item in status_items if item.get("id")})
+    control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
+    controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
     channels = []
     sensor_roles = (("left", "左温湿度"), ("right", "右温湿度"), ("upper", "上温湿度"))
     for channel, (sensor_role, sensor_name) in enumerate(sensor_roles, start=1):
@@ -62,13 +73,24 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     valve_roles = (("upper", "上阀"), ("left", "左阀"), ("right", "右阀"))
     for channel, (valve_role, valve_name) in enumerate(valve_roles, start=1):
         prefix = f"input_register.valve_{channel}"
+        di_prefix = f"discrete_input.valve_{channel}"
+        home_missing = bool((_take(by_id, f"{di_prefix}.home_not_reached").get("value")))
+        work_missing = bool((_take(by_id, f"{di_prefix}.work_not_reached").get("value")))
+        moving = bool((_take(by_id, f"{di_prefix}.moving").get("value")))
+        fault = bool((_take(by_id, f"{di_prefix}.fault").get("value")))
+        unknown = bool((_take(by_id, f"{di_prefix}.unknown").get("value")))
+        disabled = bool((_take(by_id, f"{di_prefix}.disabled").get("value")))
+        display_state = 0 if disabled else 4 if fault else 3 if moving else 1 if not home_missing else 2 if not work_missing else 5
+        actuator_state = 3 if disabled else 2 if fault else 1 if moving else 0
+        position = 0 if not home_missing else 1 if not work_missing else 2
+        updated_at = _take(by_id, f"{di_prefix}.home_not_reached").get("updatedAt")
         valves.append({
             "channel": channel,
             "role": valve_role,
             "name": valve_name,
-            "displayState": _take(by_id, f"{prefix}.display_state"),
-            "actuatorState": _take(by_id, f"{prefix}.actuator_state"),
-            "position": _take(by_id, f"{prefix}.position"),
+            "displayState": _synthetic(f"{prefix}.display_state", f"{valve_name}状态", display_state, updated_at, {0: "禁用", 1: "原位", 2: "工作位", 3: "运动中", 4: "故障", 5: "未知"}),
+            "actuatorState": _synthetic(f"{prefix}.actuator_state", f"{valve_name}执行器状态", actuator_state, updated_at, {0: "空闲", 1: "运动中", 2: "故障", 3: "禁用"}),
+            "position": _synthetic(f"{prefix}.position", f"{valve_name}位置", position, updated_at, {0: "原位", 1: "工作位", 2: "未知"}),
             "faultReason": _take(by_id, f"{prefix}.fault_reason"),
             "currentAdc": _take(by_id, f"{prefix}.current_adc"),
             "controlSource": _take(by_id, f"{prefix}.control_source"),
@@ -78,8 +100,12 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     heat_sessions = []
     for side, side_role in enumerate(("left", "right"), start=1):
         prefix = f"input_register.heat_session_{side}"
-        flags_item = _take(by_id, f"{prefix}.session_flags")
-        flags_value = int(flags_item.get("value") or 0)
+        di_prefix = f"discrete_input.heat_session_{side}"
+        active = bool(_take(by_id, f"{di_prefix}.active").get("value"))
+        peak_valid = not bool(_take(by_id, f"{di_prefix}.peak_invalid").get("value"))
+        stop_valid = not bool(_take(by_id, f"{di_prefix}.stop_target_invalid").get("value"))
+        flags_value = (1 if active else 0) | (2 if peak_valid else 0) | (4 if stop_valid else 0)
+        flags_item = _synthetic(f"{prefix}.session_flags", "会话标志", flags_value)
         heat_sessions.append({
             "channel": side,
             "role": side_role,
@@ -88,10 +114,10 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "predictedPeakHumidity": _take(by_id, f"{prefix}.predicted_peak_humidity"),
             "stopTargetHumidity": _take(by_id, f"{prefix}.stop_target_humidity"),
             "flags": flags_item,
-            "sessionActive": bool(flags_value & 0x1),
-            "peakValid": bool(flags_value & 0x2),
-            "stopTargetValid": bool(flags_value & 0x4),
-            "fallingStopProgress": _take(by_id, f"{prefix}.falling_stop_progress"),
+            "sessionActive": active,
+            "peakValid": peak_valid,
+            "stopTargetValid": stop_valid,
+            "fallingStopProgress": _synthetic(f"{prefix}.falling_stop_progress", "停热确认进度", f"{_take(by_id, f'{prefix}.falling_stop_count').get('value') or 0}/{_take(by_id, f'{prefix}.falling_stop_target').get('value') or 0}"),
         })
 
     channel_stats = [
@@ -107,37 +133,26 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
     ]
 
     outputs = [
-        {"key": "htc1", "name": "加热通道1", "state": _take(by_id, "input_register.output.htc1_state"), "mode": _take(by_id, "input_register.output.htc1_mode"), "count": _take(by_id, "input_register.output.htc1_open_count")},
-        {"key": "htc2", "name": "加热通道2", "state": _take(by_id, "input_register.output.htc2_state"), "mode": _take(by_id, "input_register.output.htc2_mode"), "count": _take(by_id, "input_register.output.htc2_open_count")},
-        {"key": "antifreeze", "name": "防冻加热", "state": _take(by_id, "input_register.output.antifreeze_state"), "mode": _take(by_id, "input_register.output.antifreeze_mode"), "count": _take(by_id, "input_register.output.antifreeze_open_count")},
+        {"key": "htc1", "name": "加热通道1", "state": _take(by_id, "input_register.output.htc1_state"), "mode": _take(controls_by_id, "holding.runtime.htc1_mode"), "count": _take(by_id, "input_register.output.htc1_open_count")},
+        {"key": "htc2", "name": "加热通道2", "state": _take(by_id, "input_register.output.htc2_state"), "mode": _take(controls_by_id, "holding.runtime.htc2_mode"), "count": _take(by_id, "input_register.output.htc2_open_count")},
+        {"key": "antifreeze", "name": "防冻加热", "state": _take(by_id, "input_register.output.antifreeze_state"), "mode": _take(controls_by_id, "holding.runtime.antifreeze_mode"), "count": _take(by_id, "input_register.output.antifreeze_open_count")},
         {"key": "alarm", "name": "告警输出", "state": _take(by_id, "input_register.output.alarm_state"), "mode": None, "count": None},
     ]
 
-    alarm_items = [_take(by_id, point_id) for point_id in (
-        "input_register.alarm.error_group_0",
-        "input_register.alarm.error_group_1",
-        "input_register.alarm.error_group_2",
-    )]
-    alarm_active = any(int(item.get("value") or 0) != 0 for item in alarm_items)
-    # 固件 appErr.h 的 ErrorPosition 位于错误组1。上温湿度的越限报警只由第3路产生。
-    alarm_group_1 = int(alarm_items[1].get("value") or 0)
-    def alarm_bit(bit: int) -> bool:
-        return bool(alarm_group_1 & (1 << bit))
-
+    alarm_ids = [point_id for point_id in by_id if point_id.startswith("discrete_input.alarm.")]
+    alarm_items = [_take(by_id, point_id) for point_id in sorted(alarm_ids)]
+    alarm_active = bool(_take(by_id, "discrete_input.alarm.any").get("value"))
     sensor_module_alarms = {
-        "pressure": alarm_bit(0) or alarm_bit(1),
-        "flow": alarm_bit(2),
-        "t1": alarm_bit(3),
-        "t3": alarm_bit(8) or alarm_bit(28) or alarm_bit(30),
-        "t2": alarm_bit(29),
+        "pressure": bool(_take(by_id, "discrete_input.alarm.pressure_fault").get("value")) or bool(_take(by_id, "discrete_input.alarm.pressure_limit").get("value")),
+        "flow": bool(_take(by_id, "discrete_input.alarm.flow_fault").get("value")) or bool(_take(by_id, "discrete_input.alarm.breath_no_change").get("value")),
+        "t1": bool(_take(by_id, "discrete_input.alarm.sensor_1_fault").get("value")),
+        "t2": bool(_take(by_id, "discrete_input.alarm.sensor_2_fault").get("value")),
+        "t3": any(bool(_take(by_id, point_id).get("value")) for point_id in ("discrete_input.alarm.sensor_3_fault", "discrete_input.alarm.humidity_limit", "discrete_input.alarm.temperature_limit")),
     }
     equipment_module_alarms = {
-        # 功率板过热或任一路主加热输出故障，都应突出单管设备的 HTC 三角加热架。
-        "heater": alarm_bit(4) or alarm_bit(5) or alarm_bit(6),
-        "antifreeze": alarm_bit(7),
+        "heater": any(bool(_take(by_id, point_id).get("value")) for point_id in ("discrete_input.alarm.htc1_fault", "discrete_input.alarm.htc2_fault", "discrete_input.alarm.power_overheat")),
+        "antifreeze": bool(_take(by_id, "discrete_input.alarm.antifreeze_fault").get("value")),
     }
-    control_items = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
-    controls_by_id = {str(item.get("id")): item for item in control_items if item.get("id")}
     runtime_valves = []
     for channel, (valve_role, valve_name) in enumerate(valve_roles, start=1):
         prefix = f"holding.runtime.valve_{channel}"
@@ -146,24 +161,24 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "role": valve_role,
             "name": valve_name,
             "command": _take(controls_by_id, prefix),
-            "faultReason": _take(controls_by_id, f"{prefix}_diagnostic_fault"),
-            "effectiveSource": _take(controls_by_id, f"{prefix}_diagnostic_source"),
-            "remoteSeconds": _take(controls_by_id, f"{prefix}_remote_seconds"),
+            "faultReason": _take(by_id, f"input_register.valve_{channel}.fault_reason"),
+            "effectiveSource": _take(by_id, f"input_register.valve_{channel}.control_source"),
+            "remoteSeconds": _take(by_id, f"input_register.valve_{channel}.remote_seconds"),
         })
     valve_guard_reason = _take(
-        controls_by_id, "holding.runtime.valve_guard_reason"
+        by_id, "input_register.runtime.valve_guard_reason"
     )
     valve_guard = {
         "active": int(valve_guard_reason.get("value") or 0) in {1, 2, 3},
         "reason": valve_guard_reason,
         "remainingSeconds": _take(
-            controls_by_id, "holding.runtime.valve_guard_remaining_seconds"
+            by_id, "input_register.runtime.valve_guard_remaining_seconds"
         ),
         "actionCount": _take(
-            controls_by_id, "holding.runtime.valve_action_count"
+            by_id, "input_register.runtime.valve_action_count"
         ),
         "actionLimit": _take(
-            controls_by_id, "holding.runtime.valve_action_limit"
+            by_id, "input_register.runtime.valve_action_limit"
         ),
     }
     schedule_prefix = "holding.schedule"
@@ -186,7 +201,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         "session": session,
         "system": {
             "protocolVersion": _take(by_id, "input_register.system.protocol_version"),
-            "flags": _take(by_id, "input_register.system.flags"),
+            "flags": _synthetic("input_register.system.flags", "系统状态", 1 if alarm_active else 0),
             "rtcSeconds": _take(by_id, "input_register.system.rtc_seconds"),
             "configGeneration": _take(by_id, "input_register.system.config_generation"),
             "lastConfigError": _take(by_id, "input_register.system.last_config_error"),
@@ -201,7 +216,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
             "breathState": _take(by_id, "input_register.breath_state"),
         },
         "outputs": outputs,
-        "remoteHeat": _take(by_id, "input_register.output.remote_heat"),
+        "remoteHeat": _take(controls_by_id, "holding.runtime.remote_heat"),
         "valves": valves,
         "runtimeValves": runtime_valves,
         "valveGuard": valve_guard,

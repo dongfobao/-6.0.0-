@@ -18,8 +18,8 @@ from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_item
 from live_session_recorder import LiveSessionRecorder
-from modbus_v9_codec import decode_words, encode_words
-from modbus_v9_config import V9ConfigTransaction
+from modbus_v10_codec import decode_words, encode_words
+from modbus_v10_config import V10ConfigTransaction
 
 
 HISTORY_POINT_IDS = (
@@ -36,16 +36,7 @@ HISTORY_POINT_IDS = (
 HISTORY_RAW_MAX_POINTS = 28800
 HISTORY_ARCHIVE_MAX_POINTS = 7 * 24 * 60
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
-SCHEDULE_BASE_ADDRESS = int(get_register_item("holding.schedule.selected_task")["address"])
-SCHEDULE_DATA_WORD_COUNT = 28
-SCHEDULE_WINDOW_WORD_COUNT = 29
-SCHEDULE_OPERATION_ADDRESS = int(get_register_item("holding.schedule.operation")["address"])
 SCHEDULE_MAX_TASKS = 12
-SCHEDULE_OPERATION_ADD = 1
-SCHEDULE_OPERATION_DELETE_SELECTED = 2
-CONFIG_REGION_START = int(get_register_item("holding.sensor_1.enabled")["address"])
-RUNTIME_REGION_START = int(get_register_item("holding.runtime.remote_heat")["address"])
-RUNTIME_CONTROL_END = int(get_register_item("holding.runtime.reset")["addressEnd"])
 
 
 def _now() -> datetime:
@@ -133,6 +124,7 @@ class LiveAcquisitionService:
             "event_seq": 0,
             "traffic_seq": 0,
             "protocol_rejected": False,
+            "selected_schedule_task": 1,
             "active_failures": set(),
             "poll_diagnostics": {},
         }
@@ -711,6 +703,7 @@ class LiveAcquisitionService:
                 for item in self._catalog
                 if item.get("group") in {"control", "config", "task", "schedule", "runtime_control", "diagnostic"}
             ]
+            controls.extend(self._selected_schedule_rows(slot))
             return {
                 "deviceId": device_id,
                 "snapshotAt": slot["state"].get("last_snapshot_at"),
@@ -1036,13 +1029,14 @@ class LiveAcquisitionService:
         values = slot["values"] if slot is not None else {}
         with self._lock:
             builder = (lambda item: self._catalog_item_with_value(item, values)) if include_cached else self._catalog_item_without_value
+            config = [
+                builder(item) for item in self._catalog
+                if item.get("group") in {"config", "schedule"}
+            ]
+            if slot is not None and include_cached:
+                config.extend(self._selected_schedule_rows(slot))
             return {
-                "config": [
-                    builder(item) for item in self._catalog
-                    if item.get("area") == "holding_register" and CONFIG_REGION_START <= int(item.get("address") or 0) < RUNTIME_REGION_START
-                    and item.get("group") != "time_sync"
-                    and item.get("id") != "holding.schedule.operation"
-                ],
+                "config": config,
                 "runtime": [builder(item) for item in self._catalog if item.get("group") == "runtime_control"],
                 "diagnostic": [builder(item) for item in self._catalog if item.get("group") == "diagnostic"],
                 "transaction": [builder(item) for item in self._catalog if item.get("group") == "config_transaction"],
@@ -1057,11 +1051,9 @@ class LiveAcquisitionService:
         item = self._catalog_by_id.get(item_id)
         if item is None or item.get("group") != "runtime_control":
             raise ValueError(f"不是即时运行控制点: {item_id}")
-        address = int(item.get("address") or -1)
-        address_end = int(item.get("addressEnd") or address)
-        if item.get("area") != "holding_register" or address < RUNTIME_REGION_START or address_end > RUNTIME_CONTROL_END:
-            raise ValueError(f"即时控制地址必须位于 HR800–807: {item_id}")
-        V9ConfigTransaction._validate_value_range(item, value)
+        if item.get("area") != "coil":
+            raise ValueError(f"V10即时控制点必须位于线圈区: {item_id}")
+        V10ConfigTransaction._validate_value_range(item, value)
         return self.write_value(device_id, item_id, value)
 
     @_serialized_lifecycle
@@ -1071,24 +1063,21 @@ class LiveAcquisitionService:
             slot = self._get_device_slot(device_id)
         if not item:
             raise KeyError(f"未知配置点: {item_id}")
-        if item_id in {"holding.schedule.task_count", "holding.schedule.operation"}:
-            raise ValueError(f"该寄存器只能通过定时任务专用接口操作: {item_id}")
-        address = int(item.get("address") or 0)
-        if item.get("area") != "holding_register" or not CONFIG_REGION_START <= address < RUNTIME_REGION_START or not item.get("writable"):
-            raise ValueError(f"不是可暂存配置点: {item_id}")
+        if item.get("group") not in {"config", "schedule"} or item.get("area") not in {"coil", "holding_register"} or not item.get("writable"):
+            raise ValueError(f"不是V10可写配置点: {item_id}")
         if slot is None or not slot["state"].get("running"):
             raise ValueError("设备采集会话尚未运行")
 
         device = deepcopy(slot["config"])
-        V9ConfigTransaction._validate_value_range(item, value)
+        V10ConfigTransaction._validate_value_range(item, value)
         port_key = _device_port_key(device)
         with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
                 self._validate_related_config_value(slot, item_id, value, client)
-                words = V9ConfigTransaction(client).stage_value(item, value)
-                decoded = decode_words(words, str(item["dataType"]))
+                words = V10ConfigTransaction(client).stage_value(item, value)
+                decoded = bool(words[0]) if item.get("area") == "coil" else decode_words(words, str(item["dataType"]))
             finally:
                 client.close()
 
@@ -1107,8 +1096,8 @@ class LiveAcquisitionService:
                 slot["pending_connection_profile"][connection_field] = connection_value
             slot["event_seq"] += 1
             slot["events"].append({
-                "id": slot["event_seq"], "ts": timestamp, "type": "config_staged",
-                "message": f"配置已暂存: {item_id}", "details": {"itemId": item_id, "value": decoded},
+                "id": slot["event_seq"], "ts": timestamp, "type": "config_saved",
+                "message": f"配置已保存: {item_id}", "details": {"itemId": item_id, "value": decoded},
             })
         return {
             "ok": True,
@@ -1116,7 +1105,8 @@ class LiveAcquisitionService:
             "value": decoded,
             "wireValue": decoded,
             "words": words,
-            "staged": True,
+            "staged": False,
+            "persisted": True,
         }
 
     def _validate_related_config_value(
@@ -1136,13 +1126,16 @@ class LiveAcquisitionService:
             related_item = self._catalog_by_id[related_id]
             related_address = int(related_item["address"])
             related_length = int(related_item.get("wordLength") or 1)
+            if related_item.get("area") == "coil":
+                bits = client.read_coils(related_address, related_length)
+                return bool(bits[0]) if related_length == 1 else bits
             return decode_words(
                 client.read_holding_registers(related_address, related_length),
                 str(related_item["dataType"]),
             )
 
         # 双管不是一个孤立的显示选项：固件会同时校验左右温湿度传感器及
-        # 两路加热输出。应在暂存模式时直接说明缺失项，不能等提交后只收到
+        # 两路加热输出。应在写入前直接说明缺失项，不能等保存后只收到
         # Modbus 异常码 4，也不能让 3D 先显示一个无法持久化的双管状态。
         if item_id == "holding.dehumidification.mode" and int(value) == 1:
             requirements = (
@@ -1195,27 +1188,17 @@ class LiveAcquisitionService:
         selected = _strict_int(task_number, "taskNumber")
         if selected < 1 or selected > SCHEDULE_MAX_TASKS:
             raise ValueError("定时任务序号必须在 1–12 之间")
-
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
         with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                transaction = V9ConfigTransaction(client)
-                if transaction.read_status().state & 0x0002:
-                    raise ValueError("当前已有未提交配置，不能切换定时任务浏览窗口")
-                current = self._refresh_schedule_from_client(device_id, slot, client)
-                task_count = int(current[1])
-                if selected > task_count:
-                    raise ValueError(f"任务 {selected} 尚未配置，当前仅有 {task_count} 个任务")
-                client.write_single_register(SCHEDULE_BASE_ADDRESS, selected)
-                refreshed = self._refresh_schedule_from_client(device_id, slot, client)
-                if int(refreshed[0]) != selected:
-                    raise ModbusError("定时任务切换回读不一致")
-                transaction.discard()
+                self._refresh_schedule_from_client(device_id, slot, client, selected)
             finally:
                 client.close()
+        with self._lock:
+            slot["selected_schedule_task"] = selected
         return self._schedule_result(slot)
 
     @_serialized_lifecycle
@@ -1224,33 +1207,30 @@ class LiveAcquisitionService:
         if not slot["state"].get("running"):
             raise ValueError("设备采集会话尚未运行")
         normalized = str(action or "").strip().lower()
-        operations = {
-            "add": SCHEDULE_OPERATION_ADD,
-            "delete": SCHEDULE_OPERATION_DELETE_SELECTED,
-        }
-        if normalized not in operations:
+        if normalized not in {"add", "delete"}:
             raise ValueError(f"不支持的定时任务操作: {action}")
-
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
         with self._port_io_lock(port_key):
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                before = self._refresh_schedule_from_client(device_id, slot, client)
-                old_count = int(before[1])
-                if normalized == "add" and old_count >= SCHEDULE_MAX_TASKS:
-                    raise ValueError("定时任务已达到 12 条上限")
-                if normalized == "delete" and old_count == 0:
-                    raise ValueError("当前没有可删除的定时任务")
-                client.write_single_register(SCHEDULE_OPERATION_ADDRESS, operations[normalized])
-                after = self._refresh_schedule_from_client(device_id, slot, client)
-                expected_count = old_count + (1 if normalized == "add" else -1)
-                if int(after[1]) != expected_count:
-                    raise ModbusError("定时任务数量回读不一致，请确认下位机运行 Modbus V9 固件")
+                states = client.read_coils(96, 24)
+                used = [i + 1 for i in range(12) if states[i * 2] or states[i * 2 + 1]]
+                if normalized == "add":
+                    selected = next((i for i in range(1, 13) if i not in used), None)
+                    if selected is None: raise ValueError("定时任务已达到12条上限")
+                    slot["selected_schedule_task"] = selected
+                    self._refresh_schedule_from_client(device_id, slot, client, selected)
+                else:
+                    selected = int(slot.get("selected_schedule_task") or 1)
+                    transaction = V10ConfigTransaction(client)
+                    before = transaction.read_status().generation
+                    client.write_multiple_coils(96 + (selected - 1) * 2, [False, False])
+                    transaction._wait_for_save(before)
+                    self._refresh_schedule_from_client(device_id, slot, client, selected)
             finally:
                 client.close()
-
         timestamp = _iso(_now())
         with self._lock:
             slot["event_seq"] += 1
@@ -1258,8 +1238,8 @@ class LiveAcquisitionService:
                 "id": slot["event_seq"],
                 "ts": timestamp,
                 "type": f"schedule_{normalized}",
-                "message": "已暂存新增定时任务" if normalized == "add" else "已暂存删除定时任务",
-                "details": {"taskCount": expected_count},
+                "message": "已选择空任务槽" if normalized == "add" else "已停用定时任务",
+                "details": {"taskNumber": selected},
             })
         return self._schedule_result(slot)
 
@@ -1322,39 +1302,33 @@ class LiveAcquisitionService:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                current = self._refresh_schedule_from_client(device_id, slot, client)
-                if task_number > int(current[1]):
-                    raise ValueError(f"任务 {task_number} 尚未配置")
-                if int(current[0]) != task_number:
-                    client.write_single_register(SCHEDULE_BASE_ADDRESS, task_number)
-                    current = self._refresh_schedule_from_client(device_id, slot, client)
-
-                words = list(current[:SCHEDULE_DATA_WORD_COUNT])
-                words[0] = task_number
-                words[2] = 1 if self._strict_bool(payload.get("enabled"), "enabled") else 0
-                words[3] = month
-                words[4] = day
-                words[5] = hour
-                words[6] = minute
-                words[7:9] = encode_words(duration_days, "uint32")
-                words[9] = 1 if self._strict_bool(payload.get("humidityOverrideEnabled"), "humidityOverrideEnabled") else 0
+                base = 512 + (task_number - 1) * 32
+                words = [0] * 24
+                words[0:4] = [month, day, hour, minute]
+                words[4:6] = encode_words(duration_days * 86400, "uint32")
                 for sensor, value in enumerate(start_thresholds):
-                    offset = 10 + sensor * 2
+                    offset = 6 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
                 for sensor, value in enumerate(falling_stop_thresholds):
-                    offset = 16 + sensor * 2
+                    offset = 12 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
                 for sensor, value in enumerate(peak_drop_thresholds):
-                    offset = 22 + sensor * 2
+                    offset = 18 + sensor * 2
                     words[offset:offset + 2] = encode_words(value, "float32")
-
-                client.write_multiple_registers(SCHEDULE_BASE_ADDRESS, words)
-                readback = client.read_holding_registers(
-                    SCHEDULE_BASE_ADDRESS, SCHEDULE_DATA_WORD_COUNT
-                )
+                transaction = V10ConfigTransaction(client)
+                before = transaction.read_status().generation
+                client.write_multiple_registers(base, words)
+                transaction._wait_for_save(before)
+                readback = client.read_holding_registers(base, 24)
                 if list(readback) != words:
                     raise ModbusError("定时任务配置回读不一致")
-                self._refresh_schedule_from_client(device_id, slot, client)
+                before = transaction.read_status().generation
+                enabled = self._strict_bool(payload.get("enabled"), "enabled")
+                override = self._strict_bool(payload.get("humidityOverrideEnabled"), "humidityOverrideEnabled")
+                client.write_multiple_coils(96 + (task_number - 1) * 2, [enabled, override])
+                transaction._wait_for_save(before)
+                slot["selected_schedule_task"] = task_number
+                self._refresh_schedule_from_client(device_id, slot, client, task_number)
             finally:
                 client.close()
 
@@ -1364,8 +1338,8 @@ class LiveAcquisitionService:
             slot["events"].append({
                 "id": slot["event_seq"],
                 "ts": timestamp,
-                "type": "schedule_staged",
-                "message": f"定时任务 {task_number} 已暂存",
+                "type": "schedule_saved",
+                "message": f"定时任务 {task_number} 已保存",
                 "details": {"taskNumber": task_number},
             })
         return self._schedule_result(slot)
@@ -1375,33 +1349,67 @@ class LiveAcquisitionService:
         device_id: str,
         slot: dict[str, Any],
         client: LiveModbusClient,
+        task_number: int,
     ) -> list[int]:
-        command = next(
-            (
-                item for item in self._default_polling_commands
-                if int(item.get("address") or -1) == SCHEDULE_BASE_ADDRESS
-                and int(item.get("functionCode") or 0) == 3
-            ),
-            None,
-        )
-        if command is None:
-            raise RuntimeError("缺少定时任务固定轮询块")
-        block = self._command_to_block(command)
-        values = [int(value) & 0xFFFF for value in self._read_block(client, block)]
-        if len(values) != SCHEDULE_WINDOW_WORD_COUNT:
-            raise ModbusError("定时任务响应长度错误")
-        self._apply_block_values(device_id, slot, block, values)
-        return values
+        base = 512 + (task_number - 1) * 32
+        words = client.read_holding_registers(base, 24)
+        bits = client.read_coils(96 + (task_number - 1) * 2, 2)
+        timestamp = _iso(_now())
+        with self._lock:
+            for item in self._catalog:
+                item_id = str(item.get("id") or "")
+                if not item_id.startswith(f"holding.schedule.slot_{task_number}."):
+                    continue
+                offset = int(item["address"]) - (96 + (task_number - 1) * 2 if item["area"] == "coil" else base)
+                source = bits if item["area"] == "coil" else words
+                value = self._decode_value(item, source[offset:offset + int(item["wordLength"])])
+                slot["values"][item_id] = {"value": value, "ts": timestamp}
+        return [int(x) for x in words]
 
     def _schedule_result(self, slot: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            rows = [
-                self._catalog_item_with_value(item, slot["values"])
-                for item in self._catalog
-                if item.get("group") == "schedule"
-                and item.get("id") != "holding.schedule.operation"
-            ]
-        return {"ok": True, "staged": True, "config": rows}
+            selected = int(slot.get("selected_schedule_task") or 1)
+            rows = self._selected_schedule_rows(slot)
+        return {"ok": True, "staged": False, "selectedTask": selected, "taskCount": SCHEDULE_MAX_TASKS, "config": rows}
+
+    def _selected_schedule_rows(self, slot: dict[str, Any]) -> list[dict[str, Any]]:
+        """将当前固定任务槽投影为界面使用的通用定时字段。调用方须持有服务锁。"""
+        selected = int(slot.get("selected_schedule_task") or 1)
+        prefix = f"holding.schedule.slot_{selected}."
+        rows: list[dict[str, Any]] = []
+        for item in self._catalog:
+            item_id = str(item.get("id") or "")
+            if item.get("group") != "schedule" or not item_id.startswith(prefix):
+                continue
+            row = self._catalog_item_with_value(item, slot["values"])
+            row["id"] = "holding.schedule." + item_id[len(prefix):]
+            row["derived"] = True
+            rows.append(row)
+            if item_id.endswith(".duration_seconds"):
+                days_row = dict(row)
+                seconds = row.get("currentValue")
+                days_row.update({
+                    "id": "holding.schedule.duration_days",
+                    "name": f"任务{selected}持续时间",
+                    "currentValue": (int(seconds) // 86400) if seconds is not None else None,
+                    "value": (int(seconds) // 86400) if seconds is not None else None,
+                    "dataType": "uint16",
+                    "unit": "天",
+                    "minimum": 1,
+                    "maximum": 3650,
+                    "writable": False,
+                })
+                rows.append(days_row)
+        rows.extend([
+            {"id": "holding.schedule.selected_task", "name": "当前任务", "group": "schedule",
+             "currentValue": selected, "minimum": 1, "maximum": SCHEDULE_MAX_TASKS,
+             "writable": False, "readable": True, "derived": True, "unit": ""},
+            {"id": "holding.schedule.task_count", "name": "固定任务槽数量", "group": "schedule",
+             "currentValue": SCHEDULE_MAX_TASKS, "minimum": SCHEDULE_MAX_TASKS,
+             "maximum": SCHEDULE_MAX_TASKS, "writable": False, "readable": True,
+             "derived": True, "unit": ""},
+        ])
+        return rows
 
     @_serialized_lifecycle
     def sync_rtc_from_epoch(self, device_id: str, epoch_seconds: Any,
@@ -1421,15 +1429,9 @@ class LiveAcquisitionService:
             with self._port_io_lock(port_key):
                 self._close_runner_client_for_port(port_key)
                 client = self._open_manual_client(device, device_id)
-                transaction = V9ConfigTransaction(client)
-                if transaction.read_status().state & 0x0002:
-                    raise ValueError("当前已有未提交配置，请先提交或放弃后再同步 RTC")
+                transaction = V10ConfigTransaction(client)
                 words = transaction.stage_value(item, epoch)
-                try:
-                    status = transaction.commit()
-                except Exception:
-                    transaction.discard()
-                    raise
+                status = transaction.commit()
         finally:
             if client is not None:
                 client.close()
@@ -1460,7 +1462,7 @@ class LiveAcquisitionService:
             self._close_runner_client_for_port(port_key)
             client = self._open_manual_client(device, device_id)
             try:
-                transaction = V9ConfigTransaction(client)
+                transaction = V10ConfigTransaction(client)
                 status = transaction.commit() if normalized_action == "commit" else transaction.discard()
                 if normalized_action == "discard":
                     try:
@@ -1485,7 +1487,7 @@ class LiveAcquisitionService:
                 "message": (
                     "配置已提交；通信参数将在设备重启后生效"
                     if restart_required
-                    else ("配置已提交" if normalized_action == "commit" else "配置暂存已放弃")
+                    else ("配置保存状态已确认" if normalized_action == "commit" else "设备参数已重新读取")
                 ),
                 "details": {
                     **payload,
@@ -1552,7 +1554,7 @@ class LiveAcquisitionService:
         if slave_id != int(device.get("slaveId") or 0):
             raise ValueError("诊断请求的从站地址与当前设备不一致")
         if (function_code, address, count) not in allowed_blocks:
-            raise ValueError("仅允许读取点表声明的固定 Modbus V9.1 轮询块")
+            raise ValueError("仅允许读取点表声明的固定Modbus V10轮询块")
         if response_timeout_ms is not None and not 50 <= int(response_timeout_ms) <= 30_000:
             raise ValueError("诊断响应超时必须在 50–30000 ms 之间")
         port_key = _device_port_key(device)
@@ -1608,6 +1610,11 @@ class LiveAcquisitionService:
                         client.write_single_register(address, encoded_words[0])
                     else:
                         client.write_multiple_registers(address, encoded_words)
+                elif area == "coil":
+                    if len(encoded_words) == 1:
+                        client.write_single_coil(address, encoded_words[0])
+                    else:
+                        client.write_multiple_coils(address, encoded_words)
                 else:
                     raise ValueError(f"unsupported writable area: {area}")
                 if item_id in {
@@ -1622,29 +1629,21 @@ class LiveAcquisitionService:
                             f"加热模式回读不一致：写入 {decoded_value}，回读 {confirmed}"
                         )
                 elif item_id == "holding.runtime.remote_heat":
-                    feedback_item = self._catalog_by_id["input_register.output.remote_heat"]
-                    feedback_address = int(feedback_item["address"])
-                    feedback_words = client.read_input_registers(feedback_address, int(feedback_item["wordLength"]))
-                    confirmed = self._decode_value(feedback_item, feedback_words)
+                    confirmed = bool(client.read_coils(address, 1)[0])
                     runtime_feedback[item_id] = confirmed
-                    runtime_feedback["input_register.output.remote_heat"] = confirmed
                     if int(confirmed) != int(decoded_value):
                         raise ModbusError(f"远程加热回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
                 elif re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
                     runtime_feedback = self._read_runtime_valve_feedback(client)
-                    if int(decoded_value) == 3:
-                        # 回原点校准为一次性触发命令，下位机不回填该值，跳过回读比对
-                        runtime_feedback.pop(item_id, None)
-                    else:
-                        confirmed = runtime_feedback.get(item_id)
-                        if confirmed is None or int(confirmed) != int(decoded_value):
-                            raise ModbusError(f"阀门命令回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
+                    confirmed = runtime_feedback.get(item_id)
+                    if confirmed is None or int(confirmed) != int(decoded_value):
+                        raise ModbusError(f"阀门命令回读不一致: 写入 {decoded_value}, 回读 {confirmed}")
             finally:
                 client.close()
 
         timestamp = _iso(_now())
         with self._lock:
-            if int(decoded_value) == 3 and re.fullmatch(r"holding\.runtime\.valve_[1-3]", item_id):
+            if item.get("pulse"):
                 slot["values"].pop(item_id, None)
             else:
                 slot["values"][item_id] = {"value": decoded_value, "ts": timestamp}
@@ -1672,32 +1671,20 @@ class LiveAcquisitionService:
 
     @staticmethod
     def _read_runtime_heat_feedback(client: LiveModbusClient) -> dict[str, Any]:
-        start_address = int(get_register_item("input_register.output.htc1_mode")["address"])
-        words = client.read_input_registers(start_address, 3)
+        bits = client.read_coils(16, 6)
+        modes = [0 if not bits[i] else (2 if bits[i + 1] else 1) for i in (0, 2, 4)]
         return {
-            "holding.runtime.htc1_mode": words[0],
-            "holding.runtime.htc2_mode": words[1],
-            "holding.runtime.antifreeze_mode": words[2],
-            "input_register.output.htc1_mode": words[0],
-            "input_register.output.htc2_mode": words[1],
-            "input_register.output.antifreeze_mode": words[2],
+            "holding.runtime.htc1_mode": modes[0],
+            "holding.runtime.htc2_mode": modes[1],
+            "holding.runtime.antifreeze_mode": modes[2],
         }
 
     def _read_runtime_valve_feedback(self, client: LiveModbusClient) -> dict[str, Any]:
-        start_address = int(get_register_item("holding.runtime.valve_1")["address"])
-        end_address = int(get_register_item("holding.runtime.valve_action_limit")["addressEnd"])
-        words = client.read_holding_registers(start_address, end_address - start_address + 1)
-        feedback: dict[str, Any] = {}
-        for item in self._catalog:
-            address = int(item.get("address") or -1)
-            if item.get("area") != "holding_register" or address < start_address or address > end_address:
-                continue
-            offset = address - start_address
-            word_length = int(item.get("wordLength") or 1)
-            if offset + word_length > len(words):
-                continue
-            feedback[str(item["id"])] = self._decode_value(item, words[offset:offset + word_length])
-        return feedback
+        bits = client.read_coils(24, 6)
+        return {
+            f"holding.runtime.valve_{channel}": 0 if not bits[offset] else (2 if bits[offset + 1] else 1)
+            for channel, offset in enumerate((0, 2, 4), start=1)
+        }
 
     def get_session_meta(self, device_id: str | None = None) -> dict[str, Any]:
         slot = self._get_device_slot(device_id)
@@ -2188,7 +2175,7 @@ class LiveAcquisitionService:
         slot = self._get_device_slot(device_id)
         if slot is None or (stop_event is not None and stop_event.is_set()):
             return False
-        is_protocol_command = int(command.get("functionCode") or 0) == 4 and int(command.get("address") or -1) == 0
+        is_protocol_command = int(command.get("functionCode") or 0) == 4 and int(command.get("address") or -1) == 100
         with self._lock:
             if slot.get("protocol_rejected") and not is_protocol_command:
                 return False
@@ -2206,7 +2193,7 @@ class LiveAcquisitionService:
         function_code = _safe_int(command.get("functionCode"), 0)
         address = max(0, _safe_int(command.get("address"), 0))
         count = max(1, _safe_int(command.get("count"), 1))
-        area_by_function = {2: "discrete_input", 3: "holding_register", 4: "input_register"}
+        area_by_function = {1: "coil", 2: "discrete_input", 3: "holding_register", 4: "input_register"}
         area = area_by_function.get(function_code)
         if area is None:
             raise ValueError(f"unsupported polling command function code: {function_code}")
@@ -2227,6 +2214,8 @@ class LiveAcquisitionService:
         count = block["count"]
         if function_code == 2:
             return client.read_discrete_inputs(address, count)
+        if function_code == 1:
+            return client.read_coils(address, count)
         if function_code == 3:
             return client.read_holding_registers(address, count)
         if function_code == 4:
@@ -2242,7 +2231,7 @@ class LiveAcquisitionService:
             word_length = int(item.get("wordLength") or 1)
             chunk = values[start : start + word_length]
             decoded = self._decode_value(item, chunk)
-            if item["id"] in {"input_register.system.protocol_version", "holding.config.protocol_version"}:
+            if item["id"] == "input_register.system.protocol_version":
                 if decoded != PROTOCOL_VERSION_WORD:
                     with self._lock:
                         slot["protocol_rejected"] = True
@@ -2434,8 +2423,7 @@ class LiveAcquisitionService:
         controls = sum(1 for item in self._catalog if item.get("group") in {"runtime_control", "diagnostic"} and item["id"] in values)
         parameters = sum(
             1 for item in self._catalog
-            if item.get("area") == "holding_register"
-            and CONFIG_REGION_START <= int(item.get("address") or -1) < RUNTIME_REGION_START
+            if item.get("group") in {"config", "schedule"}
             and item["id"] in values
         )
         history = sum(len(rows) for rows in slot["history"].values()) + sum(
@@ -2452,6 +2440,11 @@ class LiveAcquisitionService:
     @staticmethod
     def _encode_write_value(item: dict[str, Any], value: Any) -> tuple[list[int], Any]:
         data_type = str(item.get("dataType") or "")
+        if data_type == "control_pair":
+            mode = _strict_int(value, str(item.get("name") or item.get("id") or "控制模式"))
+            if mode not in {0, 1, 2}:
+                raise ValueError("成对控制只允许0自动/释放、1强制关/原位、2强制开/工作位")
+            return ([0, 0] if mode == 0 else [1, 0] if mode == 1 else [1, 1]), mode
         words = encode_words(value, data_type)
         decoded = decode_words(words, data_type)
         if isinstance(decoded, float):
@@ -2461,8 +2454,13 @@ class LiveAcquisitionService:
     @staticmethod
     def _decode_value(item: dict[str, Any], raw_values: list[Any]) -> Any:
         area = str(item.get("area") or "")
-        if area == "discrete_input":
-            return bool(raw_values[0]) if raw_values else None
+        if area in {"discrete_input", "coil"}:
+            if not raw_values:
+                return None
+            if str(item.get("dataType") or "") == "control_pair":
+                return 0 if not bool(raw_values[0]) else (2 if len(raw_values) > 1 and bool(raw_values[1]) else 1)
+            value = bool(raw_values[0])
+            return not value if item.get("invertBoolean") else value
         if not raw_values:
             return None
         word_length = int(item.get("wordLength") or 1)

@@ -19,7 +19,7 @@ DEFAULT_POLLING_GROUPS: dict[str, dict[str, Any]] = {
 
 DEFAULT_DEVICE_PROFILE: dict[str, Any] = {
     "name": "New Device",
-    "deviceType": "YLDQ-6.0-Modbus-V9",
+    "deviceType": "YLDQ-6.0-Modbus-V10",
     "protocolType": "modbus",
     "transport": "rtu",
     "address": "COM1",
@@ -208,7 +208,7 @@ def _normalize_device_payload(
     device.update(payload or {})
     device["id"] = existing_id or str(device.get("id") or f"dev-{uuid.uuid4().hex[:8]}")
     device["name"] = str(device.get("name") or DEFAULT_DEVICE_PROFILE["name"]).strip() or DEFAULT_DEVICE_PROFILE["name"]
-    device["deviceType"] = str(device.get("deviceType") or DEFAULT_DEVICE_PROFILE["deviceType"]).strip() or DEFAULT_DEVICE_PROFILE["deviceType"]
+    device["deviceType"] = DEFAULT_DEVICE_PROFILE["deviceType"]
     device["protocolType"] = "modbus"
     device["transport"] = "rtu"
     device["address"] = str(device.get("address") or DEFAULT_DEVICE_PROFILE["address"]).strip() or DEFAULT_DEVICE_PROFILE["address"]

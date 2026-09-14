@@ -312,7 +312,7 @@
     return { start, end: end + 1000 };
   }
 
-  // ============================ 关键节点提取（V9.1 当前下位机日志语义） ============================
+  // ============================ 关键节点提取（V10.0 当前下位机日志语义） ============================
   function eventFromRow(row, type, title) {
     return {
       type,
@@ -352,7 +352,7 @@
     m = msg.match(/^write\s+(\S+)\s*=\s*(\S+)/);
     if (m) {
       const runtime = m[1].startsWith("holding.runtime.");
-      return eventFromRow(row, runtime ? "system" : "config", `${runtime ? "运行控制" : "参数暂存"} ${m[1]} = ${m[2]}`);
+      return eventFromRow(row, runtime ? "system" : "config", `${runtime ? "运行控制" : "参数保存"} ${m[1]} = ${m[2]}`);
     }
 
     // 当前固件把 EasyLogger 原文缓冲写入 run/log_N.csv。只有带明确业务标记、

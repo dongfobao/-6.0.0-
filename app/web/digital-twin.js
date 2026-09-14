@@ -48,8 +48,8 @@ const materials = {
   fault: new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x5f0000, emissiveIntensity: .7 }),
 };
 const cadMaterials = {
-  structure: new THREE.MeshStandardMaterial({ color: 0x405567, metalness: .88, roughness: .23 }),
-  valve: new THREE.MeshStandardMaterial({ color: 0x102b42, metalness: .90, roughness: .18 }),
+  structure: new THREE.MeshStandardMaterial({ color: 0x91a3b3, metalness: .66, roughness: .34 }),
+  valve: new THREE.MeshStandardMaterial({ color: 0x69879b, metalness: .68, roughness: .30 }),
   valveSolid: new THREE.MeshStandardMaterial({ color: 0x8fb9ca, metalness: .94, roughness: .16, emissive: 0x092f42, emissiveIntensity: .42 }),
   heater: new THREE.MeshStandardMaterial({ color: 0x743416, metalness: .72, roughness: .30 }),
   doubleMetal: new THREE.MeshStandardMaterial({ color: 0xa5b4c3, metalness: .78, roughness: .28, emissive: 0x405564, emissiveIntensity: .58 }),
@@ -67,9 +67,11 @@ const cadMaterials = {
 const makeMesh = (geometry, material, x=0, y=0, z=0) => { const mesh = new THREE.Mesh(geometry, material); mesh.position.set(x,y,z); rig.add(mesh); return mesh; };
 const cylinder = (radius, height, material, x=0,y=0,z=0) => makeMesh(new THREE.CylinderGeometry(radius,radius,height,40),material,x,y,z);
 
-scene.add(new THREE.HemisphereLight(0xb7e6ff, 0x06101b, .72));
-const keyLight = new THREE.DirectionalLight(0xe7f5ff, .86); keyLight.position.set(4,7,5); scene.add(keyLight);
-const rimLight = new THREE.PointLight(0x38bdf8, 1.8, 12); rimLight.position.set(-3,2,3); scene.add(rimLight);
+// 单双通道共用柔和中性照明：提亮设备，不提高背景和粒子的整体曝光。
+scene.add(new THREE.HemisphereLight(0xe5edf5, 0x586777, 1.15));
+const keyLight = new THREE.DirectionalLight(0xfff4e8, 1.65); keyLight.position.set(4,7,5); scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0xd9eaff, .85); fillLight.position.set(-5,2,4); scene.add(fillLight);
+const rimLight = new THREE.DirectionalLight(0xc4deef, 1.05); rimLight.position.set(-3,4,-5); scene.add(rimLight);
 
 const floor = new THREE.Mesh(new THREE.CircleGeometry(2.7,48), new THREE.MeshStandardMaterial({ color: 0x0b2940, metalness: .6, roughness: .55 })); floor.rotation.x = -Math.PI / 2; floor.position.y = -2.45; rig.add(floor);
 // 运行孪生使用半透明开窗壳体，优先呈现内部工艺而不是遮挡视线的实物外观。
@@ -1528,13 +1530,16 @@ function loadCadAssembly() {
         const isValveHardware = /双向电磁阀|阀主体|微动开关/.test(sourceFile) && !isDrainSlopeHousing;
         const isDrainChamber = /底座装配2-1 (?:底座|透明罩子)/.test(sourceFile) || isDrainSlopeHousing;
         const isBypassPipe = businessFunction === "heat_bypass_pipe";
+        // 上传感器仓罩子不透明，保留观察罐、油杯及主玻璃管的透明效果。
+        const isSensorChamberCover = / - 罩子-1\.STL$/.test(sourceFile);
         const isHeatingElement = role === "heater_frame" && !/295金属网/.test(sourceFile);
         if (/400玻璃管/.test(sourceFile)) replacementLowerGlassNode ||= object;
         if (/下链接座/.test(sourceFile)) replacementDrainBaseNode ||= object;
         if (/油杯固定板/.test(sourceFile)) replacementOilPlateNode ||= object;
         if (/底座装配2-1 透明罩子/.test(sourceFile)) replacementOilCupNode ||= object;
         if (/吸气管-1 增粗排气管/.test(sourceFile)) replacementLowerPipeNode ||= object;
-        object.material = isBypassPipe ? cadMaterials.bypassPipe
+        object.material = isSensorChamberCover ? cadMaterials.doubleMetal
+          : isBypassPipe ? cadMaterials.bypassPipe
           : isValveHardware ? cadMaterials.valveSolid
           : isDrainChamber ? cadMaterials.drainChamber
             : role === "outer_shell" ? cadMaterials.glass
@@ -1640,8 +1645,10 @@ function loadDoubleCadAssembly() {
         return;
       }
       const isDrainChamberShell = /^drain_chamber_shell_[12]$/.test(businessFunction);
-      const isSensorChamberShell = businessFunction === "sensor_chamber_shell";
-      object.material = isSensorChamberShell ? cadMaterials.doubleBlackMetal
+      // 上传感器仓内层外壳及外圆筒罩均采用不透明金属；下方硅胶观察罩保持透明。
+      const isSensorChamberShell = businessFunction === "sensor_chamber_shell"
+        || businessFunction === "transparent_process_shell";
+      object.material = isSensorChamberShell ? cadMaterials.doubleMetal
         : isDrainChamberShell ? cadMaterials.doubleMetal
         : role === "outer_shell" ? cadMaterials.glass
         : role === "heater_frame" ? cadMaterials.doubleHeater

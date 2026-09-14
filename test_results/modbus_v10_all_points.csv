@@ -1,0 +1,745 @@
+﻿区域,地址,数量,名称,权限,操作,结果,说明
+COIL,0,1,远程加热请求,RW,读取,PASS,[False]
+COIL,4,1,上阀故障复位,PULSE,读取,PASS,[False]
+COIL,5,1,左阀故障复位,PULSE,读取,PASS,[False]
+COIL,6,1,右阀故障复位,PULSE,读取,PASS,[False]
+COIL,8,1,上阀回原点校准,PULSE,读取,PASS,[False]
+COIL,9,1,左阀回原点校准,PULSE,读取,PASS,[False]
+COIL,10,1,右阀回原点校准,PULSE,读取,PASS,[False]
+COIL,16,1,主加热1手动接管,PAIR,读取,PASS,[False]
+COIL,17,1,主加热1手动开目标,PAIR,读取,PASS,[False]
+COIL,18,1,主加热2手动接管,PAIR,读取,PASS,[False]
+COIL,19,1,主加热2手动开目标,PAIR,读取,PASS,[False]
+COIL,20,1,防冻手动接管,PAIR,读取,PASS,[False]
+COIL,21,1,防冻手动开目标,PAIR,读取,PASS,[False]
+COIL,24,1,上阀远程接管,PAIR,读取,PASS,[False]
+COIL,25,1,上阀工作位目标,PAIR,读取,PASS,[False]
+COIL,26,1,左阀远程接管,PAIR,读取,PASS,[False]
+COIL,27,1,左阀工作位目标,PAIR,读取,PASS,[False]
+COIL,28,1,右阀远程接管,PAIR,读取,PASS,[False]
+COIL,29,1,右阀工作位目标,PAIR,读取,PASS,[False]
+COIL,32,1,除湿控制使能,CONFIG,读取,PASS,[True]
+COIL,33,1,双通道模式,CONFIG,读取,PASS,[False]
+COIL,34,1,防冻控制使能,CONFIG,读取,PASS,[True]
+COIL,40,1,T1传感器使能,CONFIG,读取,PASS,[True]
+COIL,41,1,T2传感器使能,CONFIG,读取,PASS,[True]
+COIL,42,1,T3传感器使能,CONFIG,读取,PASS,[True]
+COIL,43,1,压力检测使能,CONFIG,读取,PASS,[True]
+COIL,44,1,流量检测使能,CONFIG,读取,PASS,[True]
+COIL,48,1,上阀使能,CONFIG,读取,PASS,[True]
+COIL,49,1,左阀使能,CONFIG,读取,PASS,[True]
+COIL,50,1,右阀使能,CONFIG,读取,PASS,[False]
+COIL,52,1,上阀原点方向高电平,CONFIG,读取,PASS,[True]
+COIL,53,1,左阀原点方向高电平,CONFIG,读取,PASS,[False]
+COIL,54,1,右阀原点方向高电平,CONFIG,读取,PASS,[False]
+COIL,56,1,主加热1输出使能,CONFIG,读取,PASS,[True]
+COIL,57,1,主加热2输出使能,CONFIG,读取,PASS,[False]
+COIL,58,1,防冻输出使能,CONFIG,读取,PASS,[True]
+COIL,59,1,报警输出输出使能,CONFIG,读取,PASS,[True]
+COIL,60,1,主加热1上电状态,CONFIG,读取,PASS,[False]
+COIL,61,1,主加热2上电状态,CONFIG,读取,PASS,[False]
+COIL,62,1,防冻上电状态,CONFIG,读取,PASS,[False]
+COIL,63,1,报警输出上电状态,CONFIG,读取,PASS,[False]
+COIL,64,1,报警总使能,CONFIG,读取,PASS,[True]
+COIL,65,1,T3湿度阈值报警使能,CONFIG,读取,PASS,[True]
+COIL,66,1,T3温度阈值报警使能,CONFIG,读取,PASS,[False]
+COIL,67,1,湿度报警分类使能,CONFIG,读取,PASS,[True]
+COIL,68,1,温度报警分类使能,CONFIG,读取,PASS,[True]
+COIL,69,1,压力报警分类使能,CONFIG,读取,PASS,[True]
+COIL,70,1,流量报警分类使能,CONFIG,读取,PASS,[True]
+COIL,71,1,阀故障报警分类使能,CONFIG,读取,PASS,[True]
+COIL,72,1,故障驱动报警输出,CONFIG,读取,PASS,[True]
+COIL,80,1,传感器日志使能,CONFIG,读取,PASS,[True]
+COIL,81,1,呼吸记录使能,CONFIG,读取,PASS,[True]
+COIL,96,1,任务1使能,CONFIG,读取,PASS,[True]
+COIL,97,1,任务1湿度覆盖使能,CONFIG,读取,PASS,[True]
+COIL,98,1,任务2使能,CONFIG,读取,PASS,[True]
+COIL,99,1,任务2湿度覆盖使能,CONFIG,读取,PASS,[True]
+COIL,100,1,任务3使能,CONFIG,读取,PASS,[True]
+COIL,101,1,任务3湿度覆盖使能,CONFIG,读取,PASS,[True]
+COIL,102,1,任务4使能,CONFIG,读取,PASS,[False]
+COIL,103,1,任务4湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,104,1,任务5使能,CONFIG,读取,PASS,[False]
+COIL,105,1,任务5湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,106,1,任务6使能,CONFIG,读取,PASS,[False]
+COIL,107,1,任务6湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,108,1,任务7使能,CONFIG,读取,PASS,[False]
+COIL,109,1,任务7湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,110,1,任务8使能,CONFIG,读取,PASS,[False]
+COIL,111,1,任务8湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,112,1,任务9使能,CONFIG,读取,PASS,[False]
+COIL,113,1,任务9湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,114,1,任务10使能,CONFIG,读取,PASS,[False]
+COIL,115,1,任务10湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,116,1,任务11使能,CONFIG,读取,PASS,[False]
+COIL,117,1,任务11湿度覆盖使能,CONFIG,读取,PASS,[False]
+COIL,118,1,任务12使能,CONFIG,读取,PASS,[False]
+COIL,119,1,任务12湿度覆盖使能,CONFIG,读取,PASS,[False]
+DI,0,1,总主加热状态,R,读取,PASS,[False]
+DI,1,1,主加热1状态,R,读取,PASS,[False]
+DI,2,1,主加热2状态,R,读取,PASS,[False]
+DI,3,1,防冻加热状态,R,读取,PASS,[False]
+DI,4,1,报警输出状态,R,读取,PASS,[False]
+DI,5,1,出气状态,R,读取,PASS,[False]
+DI,6,1,吸气状态,R,读取,PASS,[False]
+DI,7,1,无呼吸状态,R,读取,PASS,[True]
+DI,8,1,总报警,R,读取,PASS,[False]
+DI,9,1,上部温湿度故障,R,读取,PASS,[False]
+DI,10,1,压力传感器故障,R,读取,PASS,[False]
+DI,11,1,流量传感器故障,R,读取,PASS,[False]
+DI,12,1,执行器故障汇总,R,读取,PASS,[False]
+DI,13,1,压力越限报警,R,读取,PASS,[False]
+DI,14,1,上部湿度越限报警,R,读取,PASS,[False]
+DI,15,1,上部温度越限报警,R,读取,PASS,[False]
+DI,16,1,呼吸无变化报警,R,读取,PASS,[False]
+DI,17,1,上部温湿度有效,R,读取,PASS,[False]
+DI,18,1,压力数据有效,R,读取,PASS,[False]
+DI,19,1,流量数据有效,R,读取,PASS,[False]
+DI,32,1,左温湿度有效,R,读取,PASS,[False]
+DI,33,1,右温湿度有效,R,读取,PASS,[False]
+DI,34,1,左温湿度故障,R,读取,PASS,[False]
+DI,35,1,右温湿度故障,R,读取,PASS,[False]
+DI,36,1,主加热1输出故障,R,读取,PASS,[False]
+DI,37,1,主加热2输出故障,R,读取,PASS,[False]
+DI,38,1,防冻输出故障,R,读取,PASS,[False]
+DI,39,1,上阀故障,R,读取,PASS,[False]
+DI,40,1,左阀故障,R,读取,PASS,[False]
+DI,41,1,右阀故障,R,读取,PASS,[False]
+DI,42,1,电源过热故障,R,读取,PASS,[False]
+DI,43,1,压力保护停热,R,读取,PASS,[False]
+DI,48,1,阀动作保护中,R,读取,PASS,[True]
+DI,49,1,配置保存忙,R,读取,PASS,[False]
+DI,50,1,配置保存失败,R,读取,PASS,[False]
+DI,64,1,上阀原位到位,R,读取,PASS,[False]
+DI,65,1,上阀工作位到位,R,读取,PASS,[True]
+DI,66,1,上阀运动中,R,读取,PASS,[True]
+DI,67,1,上阀故障状态,R,读取,PASS,[False]
+DI,68,1,上阀位置未知,R,读取,PASS,[False]
+DI,69,1,上阀已禁用,R,读取,PASS,[False]
+DI,72,1,左阀原位到位,R,读取,PASS,[True]
+DI,73,1,左阀工作位到位,R,读取,PASS,[False]
+DI,74,1,左阀运动中,R,读取,PASS,[True]
+DI,75,1,左阀故障状态,R,读取,PASS,[False]
+DI,76,1,左阀位置未知,R,读取,PASS,[False]
+DI,77,1,左阀已禁用,R,读取,PASS,[False]
+DI,80,1,右阀原位到位,R,读取,PASS,[True]
+DI,81,1,右阀工作位到位,R,读取,PASS,[True]
+DI,82,1,右阀运动中,R,读取,PASS,[False]
+DI,83,1,右阀故障状态,R,读取,PASS,[False]
+DI,84,1,右阀位置未知,R,读取,PASS,[True]
+DI,85,1,右阀已禁用,R,读取,PASS,[True]
+DI,96,1,左路加热会话激活,R,读取,PASS,[False]
+DI,97,1,左路湿度峰值有效,R,读取,PASS,[True]
+DI,98,1,左路停热目标有效,R,读取,PASS,[True]
+DI,100,1,右路加热会话激活,R,读取,PASS,[False]
+DI,101,1,右路湿度峰值有效,R,读取,PASS,[True]
+DI,102,1,右路停热目标有效,R,读取,PASS,[True]
+DI,104,1,上阀回原点校准中,R,读取,PASS,[False]
+DI,105,1,上阀回原点校准成功,R,读取,PASS,[False]
+DI,106,1,上阀回原点校准失败,R,读取,PASS,[False]
+DI,108,1,左阀回原点校准中,R,读取,PASS,[False]
+DI,109,1,左阀回原点校准成功,R,读取,PASS,[False]
+DI,110,1,左阀回原点校准失败,R,读取,PASS,[False]
+DI,112,1,右阀回原点校准中,R,读取,PASS,[False]
+DI,113,1,右阀回原点校准成功,R,读取,PASS,[False]
+DI,114,1,右阀回原点校准失败,R,读取,PASS,[False]
+HR,0,1,从站地址,CONFIG,读取,PASS,[1]
+HR,1,1,校验方式,CONFIG,读取,PASS,[0]
+HR,2,2,波特率,CONFIG,读取,PASS,"[0, 9600]"
+HR,8,2,传感器日志间隔,CONFIG,读取,PASS,"[0, 60]"
+HR,10,1,日志保留天数,CONFIG,读取,PASS,[30]
+HR,16,2,设备Unix校时,COMMAND,读取,PASS,"[27304, 10689]"
+HR,100,2,T1温度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,102,2,T1湿度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,108,2,T1除湿启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,110,2,T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,112,2,T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,118,2,T1阈值确认间隔,CONFIG,读取,PASS,"[0, 600]"
+HR,120,1,T1阈值确认次数,CONFIG,读取,PASS,[3]
+HR,121,1,T1传感器总线,CONFIG,读取,PASS,[0]
+HR,122,1,T1传感器地址,CONFIG,读取,PASS,[1]
+HR,132,2,T2温度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,134,2,T2湿度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,140,2,T2除湿启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,142,2,T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,144,2,T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,150,2,T2阈值确认间隔,CONFIG,读取,PASS,"[0, 600]"
+HR,152,1,T2阈值确认次数,CONFIG,读取,PASS,[3]
+HR,153,1,T2传感器总线,CONFIG,读取,PASS,[0]
+HR,154,1,T2传感器地址,CONFIG,读取,PASS,[2]
+HR,164,2,T3温度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,166,2,T3湿度偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,168,2,T3温度报警上限,CONFIG,读取,PASS,"[17056, 0]"
+HR,170,2,T3温度报警下限,CONFIG,读取,PASS,"[0, 0]"
+HR,172,2,T3除湿启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,174,2,T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,176,2,T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,178,2,T3湿度报警上限,CONFIG,读取,PASS,"[16840, 0]"
+HR,180,2,T3湿度报警下限,CONFIG,读取,PASS,"[0, 0]"
+HR,182,2,T3阈值确认间隔,CONFIG,读取,PASS,"[1, 20864]"
+HR,184,1,T3阈值确认次数,CONFIG,读取,PASS,[7]
+HR,185,1,T3传感器总线,CONFIG,读取,PASS,[1]
+HR,186,1,T3传感器地址,CONFIG,读取,PASS,[0]
+HR,220,2,压力偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,222,2,正压报警上限,CONFIG,读取,PASS,"[16544, 0]"
+HR,224,2,负压报警下限,CONFIG,读取,PASS,"[49312, 0]"
+HR,240,2,流量偏移,CONFIG,读取,PASS,"[0, 0]"
+HR,242,2,吸气判定上限,CONFIG,读取,PASS,"[16025, 39322]"
+HR,244,2,出气判定下限,CONFIG,读取,PASS,"[48793, 39322]"
+HR,246,2,呼吸无变化报警时间,CONFIG,读取,PASS,"[1, 20864]"
+HR,260,2,除湿切换周期,CONFIG,读取,PASS,"[39, 36096]"
+HR,262,2,加热后冷却时间,CONFIG,读取,PASS,"[0, 10800]"
+HR,264,2,强制结束时间,CONFIG,读取,PASS,"[0, 43200]"
+HR,266,1,上阀空闲位置,CONFIG,读取,PASS,[1]
+HR,267,1,左阀空闲位置,CONFIG,读取,PASS,[1]
+HR,268,1,右阀空闲位置,CONFIG,读取,PASS,[1]
+HR,280,1,防冻参考传感器,CONFIG,读取,PASS,[3]
+HR,282,2,防冻开启温度,CONFIG,读取,PASS,"[49312, 0]"
+HR,284,2,防冻关闭温度,CONFIG,读取,PASS,"[0, 0]"
+HR,286,2,防冻关闭延时,CONFIG,读取,PASS,"[0, 28800]"
+HR,300,1,温湿度故障策略,CONFIG,读取,PASS,[2]
+HR,301,1,压力故障策略,CONFIG,读取,PASS,[2]
+HR,302,1,流量故障策略,CONFIG,读取,PASS,[1]
+HR,512,1,任务1月,CONFIG,读取,PASS,[4]
+HR,513,1,任务1日,CONFIG,读取,PASS,[1]
+HR,514,1,任务1时,CONFIG,读取,PASS,[8]
+HR,515,1,任务1分,CONFIG,读取,PASS,[30]
+HR,516,2,任务1持续时间,CONFIG,读取,PASS,"[5, 17920]"
+HR,518,2,任务1T1启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,520,2,任务1T2启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,522,2,任务1T3启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,524,2,任务1T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,526,2,任务1T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,528,2,任务1T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,530,2,任务1T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,532,2,任务1T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,534,2,任务1T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,544,1,任务2月,CONFIG,读取,PASS,[7]
+HR,545,1,任务2日,CONFIG,读取,PASS,[1]
+HR,546,1,任务2时,CONFIG,读取,PASS,[8]
+HR,547,1,任务2分,CONFIG,读取,PASS,[30]
+HR,548,2,任务2持续时间,CONFIG,读取,PASS,"[5, 17920]"
+HR,550,2,任务2T1启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,552,2,任务2T2启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,554,2,任务2T3启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,556,2,任务2T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,558,2,任务2T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,560,2,任务2T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,562,2,任务2T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,564,2,任务2T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,566,2,任务2T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,576,1,任务3月,CONFIG,读取,PASS,[10]
+HR,577,1,任务3日,CONFIG,读取,PASS,[1]
+HR,578,1,任务3时,CONFIG,读取,PASS,[8]
+HR,579,1,任务3分,CONFIG,读取,PASS,[30]
+HR,580,2,任务3持续时间,CONFIG,读取,PASS,"[5, 17920]"
+HR,582,2,任务3T1启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,584,2,任务3T2启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,586,2,任务3T3启动湿度,CONFIG,读取,PASS,"[16672, 0]"
+HR,588,2,任务3T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,590,2,任务3T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,592,2,任务3T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,594,2,任务3T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,596,2,任务3T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,598,2,任务3T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,608,1,任务4月,CONFIG,读取,PASS,[0]
+HR,609,1,任务4日,CONFIG,读取,PASS,[0]
+HR,610,1,任务4时,CONFIG,读取,PASS,[0]
+HR,611,1,任务4分,CONFIG,读取,PASS,[0]
+HR,612,2,任务4持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,614,2,任务4T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,616,2,任务4T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,618,2,任务4T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,620,2,任务4T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,622,2,任务4T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,624,2,任务4T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,626,2,任务4T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,628,2,任务4T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,630,2,任务4T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,640,1,任务5月,CONFIG,读取,PASS,[0]
+HR,641,1,任务5日,CONFIG,读取,PASS,[0]
+HR,642,1,任务5时,CONFIG,读取,PASS,[0]
+HR,643,1,任务5分,CONFIG,读取,PASS,[0]
+HR,644,2,任务5持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,646,2,任务5T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,648,2,任务5T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,650,2,任务5T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,652,2,任务5T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,654,2,任务5T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,656,2,任务5T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,658,2,任务5T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,660,2,任务5T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,662,2,任务5T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,672,1,任务6月,CONFIG,读取,PASS,[0]
+HR,673,1,任务6日,CONFIG,读取,PASS,[0]
+HR,674,1,任务6时,CONFIG,读取,PASS,[0]
+HR,675,1,任务6分,CONFIG,读取,PASS,[0]
+HR,676,2,任务6持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,678,2,任务6T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,680,2,任务6T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,682,2,任务6T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,684,2,任务6T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,686,2,任务6T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,688,2,任务6T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,690,2,任务6T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,692,2,任务6T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,694,2,任务6T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,704,1,任务7月,CONFIG,读取,PASS,[0]
+HR,705,1,任务7日,CONFIG,读取,PASS,[0]
+HR,706,1,任务7时,CONFIG,读取,PASS,[0]
+HR,707,1,任务7分,CONFIG,读取,PASS,[0]
+HR,708,2,任务7持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,710,2,任务7T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,712,2,任务7T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,714,2,任务7T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,716,2,任务7T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,718,2,任务7T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,720,2,任务7T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,722,2,任务7T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,724,2,任务7T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,726,2,任务7T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,736,1,任务8月,CONFIG,读取,PASS,[0]
+HR,737,1,任务8日,CONFIG,读取,PASS,[0]
+HR,738,1,任务8时,CONFIG,读取,PASS,[0]
+HR,739,1,任务8分,CONFIG,读取,PASS,[0]
+HR,740,2,任务8持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,742,2,任务8T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,744,2,任务8T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,746,2,任务8T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,748,2,任务8T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,750,2,任务8T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,752,2,任务8T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,754,2,任务8T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,756,2,任务8T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,758,2,任务8T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,768,1,任务9月,CONFIG,读取,PASS,[0]
+HR,769,1,任务9日,CONFIG,读取,PASS,[0]
+HR,770,1,任务9时,CONFIG,读取,PASS,[0]
+HR,771,1,任务9分,CONFIG,读取,PASS,[0]
+HR,772,2,任务9持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,774,2,任务9T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,776,2,任务9T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,778,2,任务9T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,780,2,任务9T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,782,2,任务9T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,784,2,任务9T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,786,2,任务9T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,788,2,任务9T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,790,2,任务9T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,800,1,任务10月,CONFIG,读取,PASS,[0]
+HR,801,1,任务10日,CONFIG,读取,PASS,[0]
+HR,802,1,任务10时,CONFIG,读取,PASS,[0]
+HR,803,1,任务10分,CONFIG,读取,PASS,[0]
+HR,804,2,任务10持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,806,2,任务10T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,808,2,任务10T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,810,2,任务10T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,812,2,任务10T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,814,2,任务10T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,816,2,任务10T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,818,2,任务10T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,820,2,任务10T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,822,2,任务10T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,832,1,任务11月,CONFIG,读取,PASS,[0]
+HR,833,1,任务11日,CONFIG,读取,PASS,[0]
+HR,834,1,任务11时,CONFIG,读取,PASS,[0]
+HR,835,1,任务11分,CONFIG,读取,PASS,[0]
+HR,836,2,任务11持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,838,2,任务11T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,840,2,任务11T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,842,2,任务11T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,844,2,任务11T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,846,2,任务11T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,848,2,任务11T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,850,2,任务11T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,852,2,任务11T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,854,2,任务11T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,864,1,任务12月,CONFIG,读取,PASS,[0]
+HR,865,1,任务12日,CONFIG,读取,PASS,[0]
+HR,866,1,任务12时,CONFIG,读取,PASS,[0]
+HR,867,1,任务12分,CONFIG,读取,PASS,[0]
+HR,868,2,任务12持续时间,CONFIG,读取,PASS,"[0, 0]"
+HR,870,2,任务12T1启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,872,2,任务12T2启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,874,2,任务12T3启动湿度,CONFIG,读取,PASS,"[16840, 0]"
+HR,876,2,任务12T1下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,878,2,任务12T2下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,880,2,任务12T3下降停热基准,CONFIG,读取,PASS,"[17056, 0]"
+HR,882,2,任务12T1峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,884,2,任务12T2峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+HR,886,2,任务12T3峰值回落幅度,CONFIG,读取,PASS,"[16544, 0]"
+IR,0,2,上部温度,R,读取,PASS,"[16836, 59980]"
+IR,2,2,上部湿度,R,读取,PASS,"[17007, 8797]"
+IR,4,2,压力,R,读取,PASS,"[0, 0]"
+IR,6,2,呼吸流量,R,读取,PASS,"[48568, 20972]"
+IR,16,2,左温度,R,读取,PASS,"[16825, 39322]"
+IR,18,2,左湿度,R,读取,PASS,"[17025, 0]"
+IR,20,2,右温度,R,读取,PASS,"[16824, 0]"
+IR,22,2,右湿度,R,读取,PASS,"[17027, 0]"
+IR,32,2,主加热1本轮运行时间,R,读取,PASS,"[0, 0]"
+IR,34,2,主加热2本轮运行时间,R,读取,PASS,"[0, 0]"
+IR,36,2,防冻本轮运行时间,R,读取,PASS,"[0, 0]"
+IR,38,2,主加热1累计运行时间,R,读取,PASS,"[0, 0]"
+IR,40,2,主加热2累计运行时间,R,读取,PASS,"[0, 0]"
+IR,42,2,防冻累计运行时间,R,读取,PASS,"[0, 0]"
+IR,44,4,主加热1累计开启次数,R,读取,PASS,"[0, 0, 0, 0]"
+IR,48,4,主加热2累计开启次数,R,读取,PASS,"[0, 0, 0, 0]"
+IR,52,4,防冻累计开启次数,R,读取,PASS,"[0, 0, 0, 0]"
+IR,56,2,上阀累计动作次数,R,读取,PASS,"[0, 0]"
+IR,58,2,左阀累计动作次数,R,读取,PASS,"[0, 0]"
+IR,60,2,右阀累计动作次数,R,读取,PASS,"[0, 0]"
+IR,64,2,左路起始湿度,R,读取,PASS,"[32704, 0]"
+IR,66,2,左路确认峰值,R,读取,PASS,"[32704, 0]"
+IR,68,2,左路停热目标,R,读取,PASS,"[32704, 0]"
+IR,70,1,左路停热确认计数,R,读取,PASS,[0]
+IR,71,1,左路停热确认目标次数,R,读取,PASS,[0]
+IR,72,2,右路起始湿度,R,读取,PASS,"[32704, 0]"
+IR,74,2,右路确认峰值,R,读取,PASS,"[32704, 0]"
+IR,76,2,右路停热目标,R,读取,PASS,"[32704, 0]"
+IR,78,1,右路停热确认计数,R,读取,PASS,[0]
+IR,79,1,右路停热确认目标次数,R,读取,PASS,[0]
+IR,80,1,上阀最近电流ADC,R,读取,PASS,[0]
+IR,81,1,左阀最近电流ADC,R,读取,PASS,[0]
+IR,82,1,右阀最近电流ADC,R,读取,PASS,[0]
+IR,84,1,上阀远程租约剩余,R,读取,PASS,[0]
+IR,85,1,左阀远程租约剩余,R,读取,PASS,[0]
+IR,86,1,右阀远程租约剩余,R,读取,PASS,[0]
+IR,88,1,阀保护剩余时间,R,读取,PASS,[72]
+IR,89,1,阀动作窗口计数,R,读取,PASS,[0]
+IR,90,1,阀动作窗口上限,R,读取,PASS,[6]
+IR,92,1,上阀故障原因,R,读取,PASS,[0]
+IR,93,1,左阀故障原因,R,读取,PASS,[0]
+IR,94,1,右阀故障原因,R,读取,PASS,[0]
+IR,95,1,上阀有效控制来源,R,读取,PASS,[0]
+IR,96,1,左阀有效控制来源,R,读取,PASS,[0]
+IR,97,1,右阀有效控制来源,R,读取,PASS,[0]
+IR,100,1,协议版本,R,读取,PASS,[2560]
+IR,104,1,T1状态码,R,读取,PASS,[0]
+IR,105,1,T2状态码,R,读取,PASS,[0]
+IR,106,1,T3状态码,R,读取,PASS,[0]
+IR,107,1,压力状态码,R,读取,PASS,[0]
+IR,108,1,压力方向,R,读取,PASS,[0]
+IR,109,1,流量状态码,R,读取,PASS,[0]
+IR,110,1,呼吸状态码,R,读取,PASS,[2]
+IR,112,2,设备Unix时间,R,读取,PASS,"[27304, 10705]"
+IR,114,1,配置代次,R,读取,PASS,[0]
+IR,115,1,配置错误码,R,读取,PASS,[0]
+IR,116,1,阀动作保护原因,R,读取,PASS,[1]
+IR,117,1,上阀末次动作尝试次数,R,读取,PASS,[1]
+IR,118,1,左阀末次动作尝试次数,R,读取,PASS,[0]
+IR,119,1,右阀末次动作尝试次数,R,读取,PASS,[0]
+IR,120,1,上阀回原点校准剩余时间,R,读取,PASS,[0]
+IR,121,1,左阀回原点校准剩余时间,R,读取,PASS,[0]
+IR,122,1,右阀回原点校准剩余时间,R,读取,PASS,[0]
+IR,124,1,Modbus链路状态,R,读取,PASS,[1]
+IR,126,2,连续通信失败次数,R,读取,PASS,"[0, 0]"
+IR,128,2,最近通信成功时间,R,读取,PASS,"[27304, 10706]"
+IR,130,2,最近通信失败时间,R,读取,PASS,"[0, 0]"
+IR,132,1,配置存储模式,R,读取,PASS,[1]
+IR,133,1,配置版本主版本,R,读取,PASS,[6]
+IR,134,1,配置版本次版本,R,读取,PASS,[4]
+IR,135,1,配置版本修订号,R,读取,PASS,[0]
+IR,136,1,配置持久化诊断码,R,读取,PASS,[0]
+COIL,0,1,远程加热请求,RW,FC05原值写入回读,PASS,False
+COIL,4,1,上阀故障复位,PULSE,FC05写1触发,PASS,读回0
+COIL,5,1,左阀故障复位,PULSE,FC05写1触发,PASS,读回0
+COIL,6,1,右阀故障复位,PULSE,FC05写1触发,PASS,读回0
+COIL,8,1,上阀回原点校准,PULSE,FC05写1触发,PASS,读回0
+COIL,9,1,左阀回原点校准,PULSE,FC05写1触发,PASS,读回0
+COIL,10,1,右阀回原点校准,PULSE,FC05写1触发,PASS,阀已禁用，命令被保护性拒绝
+COIL,16,1,主加热1手动接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,17,1,主加热1手动开目标,PAIR,成对写入,PASS,随COIL16完整写入
+COIL,18,1,主加热2手动接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,19,1,主加热2手动开目标,PAIR,成对写入,PASS,随COIL18完整写入
+COIL,20,1,防冻手动接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,21,1,防冻手动开目标,PAIR,成对写入,PASS,随COIL20完整写入
+COIL,24,1,上阀远程接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,25,1,上阀工作位目标,PAIR,成对写入,PASS,随COIL24完整写入
+COIL,26,1,左阀远程接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,27,1,左阀工作位目标,PAIR,成对写入,PASS,随COIL26完整写入
+COIL,28,1,右阀远程接管,PAIR,FC0F原值写入回读,PASS,"[False, False]"
+COIL,29,1,右阀工作位目标,PAIR,成对写入,PASS,随COIL28完整写入
+COIL,32,1,除湿控制使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,33,1,双通道模式,CONFIG,FC05原值写入回读,PASS,False
+COIL,34,1,防冻控制使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,40,1,T1传感器使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,41,1,T2传感器使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,42,1,T3传感器使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,43,1,压力检测使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,44,1,流量检测使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,48,1,上阀使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,49,1,左阀使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,50,1,右阀使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,52,1,上阀原点方向高电平,CONFIG,FC05原值写入回读,PASS,True
+COIL,53,1,左阀原点方向高电平,CONFIG,FC05原值写入回读,PASS,False
+COIL,54,1,右阀原点方向高电平,CONFIG,FC05原值写入回读,PASS,False
+COIL,56,1,主加热1输出使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,57,1,主加热2输出使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,58,1,防冻输出使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,59,1,报警输出输出使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,60,1,主加热1上电状态,CONFIG,FC05原值写入回读,PASS,False
+COIL,61,1,主加热2上电状态,CONFIG,FC05原值写入回读,PASS,False
+COIL,62,1,防冻上电状态,CONFIG,FC05原值写入回读,PASS,False
+COIL,63,1,报警输出上电状态,CONFIG,FC05原值写入回读,PASS,False
+COIL,64,1,报警总使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,65,1,T3湿度阈值报警使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,66,1,T3温度阈值报警使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,67,1,湿度报警分类使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,68,1,温度报警分类使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,69,1,压力报警分类使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,70,1,流量报警分类使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,71,1,阀故障报警分类使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,72,1,故障驱动报警输出,CONFIG,FC05原值写入回读,PASS,True
+COIL,80,1,传感器日志使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,81,1,呼吸记录使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,96,1,任务1使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,97,1,任务1湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,98,1,任务2使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,99,1,任务2湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,100,1,任务3使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,101,1,任务3湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,True
+COIL,102,1,任务4使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,103,1,任务4湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,104,1,任务5使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,105,1,任务5湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,106,1,任务6使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,107,1,任务6湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,108,1,任务7使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,109,1,任务7湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,110,1,任务8使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,111,1,任务8湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,112,1,任务9使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,113,1,任务9湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,114,1,任务10使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,115,1,任务10湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,116,1,任务11使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,117,1,任务11湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,118,1,任务12使能,CONFIG,FC05原值写入回读,PASS,False
+COIL,119,1,任务12湿度覆盖使能,CONFIG,FC05原值写入回读,PASS,False
+HR,0,1,从站地址,CONFIG,FC06原值写入回读,PASS,[1]
+HR,1,1,校验方式,CONFIG,FC06原值写入回读,PASS,[0]
+HR,2,2,波特率,CONFIG,FC10原值写入回读,PASS,"[0, 9600]"
+HR,8,2,传感器日志间隔,CONFIG,FC10原值写入回读,PASS,"[0, 60]"
+HR,10,1,日志保留天数,CONFIG,FC06原值写入回读,PASS,[30]
+HR,16,2,设备Unix校时,COMMAND,FC10原值写入回读,PASS,"[27304, 10876]"
+HR,100,2,T1温度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,102,2,T1湿度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,108,2,T1除湿启动湿度,CONFIG,FC10原值写入回读,PASS,"[16840, 0]"
+HR,110,2,T1下降停热基准,CONFIG,FC10原值写入回读,PASS,"[17056, 0]"
+HR,112,2,T1峰值回落幅度,CONFIG,FC10原值写入回读,PASS,"[16544, 0]"
+HR,118,2,T1阈值确认间隔,CONFIG,FC10原值写入回读,PASS,"[0, 600]"
+HR,120,1,T1阈值确认次数,CONFIG,FC06原值写入回读,PASS,[3]
+HR,121,1,T1传感器总线,CONFIG,FC06原值写入回读,PASS,[0]
+HR,122,1,T1传感器地址,CONFIG,FC06原值写入回读,PASS,[1]
+HR,132,2,T2温度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,134,2,T2湿度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,140,2,T2除湿启动湿度,CONFIG,FC10原值写入回读,PASS,"[16840, 0]"
+HR,142,2,T2下降停热基准,CONFIG,FC10原值写入回读,PASS,"[17056, 0]"
+HR,144,2,T2峰值回落幅度,CONFIG,FC10原值写入回读,PASS,"[16544, 0]"
+HR,150,2,T2阈值确认间隔,CONFIG,FC10原值写入回读,PASS,"[0, 600]"
+HR,152,1,T2阈值确认次数,CONFIG,FC06原值写入回读,PASS,[3]
+HR,153,1,T2传感器总线,CONFIG,FC06原值写入回读,PASS,[0]
+HR,154,1,T2传感器地址,CONFIG,FC06原值写入回读,PASS,[2]
+HR,164,2,T3温度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,166,2,T3湿度偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,168,2,T3温度报警上限,CONFIG,FC10原值写入回读,PASS,"[17056, 0]"
+HR,170,2,T3温度报警下限,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,172,2,T3除湿启动湿度,CONFIG,FC10原值写入回读,PASS,"[16840, 0]"
+HR,174,2,T3下降停热基准,CONFIG,FC10原值写入回读,PASS,"[17056, 0]"
+HR,176,2,T3峰值回落幅度,CONFIG,FC10原值写入回读,PASS,"[16544, 0]"
+HR,178,2,T3湿度报警上限,CONFIG,FC10原值写入回读,PASS,"[16840, 0]"
+HR,180,2,T3湿度报警下限,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,182,2,T3阈值确认间隔,CONFIG,FC10原值写入回读,PASS,"[1, 20864]"
+HR,184,1,T3阈值确认次数,CONFIG,FC06原值写入回读,PASS,[7]
+HR,185,1,T3传感器总线,CONFIG,FC06原值写入回读,PASS,[1]
+HR,186,1,T3传感器地址,CONFIG,FC06原值写入回读,PASS,[0]
+HR,220,2,压力偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,222,2,正压报警上限,CONFIG,FC10原值写入回读,PASS,"[16544, 0]"
+HR,224,2,负压报警下限,CONFIG,FC10原值写入回读,PASS,"[49312, 0]"
+HR,240,2,流量偏移,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,242,2,吸气判定上限,CONFIG,FC10原值写入回读,PASS,"[16025, 39322]"
+HR,244,2,出气判定下限,CONFIG,FC10原值写入回读,PASS,"[48793, 39322]"
+HR,246,2,呼吸无变化报警时间,CONFIG,FC10原值写入回读,PASS,"[1, 20864]"
+HR,260,2,除湿切换周期,CONFIG,FC10原值写入回读,PASS,"[39, 36096]"
+HR,262,2,加热后冷却时间,CONFIG,FC10原值写入回读,PASS,"[0, 10800]"
+HR,264,2,强制结束时间,CONFIG,FC10原值写入回读,PASS,"[0, 43200]"
+HR,266,1,上阀空闲位置,CONFIG,FC06原值写入回读,PASS,[1]
+HR,267,1,左阀空闲位置,CONFIG,FC06原值写入回读,PASS,[1]
+HR,268,1,右阀空闲位置,CONFIG,FC06原值写入回读,PASS,[1]
+HR,280,1,防冻参考传感器,CONFIG,FC06原值写入回读,PASS,[3]
+HR,282,2,防冻开启温度,CONFIG,FC10原值写入回读,PASS,"[49312, 0]"
+HR,284,2,防冻关闭温度,CONFIG,FC10原值写入回读,PASS,"[0, 0]"
+HR,286,2,防冻关闭延时,CONFIG,FC10原值写入回读,PASS,"[0, 28800]"
+HR,300,1,温湿度故障策略,CONFIG,FC06原值写入回读,PASS,[2]
+HR,301,1,压力故障策略,CONFIG,FC06原值写入回读,PASS,[2]
+HR,302,1,流量故障策略,CONFIG,FC06原值写入回读,PASS,[1]
+HR,512,1,任务1月,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,513,1,任务1日,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,514,1,任务1时,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,515,1,任务1分,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,516,2,任务1持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,518,2,任务1T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,520,2,任务1T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,522,2,任务1T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,524,2,任务1T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,526,2,任务1T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,528,2,任务1T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,530,2,任务1T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,532,2,任务1T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,534,2,任务1T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR512起连续24字
+HR,544,1,任务2月,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,545,1,任务2日,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,546,1,任务2时,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,547,1,任务2分,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,548,2,任务2持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,550,2,任务2T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,552,2,任务2T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,554,2,任务2T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,556,2,任务2T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,558,2,任务2T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,560,2,任务2T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,562,2,任务2T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,564,2,任务2T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,566,2,任务2T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR544起连续24字
+HR,576,1,任务3月,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,577,1,任务3日,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,578,1,任务3时,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,579,1,任务3分,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,580,2,任务3持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,582,2,任务3T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,584,2,任务3T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,586,2,任务3T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,588,2,任务3T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,590,2,任务3T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,592,2,任务3T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,594,2,任务3T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,596,2,任务3T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,598,2,任务3T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR576起连续24字
+HR,608,1,任务4月,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,609,1,任务4日,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,610,1,任务4时,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,611,1,任务4分,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,612,2,任务4持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,614,2,任务4T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,616,2,任务4T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,618,2,任务4T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,620,2,任务4T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,622,2,任务4T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,624,2,任务4T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,626,2,任务4T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,628,2,任务4T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,630,2,任务4T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR608起连续24字
+HR,640,1,任务5月,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,641,1,任务5日,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,642,1,任务5时,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,643,1,任务5分,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,644,2,任务5持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,646,2,任务5T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,648,2,任务5T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,650,2,任务5T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,652,2,任务5T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,654,2,任务5T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,656,2,任务5T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,658,2,任务5T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,660,2,任务5T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,662,2,任务5T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR640起连续24字
+HR,672,1,任务6月,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,673,1,任务6日,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,674,1,任务6时,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,675,1,任务6分,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,676,2,任务6持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,678,2,任务6T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,680,2,任务6T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,682,2,任务6T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,684,2,任务6T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,686,2,任务6T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,688,2,任务6T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,690,2,任务6T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,692,2,任务6T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,694,2,任务6T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR672起连续24字
+HR,704,1,任务7月,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,705,1,任务7日,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,706,1,任务7时,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,707,1,任务7分,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,708,2,任务7持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,710,2,任务7T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,712,2,任务7T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,714,2,任务7T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,716,2,任务7T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,718,2,任务7T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,720,2,任务7T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,722,2,任务7T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,724,2,任务7T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,726,2,任务7T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR704起连续24字
+HR,736,1,任务8月,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,737,1,任务8日,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,738,1,任务8时,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,739,1,任务8分,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,740,2,任务8持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,742,2,任务8T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,744,2,任务8T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,746,2,任务8T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,748,2,任务8T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,750,2,任务8T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,752,2,任务8T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,754,2,任务8T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,756,2,任务8T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,758,2,任务8T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR736起连续24字
+HR,768,1,任务9月,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,769,1,任务9日,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,770,1,任务9时,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,771,1,任务9分,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,772,2,任务9持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,774,2,任务9T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,776,2,任务9T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,778,2,任务9T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,780,2,任务9T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,782,2,任务9T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,784,2,任务9T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,786,2,任务9T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,788,2,任务9T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,790,2,任务9T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR768起连续24字
+HR,800,1,任务10月,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,801,1,任务10日,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,802,1,任务10时,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,803,1,任务10分,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,804,2,任务10持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,806,2,任务10T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,808,2,任务10T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,810,2,任务10T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,812,2,任务10T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,814,2,任务10T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,816,2,任务10T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,818,2,任务10T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,820,2,任务10T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,822,2,任务10T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR800起连续24字
+HR,832,1,任务11月,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,833,1,任务11日,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,834,1,任务11时,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,835,1,任务11分,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,836,2,任务11持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,838,2,任务11T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,840,2,任务11T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,842,2,任务11T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,844,2,任务11T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,846,2,任务11T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,848,2,任务11T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,850,2,任务11T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,852,2,任务11T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,854,2,任务11T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR832起连续24字
+HR,864,1,任务12月,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,865,1,任务12日,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,866,1,任务12时,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,867,1,任务12分,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,868,2,任务12持续时间,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,870,2,任务12T1启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,872,2,任务12T2启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,874,2,任务12T3启动湿度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,876,2,任务12T1下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,878,2,任务12T2下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,880,2,任务12T3下降停热基准,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,882,2,任务12T1峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,884,2,任务12T2峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+HR,886,2,任务12T3峰值回落幅度,CONFIG,FC10任务整槽写入回读,PASS,HR864起连续24字
+COIL,1,1,软件复位,PULSE,读取,PASS,[False]
+COIL,1,1,软件复位,PULSE,FC05软件复位,PASS,复位后重新连通

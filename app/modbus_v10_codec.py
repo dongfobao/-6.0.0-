@@ -1,4 +1,4 @@
-"""YLDQ Modbus V9 大端寄存器编解码。"""
+"""YLDQ Modbus V10 大端寄存器编解码。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import struct
 from typing import Any, Iterable
 
 
-class V9CodecError(ValueError):
+class V10CodecError(ValueError):
     pass
 
 
@@ -16,13 +16,13 @@ def decode_words(words: Iterable[int], data_type: str) -> Any:
     required = {"bool": 1, "uint16": 1, "int16": 1, "enum16": 1, "bitfield16": 1,
                 "uint32": 2, "int32": 2, "float32": 2, "uint64": 4}.get(data_type)
     if required is None:
-        raise V9CodecError(f"不支持的数据类型: {data_type}")
+        raise V10CodecError(f"不支持的数据类型: {data_type}")
     if len(values) != required:
-        raise V9CodecError(f"{data_type} 需要 {required} 个寄存器，实际 {len(values)}")
+        raise V10CodecError(f"{data_type} 需要 {required} 个寄存器，实际 {len(values)}")
     payload = struct.pack(f">{len(values)}H", *values)
     if data_type == "bool":
         if values[0] not in {0, 1}:
-            raise V9CodecError(f"布尔寄存器只能是 0 或 1，实际 {values[0]}")
+            raise V10CodecError(f"布尔寄存器只能是 0 或 1，实际 {values[0]}")
         return bool(values[0])
     if data_type in {"uint16", "enum16", "bitfield16"}:
         return values[0]
@@ -35,7 +35,7 @@ def decode_words(words: Iterable[int], data_type: str) -> Any:
     if data_type == "float32":
         number = struct.unpack(">f", payload)[0]
         if not math.isfinite(number):
-            raise V9CodecError("浮点寄存器值必须是有限数")
+            raise V10CodecError("浮点寄存器值必须是有限数")
         return number
     return struct.unpack(">Q", payload)[0]
 
@@ -57,14 +57,14 @@ def encode_words(value: Any, data_type: str) -> list[int]:
         elif data_type == "float32":
             number = float(value)
             if not math.isfinite(number):
-                raise V9CodecError("浮点值必须是有限数")
+                raise V10CodecError("浮点值必须是有限数")
             payload = struct.pack(">f", number)
         else:
-            raise V9CodecError(f"不支持的数据类型: {data_type}")
+            raise V10CodecError(f"不支持的数据类型: {data_type}")
     except (TypeError, ValueError, OverflowError, struct.error) as exc:
-        if isinstance(exc, V9CodecError):
+        if isinstance(exc, V10CodecError):
             raise
-        raise V9CodecError(f"无法编码 {data_type}: {value!r}") from exc
+        raise V10CodecError(f"无法编码 {data_type}: {value!r}") from exc
     return list(struct.unpack(f">{len(payload) // 2}H", payload))
 
 
@@ -72,16 +72,16 @@ def decode_catalog_item(item: dict[str, Any], block_address: int, words: list[in
     offset = int(item["address"]) - int(block_address)
     length = int(item["wordLength"])
     if offset < 0 or offset + length > len(words):
-        raise V9CodecError(f"点 {item['id']} 不在当前数据块内")
+        raise V10CodecError(f"点 {item['id']} 不在当前数据块内")
     return decode_words(words[offset: offset + length], str(item["dataType"]))
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int) -> int:
     if isinstance(value, bool) or (isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())):
-        raise V9CodecError(f"整数值无效: {value!r}")
+        raise V10CodecError(f"整数值无效: {value!r}")
     number = int(value)
     if not minimum <= number <= maximum:
-        raise V9CodecError(f"整数超出范围 [{minimum}, {maximum}]: {number}")
+        raise V10CodecError(f"整数超出范围 [{minimum}, {maximum}]: {number}")
     return number
 
 
@@ -92,9 +92,9 @@ def _as_bool(value: Any) -> bool:
             return True
         if normalized in {"0", "false", "off", "no", "否", "关"}:
             return False
-        raise V9CodecError(f"无法识别布尔值: {value}")
+        raise V10CodecError(f"无法识别布尔值: {value}")
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and value in {0, 1}:
         return bool(value)
-    raise V9CodecError(f"布尔值只能是 true/false 或 0/1: {value!r}")
+    raise V10CodecError(f"布尔值只能是 true/false 或 0/1: {value!r}")

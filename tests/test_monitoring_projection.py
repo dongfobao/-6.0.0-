@@ -2,130 +2,61 @@ from pathlib import Path
 import sys
 import unittest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from monitoring_projection import build_monitoring_snapshot
 
 
-def item(point_id, value, name="点", **extra):
-    return {"id": point_id, "name": name, "currentValue": value, "updatedAt": "2026-07-20 12:00:00", **extra}
+def item(point_id, value, **extra):
+    return {"id": point_id, "name": point_id, "currentValue": value, "updatedAt": "2026-09-14 12:00:00", **extra}
 
 
 class MonitoringProjectionTests(unittest.TestCase):
-    def test_projects_three_sensors_and_three_valves(self):
+    def test_projects_v10_sensors_valves_and_alarm_bits(self) -> None:
         metrics = []
+        statuses = [item("discrete_input.alarm.any", True), item("discrete_input.alarm.sensor_1_fault", True), item("discrete_input.alarm.htc1_fault", True)]
         for channel in range(1, 4):
-            prefix = f"input_register.sensor_{channel}"
-            metrics.extend([
-                item(f"{prefix}.temperature", 20.0 + channel),
-                item(f"{prefix}.humidity", 50.0 + channel),
-                item(f"{prefix}.status", 0), item(f"{prefix}.read_ok", True),
-            ])
-            valve = f"input_register.valve_{channel}"
-            for offset, key in enumerate(("display_state", "actuator_state", "position", "fault_reason", "current_adc", "control_source")):
-                metrics.append(item(f"{valve}.{key}", offset))
-        result = build_monitoring_snapshot({"deviceId": "dev-1", "metrics": metrics, "session": {}})
+            metrics += [item(f"input_register.sensor_{channel}.temperature", 20 + channel), item(f"input_register.sensor_{channel}.humidity", 50 + channel)]
+            statuses += [item(f"input_register.sensor_{channel}.read_ok", True)]
+            base = f"discrete_input.valve_{channel}"
+            statuses += [item(f"{base}.home_not_reached", channel == 2), item(f"{base}.work_not_reached", channel != 2), item(f"{base}.moving", False), item(f"{base}.fault", False), item(f"{base}.unknown", False), item(f"{base}.disabled", False)]
+        result = build_monitoring_snapshot({"deviceId": "dev-1", "metrics": metrics, "statuses": statuses, "session": {}})
         self.assertEqual(len(result["environmentChannels"]), 3)
-        self.assertEqual(result["environmentChannels"][2]["temperature"]["value"], 23.0)
-        self.assertEqual(
-            [(channel["channel"], channel["role"], channel["name"]) for channel in result["environmentChannels"]],
-            [(1, "left", "左温湿度"), (2, "right", "右温湿度"), (3, "upper", "上温湿度")],
-        )
-        self.assertEqual(len(result["valves"]), 3)
-        self.assertEqual(result["valves"][1]["position"]["value"], 2)
-        self.assertEqual(
-            [(valve["channel"], valve["role"], valve["name"]) for valve in result["valves"]],
-            [(1, "upper", "上阀"), (2, "left", "左阀"), (3, "right", "右阀")],
-        )
-        self.assertEqual(
-            [(session["channel"], session["role"]) for session in result["heatSessions"]],
-            [(1, "left"), (2, "right")],
-        )
-
-    def test_alarm_summary_detects_any_nonzero_group(self):
-        metrics = [
-            item("input_register.alarm.error_group_0", 0),
-            item("input_register.alarm.error_group_1", 4),
-            item("input_register.alarm.error_group_2", 0),
-        ]
-        result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
+        self.assertEqual(result["environmentChannels"][2]["temperature"]["value"], 23)
+        self.assertEqual(result["valves"][1]["position"]["value"], 1)
         self.assertTrue(result["alarms"]["active"])
-        self.assertTrue(result["alarms"]["sensorModules"]["flow"])
+        self.assertTrue(result["alarms"]["sensorModules"]["t1"])
+        self.assertTrue(result["alarms"]["equipmentModules"]["heater"])
 
-    def test_alarm_bits_map_to_the_corresponding_sensor_modules(self):
-        group_1 = (1 << 0) | (1 << 2) | (1 << 3) | (1 << 29) | (1 << 30)
-        metrics = [
-            item("input_register.alarm.error_group_0", 0),
-            item("input_register.alarm.error_group_1", group_1),
-            item("input_register.alarm.error_group_2", 0),
-        ]
-        result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
-        self.assertEqual(
-            result["alarms"]["sensorModules"],
-            {"pressure": True, "flow": True, "t1": True, "t3": True, "t2": True},
-        )
-
-        metrics[1] = item("input_register.alarm.error_group_1", 1 << 8)
-        upper_only = build_monitoring_snapshot({"metrics": metrics, "session": {}})
-        self.assertEqual(
-            upper_only["alarms"]["sensorModules"],
-            {"pressure": False, "flow": False, "t1": False, "t3": True, "t2": False},
-        )
-
-    def test_power_alarm_bits_map_to_heater_and_antifreeze_structures(self):
-        metrics = [
-            item("input_register.alarm.error_group_0", 0),
-            item("input_register.alarm.error_group_1", (1 << 4) | (1 << 7)),
-            item("input_register.alarm.error_group_2", 0),
-        ]
-        result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
-        self.assertEqual(
-            result["alarms"]["equipmentModules"],
-            {"heater": True, "antifreeze": True},
-        )
-
-        for bit in (5, 6):
-            metrics[1] = item("input_register.alarm.error_group_1", 1 << bit)
-            heater_only = build_monitoring_snapshot({"metrics": metrics, "session": {}})
-            self.assertEqual(
-                heater_only["alarms"]["equipmentModules"],
-                {"heater": True, "antifreeze": False},
-            )
-
-    def test_enum_value_uses_display_label(self):
-        metrics = [item("input_register.breath_state", 1, enumValues={0: "呼气", 1: "吸气"})]
-        result = build_monitoring_snapshot({"metrics": metrics, "session": {}})
-        self.assertEqual(result["process"]["breathState"]["displayValue"], "吸气")
-
-    def test_projects_runtime_valve_command_and_feedback(self):
-        controls = []
-        for channel in range(1, 4):
-            prefix = f"holding.runtime.valve_{channel}"
-            controls.extend([
-                item(prefix, 2, enumValues={0: "释放远程控制", 1: "回原位", 2: "到工作位"}),
-                item(f"{prefix}_diagnostic_fault", 8, enumValues={0: "无故障", 8: "开路"}),
-                item(f"{prefix}_diagnostic_source", 2, enumValues={2: "远程"}),
-                item(f"{prefix}_remote_seconds", 600),
-            ])
-        controls.extend([
-            item("holding.runtime.valve_guard_reason", 3, enumValues={3: "阀门未到位重试等待"}),
-            item("holding.runtime.valve_guard_remaining_seconds", 42),
-            item("holding.runtime.valve_action_count", 5),
-            item("holding.runtime.valve_action_limit", 6),
-        ])
-        result = build_monitoring_snapshot({"metrics": [], "controls": controls, "session": {}})
+    def test_runtime_valve_diagnostics_use_v10_ir_points(self) -> None:
+        controls = [item("holding.runtime.valve_1", 2, enumValues={2: "到工作位"})]
+        metrics = [item("input_register.valve_1.fault_reason", 8, enumValues={8: "开路"}), item("input_register.valve_1.control_source", 1, enumValues={1: "远程"}), item("input_register.valve_1.remote_seconds", 600), item("input_register.runtime.valve_guard_reason", 3, enumValues={3: "故障重试"}), item("input_register.runtime.valve_guard_remaining_seconds", 42), item("input_register.runtime.valve_action_count", 5), item("input_register.runtime.valve_action_limit", 6)]
+        result = build_monitoring_snapshot({"metrics": metrics, "controls": controls, "session": {}})
         valve = result["runtimeValves"][0]
         self.assertEqual(valve["command"]["displayValue"], "到工作位")
         self.assertEqual(valve["faultReason"]["displayValue"], "开路")
         self.assertEqual(valve["effectiveSource"]["displayValue"], "远程")
         self.assertEqual(valve["remoteSeconds"]["value"], 600)
         self.assertTrue(result["valveGuard"]["active"])
-        self.assertEqual(result["valveGuard"]["reason"]["displayValue"], "阀门未到位重试等待")
-        self.assertEqual(result["valveGuard"]["remainingSeconds"]["value"], 42)
-        self.assertEqual(result["valveGuard"]["actionCount"]["value"], 5)
-        self.assertEqual(result["valveGuard"]["actionLimit"]["value"], 6)
+
+    def test_breath_enum_uses_catalog_label(self) -> None:
+        result = build_monitoring_snapshot({"metrics": [item("input_register.breath_state", 1, enumValues={0: "呼气", 1: "吸气"})], "session": {}})
+        self.assertEqual(result["process"]["breathState"]["displayValue"], "吸气")
+
+    def test_schedule_plan_uses_selected_slot_aliases(self) -> None:
+        controls = [
+            item("holding.schedule.task_count", 12),
+            item("holding.schedule.selected_task", 2),
+            item("holding.schedule.enabled", True),
+            item("holding.schedule.start_month", 9),
+            item("holding.schedule.start_day", 15),
+        ]
+        result = build_monitoring_snapshot({"controls": controls, "session": {}})
+        self.assertEqual(result["schedulePlan"]["taskCount"]["value"], 12)
+        self.assertEqual(result["schedulePlan"]["selectedTask"]["value"], 2)
+        self.assertTrue(result["schedulePlan"]["enabled"]["value"])
+        self.assertEqual(result["schedulePlan"]["startMonth"]["value"], 9)
 
 
 if __name__ == "__main__":

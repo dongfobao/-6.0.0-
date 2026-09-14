@@ -27,7 +27,7 @@
         <button class="nav-item" data-page="diagnostics">通信诊断</button>
         <button class="nav-item" data-page="devices">设备管理</button>
       </nav>
-      <div class="protocol-card"><span>通信协议</span><strong>Modbus V9.1</strong><small>裸 RTU · 0x0901</small></div>
+      <div class="protocol-card"><span>通信协议</span><strong>Modbus V10.0</strong><small>裸 RTU · 0x0A00</small></div>
     </aside>
 
     <main class="workspace">
@@ -89,7 +89,7 @@
 
 
       <section class="page" data-page-view="analysis">
-        <div class="trend-page-heading"><div><span>SESSION LOG ANALYSIS</span><h2>会话日志与曲线分析</h2><p>同时分析下位机 EasyLogger（SD 卡或串口）与上位机 Modbus V9 采集会话：环境、呼吸、运行日志、热事件、通信异常、配置快照、会话元数据和检查点。</p></div><div class="trend-live-badge offline"><i></i><div><strong>会话分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
+        <div class="trend-page-heading"><div><span>SESSION LOG ANALYSIS</span><h2>会话日志与曲线分析</h2><p>同时分析下位机 EasyLogger（SD 卡或串口）与上位机 Modbus V10 采集会话：环境、呼吸、运行日志、热事件、通信异常、配置快照、会话元数据和检查点。</p></div><div class="trend-live-badge offline"><i></i><div><strong>会话分析</strong><small id="analysisRangeText">未导入数据</small></div></div></div>
         <div class="panel analysis-import-panel">
           <div class="analysis-import-actions">
             <button id="analysisImportFolderBtn" class="button primary">导入会话文件夹</button>
@@ -164,8 +164,8 @@
 
       <section class="page" data-page-view="configuration">
         <div class="config-toolbar panel">
-          <div><h3>V9 配置事务</h3><p>修改先暂存并回读；确认后提交，或放弃全部暂存。</p></div>
-          <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="syncRtcBtn" class="button secondary" title="将当前电脑时间强制写入下位机 RTC">同步电脑时间</button><button id="remoteResetBtn" class="button danger" title="设备将立即重启，通信会短暂中断">远程重启复位</button><button id="discardConfigBtn" class="button secondary">放弃暂存</button><button id="commitConfigBtn" class="button primary">提交配置</button></div>
+          <div><h3>V10 参数配置</h3><p>参数保存后，下位机立即校验、持久化并回读。</p></div>
+          <div class="button-row"><button id="refreshConfigBtn" class="button secondary">读取设备参数</button><button id="syncRtcBtn" class="button secondary" title="将当前电脑时间强制写入下位机 RTC">同步电脑时间</button><button id="remoteResetBtn" class="button danger" title="设备将立即重启，通信会短暂中断">远程重启复位</button></div>
         </div>
         <div class="filter-row"><input id="configSearch" type="search" placeholder="搜索参数名称或点 ID"></div>
         <div id="configModules" class="config-modules" aria-label="参数模块"></div>
@@ -206,7 +206,7 @@
   </dialog>
   <script src="/vendor/three.legacy.js"></script>
   <script src="/vendor/GLTFLoader.legacy.js"></script>
-  <script src="/digital-twin.js?v=150"></script>
+  <script src="/digital-twin.js?v=155"></script>
   <script src="/app.js?v=5"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>

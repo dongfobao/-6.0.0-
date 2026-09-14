@@ -141,6 +141,9 @@ class LiveModbusClient:
     def read_discrete_inputs(self, address: int, count: int) -> list[bool]:
         return self._read_bits(2, address, count)
 
+    def read_coils(self, address: int, count: int) -> list[bool]:
+        return self._read_bits(1, address, count)
+
     def read_holding_registers(self, address: int, count: int) -> list[int]:
         return self._read_registers(3, address, count)
 
@@ -172,6 +175,38 @@ class LiveModbusClient:
         expected = struct.pack(">B B H H", self.config.slave_id, 16, address, word_count)
         if len(response) != 8 or response[:6] != expected[:6]:
             raise ModbusError("unexpected response payload for write multiple registers")
+
+    def write_single_coil(self, address: int, value: bool | int) -> None:
+        address = _validated_int(address, "coil address", 0, 0xFFFF)
+        if value not in {False, True, 0, 1}:
+            raise ModbusError(f"invalid coil value: {value}")
+        wire_value = 0xFF00 if bool(value) else 0x0000
+        payload = struct.pack(">B B H H", self.config.slave_id, 5, address, wire_value)
+        response = self._request(payload, minimum_length=8)
+        if len(response) != 8 or response[:6] != payload[:6]:
+            raise ModbusError("unexpected response payload for write single coil")
+
+    def write_multiple_coils(self, address: int, values: list[bool | int]) -> None:
+        if not values or len(values) > 1968:
+            raise ModbusError(f"invalid coil count: {len(values)}")
+        address = _validated_int(address, "coil address", 0, 0xFFFF)
+        if address + len(values) - 1 > 0xFFFF:
+            raise ModbusError("coil write crosses address 65535")
+        bits: list[bool] = []
+        for value in values:
+            if value not in {False, True, 0, 1}:
+                raise ModbusError(f"invalid coil value: {value}")
+            bits.append(bool(value))
+        byte_count = (len(bits) + 7) // 8
+        packed = bytearray(byte_count)
+        for offset, value in enumerate(bits):
+            if value:
+                packed[offset // 8] |= 1 << (offset % 8)
+        payload = struct.pack(">B B H H B", self.config.slave_id, 15, address, len(bits), byte_count) + bytes(packed)
+        response = self._request(payload, minimum_length=8)
+        expected = struct.pack(">B B H H", self.config.slave_id, 15, address, len(bits))
+        if len(response) != 8 or response[:6] != expected[:6]:
+            raise ModbusError("unexpected response payload for write multiple coils")
 
     def send_raw_frame(
         self,
@@ -338,7 +373,7 @@ class LiveModbusClient:
         function_code = frame[1]
         if function_code & 0x80:
             return len(frame) >= 5
-        if function_code in {6, 16}:
+        if function_code in {5, 6, 15, 16}:
             return len(frame) >= 8
         byte_count = frame[2]
         expected_length = 3 + byte_count + 2
@@ -362,10 +397,10 @@ class LiveModbusClient:
 
     @staticmethod
     def _validate_read_payload(request_payload: bytes, response: bytes) -> None:
-        if len(request_payload) < 6 or request_payload[1] not in {2, 3, 4}:
+        if len(request_payload) < 6 or request_payload[1] not in {1, 2, 3, 4}:
             return
         count = int.from_bytes(request_payload[4:6], "big")
-        expected = (count + 7) // 8 if request_payload[1] == 2 else count * 2
+        expected = (count + 7) // 8 if request_payload[1] in {1, 2} else count * 2
         if len(response) < 5 or response[2] != expected or len(response) != expected + 5:
             raise ModbusError(
                 f"unexpected response byte count for fc={request_payload[1]}: expected {expected}"
@@ -417,15 +452,15 @@ class LiveModbusClient:
         if len(payload) < 2:
             return "request"
         fc = payload[1]
-        if fc in {2, 3, 4} and len(payload) >= 6:
+        if fc in {1, 2, 3, 4} and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             count = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} count {count}"
-        if fc == 6 and len(payload) >= 6:
+        if fc in {5, 6} and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             value = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} value {value}"
-        if fc == 16 and len(payload) >= 6:
+        if fc in {15, 16} and len(payload) >= 6:
             address = int.from_bytes(payload[2:4], "big")
             count = int.from_bytes(payload[4:6], "big")
             return f"FC{fc:02d} addr {address} count {count}"
