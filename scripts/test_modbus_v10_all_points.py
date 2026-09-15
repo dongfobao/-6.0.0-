@@ -215,7 +215,7 @@ def main() -> int:
 
         offset_words = originals[("HR", 100)]
         offset = struct.unpack(">f", struct.pack(">2H", *offset_words))[0]
-        test_words = list(struct.unpack(">2H", struct.pack(">f", offset + 0.125)))
+        test_words = list(struct.unpack(">2H", struct.pack(">f", round(offset + 0.10, 2))))
         request("T1温偏改值", lambda: client.write_multiple_registers(100, test_words)); wait_ready()
         if request("T1温偏回读", lambda: client.read_holding_registers(100, 2)) != test_words: raise RuntimeError("T1温偏改值失败")
         request("T1温偏恢复", lambda: client.write_multiple_registers(100, offset_words)); wait_ready()

@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from live_register_catalog import get_register_catalog
+from modbus_v10_codec import decode_words
 from modbus_v10_config import ConfigTransactionError, V10ConfigTransaction
 
 
@@ -65,6 +66,12 @@ class ModbusV10ConfigTests(unittest.TestCase):
         words = V10ConfigTransaction(client, poll_interval_seconds=0).stage_value(self.by_id["holding.dehumidification.cycle_interval_seconds"], 86400)
         self.assertEqual(words, [1, 20864])
         self.assertEqual([client.holding[260], client.holding[261]], words)
+
+    def test_float_config_is_canonicalized_to_two_decimals(self) -> None:
+        client = FakeClient()
+        item = self.by_id["holding.sensor_1.temperature_offset"]
+        words = V10ConfigTransaction(client, poll_interval_seconds=0).stage_value(item, 0.125)
+        self.assertAlmostEqual(decode_words(words, "float32"), 0.13, places=6)
 
     def test_rejects_runtime_point_range_and_wrong_protocol(self) -> None:
         client = FakeClient()

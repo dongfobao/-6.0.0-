@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import time
 from typing import Any, Protocol
 
@@ -10,6 +11,14 @@ from modbus_v10_codec import encode_words
 
 ERROR_SAVE_PENDING = 5
 ERROR_DESCRIPTIONS = {1: "配置加载失败", 2: "配置校验失败", 3: "配置持久化失败", 4: "运行命令失败", 5: "配置仍在保存中"}
+
+
+def canonicalize_config_float(value: Any) -> float:
+    """与下位机C round(value * 100) / 100保持一致。"""
+    try:
+        return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError) as exc:
+        raise ConfigTransactionError(f"浮点配置值无效: {value!r}") from exc
 
 
 class RegisterClient(Protocol):
@@ -74,7 +83,11 @@ class V10ConfigTransaction:
                 raise ConfigTransactionError(f"配置回读不一致: {item.get('id')}")
             wire: list[int | bool] = bits
         else:
-            words = encode_words(value, str(item["dataType"]))
+            data_type = str(item["dataType"])
+            # 下位机配置持久化统一保留两位小数；上位机先按相同规则量化，
+            # 避免0.125写入后固件规范化为0.13而被误报为回读失败。
+            wire_value = canonicalize_config_float(value) if data_type == "float32" else value
+            words = encode_words(wire_value, data_type)
             if len(words) == 1: self.client.write_single_register(address, words[0])
             else: self.client.write_multiple_registers(address, words)
             if self.client.read_holding_registers(address, len(words)) != words:

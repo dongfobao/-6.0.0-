@@ -19,7 +19,7 @@ from live_polling_commands import build_default_polling_commands, normalize_poll
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_item
 from live_session_recorder import LiveSessionRecorder
 from modbus_v10_codec import decode_words, encode_words
-from modbus_v10_config import V10ConfigTransaction
+from modbus_v10_config import V10ConfigTransaction, canonicalize_config_float
 
 
 HISTORY_POINT_IDS = (
@@ -1227,7 +1227,7 @@ class LiveAcquisitionService:
                     transaction = V10ConfigTransaction(client)
                     before = transaction.read_status().generation
                     client.write_multiple_coils(96 + (selected - 1) * 2, [False, False])
-                    transaction._wait_for_save(before)
+                    transaction._wait_for_save(before, allow_unchanged=True)
                     self._refresh_schedule_from_client(device_id, slot, client, selected)
             finally:
                 client.close()
@@ -1291,8 +1291,6 @@ class LiveAcquisitionService:
         ):
             if not 0 <= start <= 100 or not 0 <= falling_stop <= 100:
                 raise ValueError(f"温湿度 {index} 的湿度阈值必须在 0–100 %RH")
-            if falling_stop >= start:
-                raise ValueError(f"温湿度{index}的回落停热阈值必须小于启动阈值")
             if not 0 < peak_drop <= 100:
                 raise ValueError(f"温湿度 {index} 的峰值回落幅度必须在 0–100 %RH")
 
@@ -1308,17 +1306,17 @@ class LiveAcquisitionService:
                 words[4:6] = encode_words(duration_days * 86400, "uint32")
                 for sensor, value in enumerate(start_thresholds):
                     offset = 6 + sensor * 2
-                    words[offset:offset + 2] = encode_words(value, "float32")
+                    words[offset:offset + 2] = encode_words(canonicalize_config_float(value), "float32")
                 for sensor, value in enumerate(falling_stop_thresholds):
                     offset = 12 + sensor * 2
-                    words[offset:offset + 2] = encode_words(value, "float32")
+                    words[offset:offset + 2] = encode_words(canonicalize_config_float(value), "float32")
                 for sensor, value in enumerate(peak_drop_thresholds):
                     offset = 18 + sensor * 2
-                    words[offset:offset + 2] = encode_words(value, "float32")
+                    words[offset:offset + 2] = encode_words(canonicalize_config_float(value), "float32")
                 transaction = V10ConfigTransaction(client)
                 before = transaction.read_status().generation
                 client.write_multiple_registers(base, words)
-                transaction._wait_for_save(before)
+                transaction._wait_for_save(before, allow_unchanged=True)
                 readback = client.read_holding_registers(base, 24)
                 if list(readback) != words:
                     raise ModbusError("定时任务配置回读不一致")
@@ -1326,7 +1324,7 @@ class LiveAcquisitionService:
                 enabled = self._strict_bool(payload.get("enabled"), "enabled")
                 override = self._strict_bool(payload.get("humidityOverrideEnabled"), "humidityOverrideEnabled")
                 client.write_multiple_coils(96 + (task_number - 1) * 2, [enabled, override])
-                transaction._wait_for_save(before)
+                transaction._wait_for_save(before, allow_unchanged=True)
                 slot["selected_schedule_task"] = task_number
                 self._refresh_schedule_from_client(device_id, slot, client, task_number)
             finally:

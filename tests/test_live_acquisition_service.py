@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "app"))
 import live_acquisition_service
 from live_acquisition_service import LiveAcquisitionService
 from live_modbus_client import ModbusError
+from modbus_v10_config import V10ConfigTransaction
 
 
 class FakeClient:
@@ -102,6 +103,31 @@ class LiveAcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(by_id["holding.schedule.selected_task"]["currentValue"], 2)
         self.assertEqual(by_id["holding.schedule.start_month"]["currentValue"], 9)
         self.assertEqual(by_id["holding.schedule.duration_days"]["currentValue"], 4)
+
+    def test_schedule_accepts_falling_stop_above_start_threshold(self) -> None:
+        payload = {
+            "taskNumber": 1,
+            "month": 4,
+            "day": 1,
+            "hour": 8,
+            "minute": 30,
+            "durationDays": 4,
+            "enabled": True,
+            "humidityOverrideEnabled": True,
+            "humidityStartThreshold": [10, 10, 10],
+            "humidityFallingStopThreshold": [80, 80, 80],
+            "humidityPeakDropThreshold": [5, 5, 5],
+        }
+        with (
+            patch.object(live_acquisition_service, "LiveModbusClient", FakeClient),
+            patch.object(V10ConfigTransaction, "_wait_for_save", return_value=None) as wait_for_save,
+        ):
+            result = self.service.stage_schedule_task("dev-a", payload)
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(call[0:2] == ("fc16", 512) for call in FakeClient.calls))
+        self.assertIn(("fc15", 96, [True, True]), FakeClient.calls)
+        self.assertEqual(wait_for_save.call_count, 2)
+        self.assertTrue(all(call.kwargs.get("allow_unchanged") for call in wait_for_save.call_args_list))
 
     def test_parameters_and_snapshot_expose_selected_schedule_aliases(self) -> None:
         self.slot["selected_schedule_task"] = 2
