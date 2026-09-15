@@ -342,7 +342,7 @@ function renderValveGuard(guard=state.snapshot?.valveGuard||{}){
   const info=valveGuardInfo(guard),host=$("valveGuardNotice");if(!host)return info;
   if(!info.available){
     host.className="valve-guard-notice";
-    host.innerHTML="<strong>阀门保护状态：--</strong><span>启动监控后读取下位机 HR817～820</span>";
+    host.innerHTML="<strong>阀门保护状态：--</strong><span>启动监控后读取下位机 DI48、IR88～90、IR116</span>";
     return info;
   }
   const countText=Number.isFinite(info.limit)&&info.limit>0?`动作次数 ${info.count}/${info.limit}`:`动作次数 ${info.count}`;

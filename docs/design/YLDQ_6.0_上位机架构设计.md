@@ -1,4 +1,6 @@
-# YLDQ 6.0 上位机架构设计
+# YLDQ 6.0 上位机 V9 历史架构设计
+
+> 归档说明：本文记录协议改造前的 Modbus V9 架构，仅供差异追溯，不是当前实现或接入依据。当前程序使用 Modbus V10.0（协议标识 `0x0A00`）；点位以 `app/modbus_v10_point_map.json` 和 `app/live_register_catalog.py` 为准，外部接入以 `docs/通信协议/YLDQ吸湿器_电站Modbus四区点表_V10.0.docx` 为准。
 
 ## 1. 设计结论
 

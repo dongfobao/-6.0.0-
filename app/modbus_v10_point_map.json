@@ -4316,7 +4316,7 @@
       "name": "协议版本",
       "type": "U16",
       "unit": "—",
-      "description": "本设计预留0x0A00；不是状态位图",
+      "description": "固定协议标识0x0A00；不是状态位图",
       "access": "R"
     },
     {
