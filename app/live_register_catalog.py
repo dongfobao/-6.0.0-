@@ -210,6 +210,14 @@ _RANGES = {
     "holding.dehumidification.force_close_seconds": (1, 31536000),
     "holding.antifreeze.close_delay_seconds": (0, 31536000), "holding.system.rtc_sync_epoch": (946684800, 4102444799),
 }
+_DISPLAY_DURATIONS = {
+    # Modbus线协议统一使用秒；上位机按设备LCD和配置文件的业务单位显示。
+    "holding.flow.no_change_alarm_seconds": (86400, "天", 0, 365),
+    "holding.dehumidification.cycle_interval_seconds": (86400, "天", 0, 365),
+    "holding.dehumidification.post_heating_cooling_seconds": (3600, "小时", 0, 8760),
+    "holding.dehumidification.force_close_seconds": (3600, "小时", 0.01, 8760),
+    "holding.antifreeze.close_delay_seconds": (3600, "小时", 0, 8760),
+}
 for _item in REGISTER_CATALOG:
     _id = str(_item["id"])
     if _id in _ENUMS:
@@ -217,6 +225,11 @@ for _item in REGISTER_CATALOG:
         if _item["writable"]: _item["allowedValues"] = list(_ENUMS[_id])
     if _id == "holding.communication.baudrate": _item["allowedValues"] = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     if _id in _RANGES: _item["minimum"], _item["maximum"] = _RANGES[_id]
+    if _id in _DISPLAY_DURATIONS:
+        _scale, _unit, _minimum, _maximum = _DISPLAY_DURATIONS[_id]
+        _item.update(displayScale=_scale, displayUnit=_unit,
+                     displayMinimum=_minimum, displayMaximum=_maximum,
+                     displayStep=0.01)
     if ".modbus_address" in _id: _item["minimum"], _item["maximum"] = 0, 247
     if any(_token in _id for _token in ("humidity_start_threshold", "humidity_falling_stop_threshold", "humidity_peak_drop_threshold", "humidity_alarm_")): _item["minimum"], _item["maximum"] = 0, 100
     if ".threshold_confirm_interval_seconds" in _id: _item["minimum"], _item["maximum"] = 1, 86400

@@ -51,6 +51,21 @@ class LiveRegisterCatalogTests(unittest.TestCase):
             self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.start_month"]["address"], base)
             self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.humidity_peak_drop_threshold_3"]["addressEnd"], base + 23)
 
+    def test_business_duration_units_keep_seconds_on_wire(self) -> None:
+        expected = {
+            "holding.flow.no_change_alarm_seconds": (86400, "天", 365),
+            "holding.dehumidification.cycle_interval_seconds": (86400, "天", 365),
+            "holding.dehumidification.post_heating_cooling_seconds": (3600, "小时", 8760),
+            "holding.dehumidification.force_close_seconds": (3600, "小时", 8760),
+            "holding.antifreeze.close_delay_seconds": (3600, "小时", 8760),
+        }
+        for item_id, (scale, unit, maximum) in expected.items():
+            item = self.by_id[item_id]
+            self.assertEqual(item["unit"], "s")
+            self.assertEqual(item["displayScale"], scale)
+            self.assertEqual(item["displayUnit"], unit)
+            self.assertEqual(item["displayMaximum"], maximum)
+
 
 if __name__ == "__main__":
     unittest.main()
