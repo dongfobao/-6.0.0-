@@ -164,12 +164,9 @@
       const prefix = element("iecStationPrefix").value.trim();
       iecState.profile.stationPrefix = prefix;
       iecState.profile.points.forEach(point => { const meta = iecState.meta.get(point.pointId); if (meta) point.stationName = `${prefix}${meta.sourceName}`; });
-      iecState.profile.description = prefix || iecState.profile.description;
       const phase = prefix.match(/([ABC])相/i)?.[1]?.toUpperCase();
       if (phase) {
-        iecState.profile.name = iecState.profile.name.replace(/[ABC]相/ig, `${phase}相`);
         iecState.profile.logicalDevice = iecState.profile.logicalDevice.replace(/_[ABC]$/i, `_${phase}`);
-        setValue("iecProfileName", iecState.profile.name);
         setValue("iecLogicalDevice", iecState.profile.logicalDevice);
       }
       renderTable();
