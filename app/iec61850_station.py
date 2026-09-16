@@ -427,6 +427,13 @@ class StationManager:
     def connect(self, device_id: str) -> dict[str, Any]:
         with self.lock:
             device = self._device(device_id)
+            duplicate = next((item for item in self.payload["devices"]
+                              if item["id"] != device_id
+                              and item.get("host") == device.get("host")
+                              and int(item.get("port") or 102) == int(device.get("port") or 102)
+                              and item.get("status") in {"online", "connecting", "model_mismatch"}), None)
+            if duplicate is not None:
+                raise ValueError(f"{device['host']}:{device['port']} 已由“{duplicate['displayName']}”连接，请先断开重复设备")
             device["status"] = "connecting"
             device["statusText"] = "正在建立MMS关联"
             device["lastError"] = ""
@@ -452,6 +459,8 @@ class StationManager:
     def read_now(self, device_id: str, reference: str, fc: str) -> dict[str, Any]:
         with self.lock:
             device = self._device(device_id)
+            if not (device.get("modelComparison") or {}).get("matched"):
+                raise ValueError("ICD与板卡在线模型不一致，不能读取该测点")
             if not any(point["reference"] == reference for point in device["points"]):
                 raise ValueError("测点不属于当前ICD")
             worker = self.workers.get(device_id)
@@ -463,6 +472,8 @@ class StationManager:
     def subscribe_rcb(self, device_id: str, reference: str) -> dict[str, Any]:
         with self.lock:
             device = self._device(device_id)
+            if not (device.get("modelComparison") or {}).get("matched"):
+                raise ValueError("ICD与板卡在线模型不一致，不能启用报告")
             rcb = next((item for item in device["rcbs"] if item["reference"] == reference), None)
             if rcb is None:
                 raise ValueError("RCB不属于当前ICD")
@@ -489,11 +500,24 @@ class StationManager:
                     worker = self.workers.get(device_id)
                     if worker:
                         worker.send({"cmd": "browse"})
-                        self._send_read_batch(device, worker)
                     self._event(device_id, "connected", "MMS关联成功")
                 elif payload.get("ok") and command == "browse":
                     device["onlineModel"] = payload.get("result")
                     device["modelComparison"] = self._compare_model(device)
+                    worker = self.workers.get(device_id)
+                    if device["modelComparison"]["matched"]:
+                        device["status"] = "online"
+                        device["statusText"] = "MMS已连接 · 模型匹配"
+                        if worker:
+                            self._send_read_batch(device, worker)
+                        self._event(device_id, "model_matched", "ICD与板卡在线模型匹配")
+                    else:
+                        device["status"] = "model_mismatch"
+                        device["statusText"] = "在线模型不匹配"
+                        device["values"] = {}
+                        expected = ", ".join(device["modelComparison"]["missingLogicalDevices"]) or "ICD定义模型"
+                        actual = ", ".join(device["modelComparison"]["extraLogicalDevices"]) or "板卡在线模型"
+                        self._event(device_id, "model_mismatch", f"模型不一致：ICD期望 {expected}；板卡实际 {actual}")
                 elif payload.get("ok") and command == "read_batch":
                     self._apply_values(device, payload.get("result", {}).get("values", []), "poll")
                 elif payload.get("ok") and command == "read":
@@ -603,6 +627,8 @@ class StationManager:
             with self.lock:
                 for device in self.payload["devices"]:
                     if device.get("status") != "online":
+                        continue
+                    if not (device.get("modelComparison") or {}).get("matched"):
                         continue
                     worker = self.workers.get(device["id"])
                     if not worker or not worker.process or worker.process.poll() is not None:

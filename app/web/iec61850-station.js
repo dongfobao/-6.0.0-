@@ -6,7 +6,7 @@ const stationEl = (id) => document.getElementById(id);
 function stationEscape(value){return String(value??"").replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function stationTime(value){if(!value)return "--";const date=new Date(value);return Number.isNaN(date.getTime())?String(value):date.toLocaleString("zh-CN",{hour12:false});}
 function stationValue(value){if(typeof value==="number"){if(Number.isInteger(value))return String(value);return value.toFixed(3).replace(/\.?0+$/,"");}if(typeof value==="boolean")return value?"true":"false";return value??"--";}
-function stationNotify(message,error=false){if(typeof notify==="function")notify(message,error);else console[error?"error":"log"](message);}
+function stationNotify(message,error=false){if(typeof showNotice==="function")showNotice(message,error?"error":"success");else console[error?"error":"log"](message);}
 async function stationApi(path,options={}){
   const response=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
   const payload=await response.json().catch(()=>({error:`HTTP ${response.status}`}));
@@ -38,11 +38,21 @@ function stationRender(){
   stationEl("stationSelectedMeta").textContent=device?`${device.iedName} · ${device.fileName} · ${device.points.length}个点`:`请先导入ICD`;
   stationEl("stationHost").value=device?.host||"";
   stationEl("stationPort").value=device?.port||102;
-  stationEl("stationConnectBtn").disabled=!device||device.status==="online"||device.status==="connecting";
-  stationEl("stationDisconnectBtn").disabled=!device||!(["online","connecting","error"].includes(device.status));
+  stationEl("stationConnectBtn").disabled=!device||["online","connecting","model_mismatch"].includes(device.status);
+  stationEl("stationDisconnectBtn").disabled=!device||!(["online","connecting","model_mismatch","error"].includes(device.status));
   stationEl("stationSaveDeviceBtn").disabled=!device;
   stationEl("stationDeleteDeviceBtn").disabled=!device;
+  stationRenderModelAlert(device);
   stationRenderTree(device);stationRenderPoints(device);stationRenderReports(device);stationRenderEvents();stationRenderComparison(device);
+}
+
+function stationRenderModelAlert(device){
+  const root=stationEl("stationModelAlert"),comparison=device?.modelComparison;
+  if(!device||!comparison||comparison.matched){root.classList.add("hidden");root.textContent="";return;}
+  const expected=comparison.missingLogicalDevices?.join("、")||device.logicalDevices?.map((item)=>item.name).join("、")||"ICD定义模型";
+  const actual=comparison.extraLogicalDevices?.join("、")||device.onlineModel?.logicalDevices?.map((item)=>item.name).join("、")||"未知";
+  root.classList.remove("hidden");
+  root.innerHTML=`<strong>ICD与板卡在线模型不一致，已停止轮询</strong><span>ICD期望：${stationEscape(expected)}；板卡实际：${stationEscape(actual)}。请把与ICD同批生成的CFG放入板卡SD卡，删除旧CFG后重启板卡。</span>`;
 }
 
 function stationRenderCards(){
@@ -66,6 +76,7 @@ function stationRenderTree(device){
 function stationRenderPoints(device){
   const body=stationEl("stationPointTableBody");if(!device){body.innerHTML='<tr><td colspan="8" class="station-empty">无测点</td></tr>';stationEl("stationPointCount").textContent="0个点";return;}
   const search=stationState.search.trim().toLowerCase();
+  const modelMismatch=device.modelComparison&&!device.modelComparison.matched;
   const points=device.points.filter((point)=>!search||`${point.displayName} ${point.reference} ${point.dataset}`.toLowerCase().includes(search));
   stationEl("stationPointCount").textContent=`${points.length}/${device.points.length}个点`;
   body.innerHTML=points.map((point)=>{
@@ -73,9 +84,9 @@ function stationRenderPoints(device){
     const ok=current?.ok&&!current?.stale;
     const value=current?.ok?stationValue(current.value):"--";
     const unit=point.unit?` ${stationEscape(point.unit)}`:"";
-    const quality=current?.qualityText||current?.quality||((current?.ok)?"good":"未读取");
+    const quality=modelMismatch?"在线模型不匹配":current?.qualityText||current?.quality||((current?.ok)?"good":"未读取");
     const source=current?.source==="report"?"报告":current?.source==="manual"?"手动读取":current?.source==="poll"?"轮询":"--";
-    return `<tr><td class="point-name">${stationEscape(point.displayName)}</td><td><code>${stationEscape(point.reference)}</code><small>${stationEscape(point.dataset)}</small></td><td><span class="station-value${current&&!current.ok?" error":""}">${stationEscape(value)}${unit}</span></td><td>${stationEscape(point.fc)}<br><small>${stationEscape(point.bType)}</small></td><td class="${ok?"station-fresh":"station-stale"}">${stationEscape(quality)}${current?.error?`<br><small>错误${stationEscape(current.error)}</small>`:""}</td><td>${stationEscape(stationTime(current?.receivedAt))}</td><td>${stationEscape(source)}</td><td><button class="button small secondary" data-station-read="${stationEscape(point.id)}">读取</button></td></tr>`;
+    return `<tr><td class="point-name">${stationEscape(point.displayName)}</td><td><code>${stationEscape(point.reference)}</code><small>${stationEscape(point.dataset)}</small></td><td><span class="station-value${current&&!current.ok?" error":""}">${stationEscape(value)}${unit}</span></td><td>${stationEscape(point.fc)}<br><small>${stationEscape(point.bType)}</small></td><td class="${ok?"station-fresh":"station-stale"}">${stationEscape(quality)}${!modelMismatch&&current?.error?`<br><small>错误${stationEscape(current.error)}</small>`:""}</td><td>${stationEscape(stationTime(current?.receivedAt))}</td><td>${stationEscape(source)}</td><td><button class="button small secondary" data-station-read="${stationEscape(point.id)}" ${modelMismatch?"disabled":""}>读取</button></td></tr>`;
   }).join("")||'<tr><td colspan="8" class="station-empty">没有匹配的测点</td></tr>';
 }
 

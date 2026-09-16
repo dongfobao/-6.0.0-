@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from iec61850_station import parse_icd  # noqa: E402
+from iec61850_station import StationManager, parse_icd  # noqa: E402
 
 
 SAMPLE_ICD = """<?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +41,28 @@ class Iec61850StationParserTests(unittest.TestCase):
         )
         payload = parse_icd(content, "sample.icd")
         self.assertEqual(payload["displayName"], "三江变电站C相吸湿器")
+
+    def test_model_comparison_detects_different_online_logical_device(self) -> None:
+        manager = StationManager.__new__(StationManager)
+        device = {
+            "logicalDevices": [{"name": "kaokaoLD_Device_F", "logicalNodes": [{"name": "GGIO1"}]}],
+            "onlineModel": {"logicalDevices": [{"name": "SANJIANGBIANLD_Device_A", "logicalNodes": [{"name": "GGIO1"}]}]},
+        }
+        comparison = manager._compare_model(device)
+        self.assertFalse(comparison["matched"])
+        self.assertEqual(comparison["missingLogicalDevices"], ["kaokaoLD_Device_F"])
+        self.assertEqual(comparison["extraLogicalDevices"], ["SANJIANGBIANLD_Device_A"])
+
+    def test_same_endpoint_cannot_be_connected_twice(self) -> None:
+        manager = StationManager.__new__(StationManager)
+        manager.lock = threading.RLock()
+        manager.workers = {}
+        manager.payload = {"devices": [
+            {"id": "first", "displayName": "设备一", "host": "192.168.0.16", "port": 102, "status": "online"},
+            {"id": "second", "displayName": "设备二", "host": "192.168.0.16", "port": 102, "status": "offline"},
+        ]}
+        with self.assertRaisesRegex(ValueError, "请先断开重复设备"):
+            manager.connect("second")
 
     def test_reject_non_scl_document(self) -> None:
         with self.assertRaisesRegex(ValueError, "根节点不是 SCL"):
