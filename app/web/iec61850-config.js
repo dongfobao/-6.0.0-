@@ -164,7 +164,7 @@
       const prefix = element("iecStationPrefix").value.trim();
       iecState.profile.stationPrefix = prefix;
       iecState.profile.points.forEach(point => { const meta = iecState.meta.get(point.pointId); if (meta) point.stationName = `${prefix}${meta.sourceName}`; });
-      iecState.profile.description = prefix ? `${prefix} Modbus V10 转 IEC61850` : iecState.profile.description;
+      iecState.profile.description = prefix || iecState.profile.description;
       const phase = prefix.match(/([ABC])相/i)?.[1]?.toUpperCase();
       if (phase) {
         iecState.profile.name = iecState.profile.name.replace(/[ABC]相/ig, `${phase}相`);

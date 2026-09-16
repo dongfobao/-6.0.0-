@@ -65,14 +65,15 @@ class Iec61850WorkspaceTests(unittest.TestCase):
         profile["logicalDevice"] = "LD_Device_A"
         normalized = normalize_profile(profile)
         self.assertEqual(normalized["name"], "三江变电站B相吸湿器模板")
-        self.assertEqual(normalized["description"], "三江变电站B相吸湿器 Modbus V10 转 IEC61850")
+        self.assertEqual(normalized["description"], "三江变电站B相吸湿器")
         self.assertEqual(normalized["logicalDevice"], "LD_Device_B")
         with tempfile.TemporaryDirectory() as temp:
             result = generate_package(normalized, Path(temp))
             cfg = Path(result["files"]["cfg"]).read_text(encoding="utf-8")
             icd = Path(result["files"]["icd"]).read_text(encoding="utf-8")
             self.assertNotIn("A相", cfg + icd)
-            self.assertIn("三江变电站B相吸湿器 Modbus V10 转 IEC61850", cfg + icd)
+            self.assertIn("三江变电站B相吸湿器", cfg + icd)
+            self.assertNotIn("Modbus V10 转 IEC61850", cfg + icd)
 
     def test_icd_contains_field_style_datasets_and_reports(self):
         with tempfile.TemporaryDirectory() as temp:

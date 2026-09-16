@@ -32,6 +32,15 @@ class Iec61850StationParserTests(unittest.TestCase):
         self.assertEqual(payload["points"][0]["qualityReference"], "DEV1LD1/GGIO1.AnIn1.q")
         self.assertEqual(payload["rcbs"][0]["reference"], "DEV1LD1/LLN0.RP.urcbAin")
 
+    def test_import_removes_protocol_suffix_from_device_name(self) -> None:
+        content = SAMPLE_ICD.replace(
+            'desc="三江变电站A相吸湿器"',
+            'desc="三江变电站C相吸湿器 Modbus V10 转 IEC61850"',
+            1,
+        )
+        payload = parse_icd(content, "sample.icd")
+        self.assertEqual(payload["displayName"], "三江变电站C相吸湿器")
+
     def test_reject_non_scl_document(self) -> None:
         with self.assertRaisesRegex(ValueError, "根节点不是 SCL"):
             parse_icd("<root/>", "bad.icd")

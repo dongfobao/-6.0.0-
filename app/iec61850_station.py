@@ -23,6 +23,9 @@ DEFAULT_ROOT = APP_DIR.parent
 STATION_STORE_PATH = DEFAULT_ROOT / "iec61850_station.json"
 STATION_IMPORT_DIR = DEFAULT_ROOT / "IEC61850总站设备"
 ASSET_APP_DIR = APP_DIR
+_PROTOCOL_DISPLAY_SUFFIX = re.compile(
+    r"\s*Modbus\s+V10(?:\.0)?\s*转\s*IEC\s*61850\s*$", re.IGNORECASE
+)
 
 
 def configure_station_paths(base_dir: Path, asset_app_dir: Path | None = None) -> None:
@@ -38,6 +41,11 @@ def configure_station_paths(base_dir: Path, asset_app_dir: Path | None = None) -
 
 def _tag_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
+
+
+def _clean_display_name(value: Any, fallback: str = "") -> str:
+    cleaned = _PROTOCOL_DISPLAY_SUFFIX.sub("", str(value or "").strip()).strip()
+    return cleaned or str(fallback or "").strip()
 
 
 def _children(element: ET.Element, name: str) -> list[ET.Element]:
@@ -97,7 +105,7 @@ def parse_icd(content: str, file_name: str) -> dict[str, Any]:
     ied_name = str(ied.get("name") or "").strip()
     if not ied_name:
         raise ValueError("ICD 中的 IED 缺少 name")
-    display_name = str(ied.get("desc") or ied_name).strip()
+    display_name = _clean_display_name(ied.get("desc"), ied_name)
 
     ip = ""
     port = 102
@@ -329,6 +337,9 @@ class StationManager:
                 payload = json.loads(STATION_STORE_PATH.read_text(encoding="utf-8"))
                 if isinstance(payload, dict) and isinstance(payload.get("devices"), list):
                     for item in payload["devices"]:
+                        item["displayName"] = _clean_display_name(
+                            item.get("displayName"), item.get("iedName")
+                        )
                         item.update({"status": "offline", "statusText": "未连接", "onlineModel": None, "values": {}, "reportStates": {}})
                     payload.setdefault("events", [])
                     return payload
@@ -360,7 +371,7 @@ class StationManager:
             device = {
                 "id": device_id,
                 **parsed,
-                "displayName": display_name.strip() or parsed["displayName"],
+                "displayName": _clean_display_name(display_name, parsed["displayName"]),
                 "host": host.strip() or parsed["host"],
                 "importedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "status": "offline", "statusText": "未连接", "values": {}, "onlineModel": None,
@@ -378,7 +389,9 @@ class StationManager:
         with self.lock:
             device = self._device(device_id)
             if "displayName" in changes:
-                device["displayName"] = str(changes["displayName"]).strip()[:100] or device["displayName"]
+                device["displayName"] = _clean_display_name(
+                    str(changes["displayName"])[:100], device["displayName"]
+                )
             if "host" in changes:
                 host = str(changes["host"]).strip()
                 if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host):

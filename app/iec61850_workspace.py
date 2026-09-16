@@ -23,6 +23,9 @@ from live_register_catalog import get_register_catalog
 
 SCHEMA_VERSION = 1
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_PROTOCOL_DESCRIPTION_SUFFIX = re.compile(
+    r"\s*Modbus\s+V10(?:\.0)?\s*转\s*IEC\s*61850\s*$", re.IGNORECASE
+)
 
 _ANALOG = {
     "input_register.sensor_3.temperature": ("v10_ir0_temp", "AnIn1", "℃"),
@@ -93,6 +96,11 @@ def default_profile() -> dict[str, Any]:
     }
 
 
+def _clean_device_description(value: Any) -> str:
+    """移除总站设备名称中不需要的协议实现说明。"""
+    return _PROTOCOL_DESCRIPTION_SUFFIX.sub("", str(value or "").strip()).strip()
+
+
 def load_profiles(path: Path) -> dict[str, Any]:
     if not path.exists():
         profile = default_profile()
@@ -138,8 +146,8 @@ def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
     if phase and re.search(r"_[ABC]$", logical_device, re.IGNORECASE):
         logical_device = f"{logical_device[:-1]}{phase}"
     profile_name = _sync_phase_label(str(raw.get("name") or base["name"]).strip()[:80], phase)
-    description = (f"{station_prefix} Modbus V10 转 IEC61850" if station_prefix else
-                   str(raw.get("description") or base["description"]).strip()[:120])
+    description = (station_prefix if station_prefix else
+                   _clean_device_description(raw.get("description") or base["description"])[:120])
     network = raw.get("network") if isinstance(raw.get("network"), dict) else {}
     normalized_network = {
         "ip": _ipv4(network.get("ip", base["network"]["ip"]), "IP地址"),
