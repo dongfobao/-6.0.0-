@@ -208,7 +208,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             self._validate_mutation_origin()
-            body = self._read_json() if method != "DELETE" else {}
+            content_length = str(self.headers.get("Content-Length") or "").strip()
+            body = self._read_json() if method != "DELETE" or content_length not in {"", "0"} else {}
             path = parsed.path
             service = _service()
             if method == "POST" and path == "/api/devices":
