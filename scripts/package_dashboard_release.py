@@ -12,6 +12,8 @@ SPEC_PATH = PROJECT_DIR / "packaging" / "dashboard_workbench.spec"
 DIST_DIR = PROJECT_DIR / "dist" / "YLDQ6.0远程监控系统"
 RELEASE_DIR = PROJECT_DIR / "release" / "YLDQ6.0远程监控系统"
 LIVE_DEVICES_PATH = PROJECT_DIR / "live_devices.json"
+IEC61850_STATION_PATH = PROJECT_DIR / "iec61850_station.json"
+IEC61850_RUNTIME_DIR = PROJECT_DIR / "runtime"
 
 
 def run_packaging() -> None:
@@ -46,6 +48,14 @@ def copy_release_tree() -> Path:
 
     if LIVE_DEVICES_PATH.exists():
         shutil.copy2(LIVE_DEVICES_PATH, release_dir / "live_devices.json")
+
+    if IEC61850_STATION_PATH.exists():
+        shutil.copy2(IEC61850_STATION_PATH, release_dir / "iec61850_station.json")
+
+    if not (IEC61850_RUNTIME_DIR / "python32" / "python.exe").exists():
+        raise FileNotFoundError("缺少 IEC61850 32位客户端运行时")
+    shutil.copytree(IEC61850_RUNTIME_DIR, release_dir / "runtime", dirs_exist_ok=True)
+    (release_dir / "IEC61850总站设备").mkdir(parents=True, exist_ok=True)
 
     return release_dir
 

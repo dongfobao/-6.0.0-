@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="/trend-workbench.css">
   <link rel="stylesheet" href="/analysis.css">
   <link rel="stylesheet" href="/sessions.css">
+  <link rel="stylesheet" href="/iec61850-config.css">
+  <link rel="stylesheet" href="/iec61850-station.css">
 </head>
 <body>
   <div class="app-shell">
@@ -23,6 +25,8 @@
         <button class="nav-item" data-page="sessions">运行会话</button>
         <button class="nav-item" data-page="control">远程控制</button>
         <button class="nav-item" data-page="configuration">参数配置</button>
+        <button class="nav-item" data-page="iec61850">61850配置</button>
+        <button class="nav-item" data-page="iec61850station">61850总站</button>
         <button class="nav-item" data-page="alarms">告警事件</button>
         <button class="nav-item" data-page="diagnostics">通信诊断</button>
         <button class="nav-item" data-page="devices">设备管理</button>
@@ -189,6 +193,116 @@
         <div class="panel-title page-panel-title"><div><h2>设备管理</h2><p>在设备卡片中勾选参与统一采集的设备，并查看每台设备自己的通信状态</p></div><button id="addDeviceBtn" class="button primary">添加设备</button></div>
         <div id="deviceCards" class="device-grid"></div>
       </section>
+
+      <section class="page iec-page" data-page-view="iec61850">
+        <div class="iec-heading">
+          <div><span>MODBUS V10 → IEC 61850</span><h2>转发配置工作台</h2><p>通过RS485确认源点，通过网口配置板卡、验证MMS并生成总站交付文件。</p></div>
+          <div class="iec-state"><i></i><div><strong id="iecCapabilityTitle">配置设计模式</strong><small id="iecCapabilityText">正在读取能力</small></div></div>
+        </div>
+        <div class="iec-flow" aria-label="配置流程">
+          <div class="done"><b>1</b><span>选择Modbus源点<small>仅显示固件真实支持点</small></span></div>
+          <div class="active"><b>2</b><span>统一IEC命名<small>IED、LD和点名前缀</small></span></div>
+          <div><b>3</b><span>生成并校验<small>CFG、映射、ICD、CSV</small></span></div>
+          <div><b>4</b><span>网口下发<small>固件配置服务实现后开放</small></span></div>
+        </div>
+
+        <div class="iec-layout">
+          <div class="iec-main">
+            <section class="panel iec-card">
+              <div class="panel-title"><div><h3>设备与网络</h3><p>IP修改后，上位机将使用新地址重新连接TCP102进行确认。</p></div><button id="iecProbeBtn" class="button secondary">测试当前IP</button></div>
+              <div class="iec-form-grid">
+                <label>配置名称<input id="iecProfileName" maxlength="80"></label>
+                <label>IED名称<input id="iecIedName" maxlength="64" placeholder="YLDQ01"></label>
+                <label>逻辑设备LD<input id="iecLogicalDevice" maxlength="64" placeholder="LD_Device_1"></label>
+                <label>IEC对象名前缀（通常留空）<input id="iecPointPrefix" maxlength="4" placeholder="如 A1"></label>
+                <label>总站中文前缀<input id="iecStationPrefix" maxlength="60" placeholder="三江变电站A相吸湿器"></label>
+                <label>板卡IP<input id="iecIp" inputmode="decimal"></label>
+                <label>子网掩码<input id="iecNetmask" inputmode="decimal"></label>
+                <label>网关<input id="iecGateway" inputmode="decimal"></label>
+                <label>MMS端口<input id="iecPort" type="number" min="1" max="65535"></label>
+              </div>
+              <div id="iecProbeResult" class="iec-probe-result muted">尚未测试网络</div>
+            </section>
+
+            <section class="panel iec-card">
+              <div class="panel-title"><div><h3>转发点表</h3><p>地址和数据类型来自唯一Modbus V10点表；中文名称写入ICD的desc/dU，IEC对象名用于机器引用。</p></div><div class="button-row"><button id="iecSelectAllBtn" class="button small secondary">全选</button><button id="iecClearBtn" class="button small secondary">清空</button><button id="iecApplyStationPrefixBtn" class="button small secondary">应用中文前缀</button><button id="iecApplyPrefixBtn" class="button small secondary">应用对象前缀</button></div></div>
+              <div class="iec-filter"><input id="iecPointSearch" type="search" placeholder="搜索点名、地址或IEC对象名"><span id="iecPointCount">0 / 0</span></div>
+              <div class="table-scroll iec-table-scroll"><table class="iec-table"><thead><tr><th>启用</th><th>Modbus源点</th><th>类型</th><th>总站名称</th><th>IEC对象名</th><th>IEC引用</th></tr></thead><tbody id="iecPointTableBody"></tbody></table></div>
+            </section>
+          </div>
+
+          <aside class="iec-side">
+            <section class="panel iec-card iec-summary">
+              <h3>配置摘要</h3>
+              <dl><div><dt>启用源点</dt><dd id="iecSelectedSummary">--</dd></div><div><dt>映射属性</dt><dd id="iecMappingSummary">--</dd></div><div><dt>设备地址</dt><dd id="iecNetworkSummary">--</dd></div><div><dt>总站根引用</dt><dd id="iecRootSummary">--</dd></div></dl>
+              <button id="iecSaveBtn" class="button secondary full">保存配置项目</button>
+              <button id="iecGenerateBtn" class="button primary full">生成总站配置包</button>
+              <button id="iecApplyBtn" class="button secondary full" disabled>通过网口下发到板卡</button>
+              <p id="iecApplyReason" class="iec-apply-reason"></p>
+            </section>
+            <section class="panel iec-card">
+              <h3>生成结果</h3><div id="iecOutput" class="iec-output muted">尚未生成配置包</div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page station-page" data-page-view="iec61850station">
+        <div class="station-heading">
+          <div><span>IEC 61850 CLIENT WORKBENCH</span><h2>现场测试总站</h2><p>导入ICD，在线核对设备模型，并把中文点名、IEC树和实时值放在同一界面。</p></div>
+          <div class="button-row">
+            <input id="stationIcdFile" type="file" accept=".icd,.cid,.scd,.xml" hidden>
+            <button id="stationImportBtn" class="button primary">导入ICD</button>
+            <button id="stationRefreshBtn" class="button secondary">刷新</button>
+          </div>
+        </div>
+
+        <div id="stationDeviceCards" class="station-device-grid"></div>
+
+        <section class="panel station-toolbar">
+          <div class="station-selected">
+            <strong id="stationSelectedName">尚未选择设备</strong>
+            <span id="stationSelectedMeta">请先导入ICD</span>
+          </div>
+          <label>设备IP<input id="stationHost" inputmode="decimal" placeholder="192.168.0.123"></label>
+          <label>端口<input id="stationPort" type="number" min="1" max="65535" value="102"></label>
+          <button id="stationSaveDeviceBtn" class="button secondary">保存地址</button>
+          <button id="stationConnectBtn" class="button primary">连接设备</button>
+          <button id="stationDisconnectBtn" class="button danger ghost">断开</button>
+        </section>
+
+        <div class="station-tabs" role="tablist">
+          <button class="active" data-station-tab="realtime">实时树</button>
+          <button data-station-tab="reports">报告与数据集</button>
+          <button data-station-tab="events">事件/SOE</button>
+          <button data-station-tab="compare">模型比对</button>
+        </div>
+
+        <div class="station-tab active" data-station-tab-view="realtime">
+          <div class="station-realtime-layout">
+            <section class="panel station-tree-panel">
+              <div class="panel-title"><div><h3>IEC模型树</h3><p>IED → LD → LN → DO → DA</p></div></div>
+              <div id="stationModelTree" class="station-tree"></div>
+            </section>
+            <section class="panel station-points-panel">
+              <div class="station-point-tools"><input id="stationPointSearch" type="search" placeholder="搜索中文名称、IEC引用、数据集"><span id="stationPointCount">0个点</span></div>
+              <div class="table-scroll station-table-scroll"><table class="station-table"><thead><tr><th>中文描述</th><th>IEC 61850引用</th><th>值</th><th>FC</th><th>品质/状态</th><th>更新时间</th><th>来源</th><th>操作</th></tr></thead><tbody id="stationPointTableBody"></tbody></table></div>
+            </section>
+          </div>
+        </div>
+
+        <div class="station-tab" data-station-tab-view="reports">
+          <div class="two-column"><section class="panel"><div class="panel-title"><div><h3>报告控制块</h3><p>读取RCB、启用报告并执行GI</p></div></div><div id="stationRcbList" class="station-card-list"></div></section><section class="panel"><div class="panel-title"><div><h3>数据集</h3><p>FCDA成员与实时点对应关系</p></div></div><div id="stationDatasetList" class="station-card-list"></div></section></div>
+        </div>
+
+        <div class="station-tab" data-station-tab-view="events">
+          <section class="panel"><div class="panel-title"><div><h3>通信与报告事件</h3><p>保留最近500条事件</p></div></div><div id="stationEventList" class="station-event-list"></div></section>
+        </div>
+
+        <div class="station-tab" data-station-tab-view="compare">
+          <section class="panel"><div class="panel-title"><div><h3>ICD与在线模型比对</h3><p>连接后自动读取设备LD、LN和DataSet目录</p></div></div><div id="stationCompareResult" class="station-compare"></div></section>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -210,5 +324,7 @@
   <script src="/app.js?v=5"></script>
   <script src="/analysis.js"></script>
   <script src="/sessions.js"></script>
+  <script src="/iec61850-config.js"></script>
+  <script src="/iec61850-station.js"></script>
 </body>
 </html>

@@ -38,6 +38,8 @@ def _cleanup() -> None:
     try:
         from live_acquisition_service import get_live_acquisition_service
         get_live_acquisition_service().stop_all()
+        from iec61850_station import get_station_manager
+        get_station_manager().stop_all()
     except Exception as exc:
         _shutting_down = False
         print(f"停止采集失败，将在退出阶段重试: {exc}", file=sys.stderr)
@@ -92,6 +94,7 @@ def main() -> int:
             webbrowser.open(APP_URL)
             return 0
         server = ThreadingHTTPServer((dashboard_server.HOST, dashboard_server.PORT), dashboard_server.DashboardRequestHandler)
+        server.daemon_threads = True
         threading.Thread(target=_open_browser_when_ready, daemon=True).start()
         try:
             server.serve_forever()

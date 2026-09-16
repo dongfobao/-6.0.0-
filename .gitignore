@@ -21,6 +21,9 @@ live_exports/
 
 .idea/
 live_devices.json
+iec61850_station.json
+IEC61850总站设备/
+runtime/
 *_old/
 *_new/
 

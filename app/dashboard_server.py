@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +25,8 @@ from modbus_v10_config import ConfigTransactionError
 from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_catalog_summary
 from monitoring_projection import build_monitoring_snapshot
 from session_archive import get_session_detail, list_sessions
+from iec61850_workspace import generate_package, probe_network, save_profile, workspace_payload
+from iec61850_station import configure_station_paths, get_station_manager
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -31,6 +34,8 @@ BASE_DIR = APP_DIR.parent
 WEB_DIR = APP_DIR / "web"
 LIVE_DEVICES_PATH = BASE_DIR / "live_devices.json"
 SESSIONS_DIR = BASE_DIR / "实时采集会话"
+IEC61850_PROFILE_PATH = BASE_DIR / "iec61850_profiles.json"
+IEC61850_EXPORT_DIR = BASE_DIR / "IEC61850配置导出"
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_JSON_BODY_BYTES = 1024 * 1024
@@ -42,13 +47,16 @@ def _service():
 
 
 def set_runtime_base(base_dir: Path, asset_base_dir: Path | None = None) -> None:
-    global BASE_DIR, WEB_DIR, LIVE_DEVICES_PATH, SESSIONS_DIR
+    global BASE_DIR, WEB_DIR, LIVE_DEVICES_PATH, SESSIONS_DIR, IEC61850_PROFILE_PATH, IEC61850_EXPORT_DIR
     BASE_DIR = Path(base_dir).resolve()
     assets = Path(asset_base_dir).resolve() if asset_base_dir else APP_DIR
     WEB_DIR = assets / "web"
     LIVE_DEVICES_PATH = BASE_DIR / "live_devices.json"
     SESSIONS_DIR = BASE_DIR / "实时采集会话"
+    IEC61850_PROFILE_PATH = BASE_DIR / "iec61850_profiles.json"
+    IEC61850_EXPORT_DIR = BASE_DIR / "IEC61850配置导出"
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    configure_station_paths(BASE_DIR, assets)
 
 
 def _find_device(payload: dict[str, Any], device_id: str | None) -> dict[str, Any] | None:
@@ -136,6 +144,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             return self._json(load_live_devices(LIVE_DEVICES_PATH))
         if path == "/api/catalog":
             return self._json({"summary": get_register_catalog_summary(), "items": get_register_catalog()})
+        if path == "/api/iec61850/bootstrap":
+            return self._json(workspace_payload(IEC61850_PROFILE_PATH))
+        if path == "/api/iec61850-station/bootstrap":
+            return self._json(get_station_manager().snapshot())
+        if path == "/api/iec61850-station/stream":
+            return self._station_stream()
         if path == "/api/acquisition/status":
             devices = load_live_devices(LIVE_DEVICES_PATH).get("devices", [])
             return self._json({"global": service.get_status(), "devices": service.get_fleet_status(devices)})
@@ -310,6 +324,39 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 ))
             if method == "POST" and path == "/api/traffic/clear":
                 return self._json(service.clear_command_traffic())
+            if method == "POST" and path == "/api/iec61850/profile":
+                return self._json(save_profile(IEC61850_PROFILE_PATH, body.get("profile") or body))
+            if method == "POST" and path == "/api/iec61850/generate":
+                profile = save_profile(IEC61850_PROFILE_PATH, body.get("profile") or body)
+                return self._json(generate_package(profile, IEC61850_EXPORT_DIR), HTTPStatus.CREATED)
+            if method == "POST" and path == "/api/iec61850/probe":
+                return self._json(probe_network(body))
+            if method == "POST" and path == "/api/iec61850-station/icd/import":
+                content = str(body.get("content") or "")
+                file_name = str(body.get("fileName") or "device.icd")
+                if not content.strip():
+                    raise ValueError("ICD内容不能为空")
+                return self._json(get_station_manager().import_icd(
+                    content, file_name, str(body.get("displayName") or ""), str(body.get("host") or ""),
+                ), HTTPStatus.CREATED)
+            if method == "POST" and path == "/api/iec61850-station/device/update":
+                return self._json(get_station_manager().update_device(str(body.get("deviceId") or ""), body))
+            if method == "POST" and path == "/api/iec61850-station/device/select":
+                return self._json(get_station_manager().select_device(str(body.get("deviceId") or "")))
+            if method == "POST" and path == "/api/iec61850-station/device/connect":
+                return self._json(get_station_manager().connect(str(body.get("deviceId") or "")))
+            if method == "POST" and path == "/api/iec61850-station/device/disconnect":
+                return self._json(get_station_manager().disconnect(str(body.get("deviceId") or "")))
+            if method == "POST" and path == "/api/iec61850-station/read":
+                return self._json(get_station_manager().read_now(
+                    str(body.get("deviceId") or ""), str(body.get("reference") or ""), str(body.get("fc") or "MX"),
+                ))
+            if method == "POST" and path == "/api/iec61850-station/report/subscribe":
+                return self._json(get_station_manager().subscribe_rcb(
+                    str(body.get("deviceId") or ""), str(body.get("reference") or ""),
+                ))
+            if method == "DELETE" and path == "/api/iec61850-station/device":
+                return self._json(get_station_manager().delete_device(str(body.get("deviceId") or "")))
             if method == "POST" and path == "/api/session/export":
                 return self._json(service.export_session(str(body.get("deviceId") or ""), Path(str(body.get("exportRoot") or BASE_DIR / "导出"))))
             self.send_error(HTTPStatus.NOT_FOUND, "API not found")
@@ -349,6 +396,30 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _station_stream(self) -> None:
+        manager = get_station_manager()
+        subscriber = manager.subscribe()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            initial = json.dumps({"reason": "initial", "snapshot": manager.snapshot()}, ensure_ascii=False, separators=(",", ":"))
+            self.wfile.write(f"event: station\ndata: {initial}\n\n".encode("utf-8"))
+            self.wfile.flush()
+            while True:
+                try:
+                    event = subscriber.get(timeout=15)
+                    data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+                    self.wfile.write(f"event: station\ndata: {data}\n\n".encode("utf-8"))
+                except queue.Empty:
+                    self.wfile.write(b": keep-alive\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            manager.unsubscribe(subscriber)
+
     def _error(self, exc: Exception) -> None:
         if isinstance(exc, KeyError):
             status = HTTPStatus.NOT_FOUND
@@ -384,6 +455,7 @@ def main() -> None:
         raise SystemExit(f"Web 目录不存在: {WEB_DIR}")
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), DashboardRequestHandler)
+    server.daemon_threads = True
     print(f"YLDQ 6.0 远程监控系统: http://{HOST}:{PORT}")
     try:
         server.serve_forever()
@@ -391,6 +463,7 @@ def main() -> None:
         pass
     finally:
         _service().stop_all()
+        get_station_manager().stop_all()
         server.server_close()
 
 

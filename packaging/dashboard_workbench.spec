@@ -6,7 +6,11 @@ project_dir = Path.cwd()
 app_dir = project_dir / "app"
 web_dir = app_dir / "web"
 
-datas = [(str(web_dir), "web")]
+datas = [
+    (str(web_dir), "web"),
+    (str(app_dir / "iec61850_worker.py"), "."),
+    (str(app_dir / "modbus_v10_point_map.json"), "."),
+]
 
 a = Analysis(
     [str(app_dir / "dashboard_workbench_entry.py")],
