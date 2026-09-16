@@ -108,8 +108,6 @@
       iecState.profile = selectedProfile(payload);
       if (!iecState.profile) throw new Error("没有可用的IEC61850配置项目");
       fillFields(); renderTable();
-      element("iecCapabilityTitle").textContent = "配置包生成可用";
-      element("iecCapabilityText").textContent = "可生成并校验 CFG、映射、ICD、CSV";
       iecState.loaded = true;
     } catch (error) {
       element("iecCapabilityText").textContent = error.message;
