@@ -64,6 +64,19 @@ class Iec61850StationParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "请先断开重复设备"):
             manager.connect("second")
 
+    def test_successful_read_clears_previous_error(self) -> None:
+        manager = StationManager.__new__(StationManager)
+        reference = "kaokaoLD_Device_F/GGIO1.AnIn1.mag.f"
+        device = {
+            "points": [{"reference": reference, "qualityReference": "", "timeReference": ""}],
+            "values": {reference: {"ok": False, "error": 3, "stale": True}},
+        }
+        manager._apply_values(device, [{"reference": reference, "ok": True, "value": 26.9}], "poll")
+        current = device["values"][reference]
+        self.assertTrue(current["ok"])
+        self.assertFalse(current["stale"])
+        self.assertNotIn("error", current)
+
     def test_reject_non_scl_document(self) -> None:
         with self.assertRaisesRegex(ValueError, "根节点不是 SCL"):
             parse_icd("<root/>", "bad.icd")

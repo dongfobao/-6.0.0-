@@ -580,11 +580,14 @@ class StationManager:
                 continue
             point = next((item for item in device["points"] if item["reference"] == reference), None)
             if point is not None:
-                device["values"][reference] = {
+                current = {
                     **device["values"].get(reference, {}), **value,
                     "source": source, "receivedAt": received_at,
                     "stale": not bool(value.get("ok")),
                 }
+                if value.get("ok"):
+                    current.pop("error", None)
+                device["values"][reference] = current
                 continue
             quality_point = next((item for item in device["points"] if item.get("qualityReference") == reference), None)
             if quality_point is not None:
