@@ -77,6 +77,58 @@ class Iec61850StationParserTests(unittest.TestCase):
         self.assertFalse(current["stale"])
         self.assertNotIn("error", current)
 
+    def test_poll_skips_dataset_covered_by_enabled_report(self) -> None:
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.commands = []
+
+            def send(self, command):
+                self.commands.append(command)
+
+        manager = StationManager.__new__(StationManager)
+        worker = FakeWorker()
+        device = {
+            "lastPollSent": 0,
+            "points": [
+                {"reference": "IEDLD/GGIO1.AnIn1.mag.f", "qualityReference": "", "timeReference": "", "fc": "MX", "dataset": "dsAin"},
+                {"reference": "IEDLD/GGIO1.Ind1.stVal", "qualityReference": "", "timeReference": "", "fc": "ST", "dataset": "dsDin"},
+            ],
+            "rcbs": [
+                {"reference": "IEDLD/LLN0.RP.urcbAin", "dataset": "dsAin"},
+                {"reference": "IEDLD/LLN0.RP.urcbDin", "dataset": "dsDin"},
+            ],
+            "reportStates": {"IEDLD/LLN0.RP.urcbAin": {"status": "enabled"}},
+        }
+
+        manager._send_read_batch(device, worker)
+
+        self.assertEqual(len(worker.commands), 1)
+        self.assertEqual(worker.commands[0]["items"], [{"reference": "IEDLD/GGIO1.Ind1.stVal", "fc": "ST"}])
+
+    def test_poll_sends_nothing_when_all_datasets_have_enabled_reports(self) -> None:
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.commands = []
+
+            def send(self, command):
+                self.commands.append(command)
+
+        manager = StationManager.__new__(StationManager)
+        worker = FakeWorker()
+        device = {
+            "lastPollSent": 0,
+            "points": [
+                {"reference": "IEDLD/GGIO1.AnIn1.mag.f", "qualityReference": "", "timeReference": "", "fc": "MX", "dataset": "dsAin"},
+            ],
+            "rcbs": [{"reference": "IEDLD/LLN0.RP.urcbAin", "dataset": "dsAin"}],
+            "reportStates": {"IEDLD/LLN0.RP.urcbAin": {"status": "enabled"}},
+        }
+
+        manager._send_read_batch(device, worker)
+
+        self.assertEqual(worker.commands, [])
+        self.assertGreater(device["lastPollSent"], 0)
+
     def test_reject_non_scl_document(self) -> None:
         with self.assertRaisesRegex(ValueError, "根节点不是 SCL"):
             parse_icd("<root/>", "bad.icd")

@@ -24,14 +24,7 @@ FC_VALUES = {
 }
 RCB_ELEMENT_RPT_ENA = 2
 RCB_ELEMENT_RESV = 4
-RCB_ELEMENT_TRG_OPS = 256
 RCB_ELEMENT_INTG_PD = 512
-RCB_ELEMENT_GI = 1024
-TRG_OPT_DATA_CHANGED = 1
-TRG_OPT_QUALITY_CHANGED = 2
-TRG_OPT_DATA_UPDATE = 4
-TRG_OPT_INTEGRITY = 8
-TRG_OPT_GI = 16
 
 _write_lock = threading.Lock()
 
@@ -93,9 +86,7 @@ class NativeClient:
         self.rcb_get_enabled = self._fn("ClientReportControlBlock_getRptEna", c_bool, [c_void_p])
         self.rcb_set_enabled = self._fn("ClientReportControlBlock_setRptEna", None, [c_void_p, c_bool])
         self.rcb_set_reserved = self._fn("ClientReportControlBlock_setResv", None, [c_void_p, c_bool])
-        self.rcb_set_trg_ops = self._fn("ClientReportControlBlock_setTrgOps", None, [c_void_p, c_int])
         self.rcb_set_intg_pd = self._fn("ClientReportControlBlock_setIntgPd", None, [c_void_p, c_uint32])
-        self.rcb_set_gi = self._fn("ClientReportControlBlock_setGI", None, [c_void_p, c_bool])
         self.report_cb_type = ctypes.CFUNCTYPE(None, c_void_p, c_void_p)
         self.install_report = self._fn("IedConnection_installReportHandler", None, [c_void_p, c_char_p, c_char_p, self.report_cb_type, c_void_p])
         self.uninstall_report = self._fn("IedConnection_uninstallReportHandler", None, [c_void_p, c_char_p])
@@ -246,10 +237,12 @@ class NativeClient:
         self.rcbs[reference] = int(rcb)
         self.install_report(connection, reference.encode(), rpt_id.encode(), report_callback, None)
         self.rcb_set_reserved(rcb, True)
-        self.rcb_set_trg_ops(rcb, TRG_OPT_DATA_CHANGED | TRG_OPT_QUALITY_CHANGED | TRG_OPT_DATA_UPDATE | TRG_OPT_INTEGRITY | TRG_OPT_GI)
         self.rcb_set_intg_pd(rcb, max(1000, int(integrity_ms)))
         self.rcb_set_enabled(rcb, True)
-        mask = RCB_ELEMENT_RESV | RCB_ELEMENT_TRG_OPS | RCB_ELEMENT_INTG_PD | RCB_ELEMENT_RPT_ENA
+        # 使用CFG模型中定义的TrgOps，避免客户端把DATA_UPDATE等额外触发条件强加给板卡。
+        # 初值已在连接后通过轮询读取；启用多个报告时不再逐个立即触发GI，防止同一
+        # MMS关联瞬间叠加多个完整数据集报告而压垮嵌入式服务器的发送路径。
+        mask = RCB_ELEMENT_RESV | RCB_ELEMENT_INTG_PD | RCB_ELEMENT_RPT_ENA
         self.set_rcb(connection, byref(error), rcb, mask, True)
         if error.value != 0:
             self.uninstall_report(connection, reference.encode())
@@ -257,9 +250,7 @@ class NativeClient:
             self.callbacks.pop(reference, None)
             self.rcbs.pop(reference, None)
             raise RuntimeError(f"启用RCB失败 {reference}，IedClientError={error.value}")
-        self.rcb_set_gi(rcb, True)
-        self.set_rcb(connection, byref(error), rcb, RCB_ELEMENT_GI, True)
-        return {"reference": reference, "rptId": rpt_id, "dataset": dataset, "enabled": True, "giError": error.value}
+        return {"reference": reference, "rptId": rpt_id, "dataset": dataset, "enabled": True}
 
     def disconnect(self) -> None:
         if not self.connection:

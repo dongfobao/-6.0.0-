@@ -526,6 +526,8 @@ class StationManager:
                     result = payload.get("result", {})
                     reference = str(result.get("reference") or "")
                     device["reportStates"][reference] = {"status": "enabled", "text": "已启用", **result}
+                    # 下一轮读取只轮询尚未被报告覆盖的数据集。
+                    device["lastPollSent"] = 0
                     self._event(device_id, "report_enabled", f"报告已启用: {reference}")
                 elif not payload.get("ok"):
                     error = str(payload.get("error") or "工作进程命令失败")
@@ -550,6 +552,7 @@ class StationManager:
                             "reason": entry.get("reason"),
                             "source": "report", "receivedAt": payload.get("at"), "stale": False,
                         })
+                        current.pop("error", None)
                 self._event(device_id, "report", f"收到报告 {payload.get('rptId') or payload.get('rcbReference')}", payload)
             elif event in {"fatal", "worker_exit", "worker_stderr", "error"}:
                 if device.get("status") == "offline" and device_id not in self.workers:
@@ -564,13 +567,21 @@ class StationManager:
     def _send_read_batch(self, device: dict[str, Any], worker: DeviceWorker) -> None:
         items: list[dict[str, str]] = []
         seen: set[str] = set()
+        enabled_datasets = {
+            str(rcb.get("dataset") or "")
+            for rcb in device.get("rcbs", [])
+            if (device.get("reportStates", {}).get(rcb.get("reference"), {}).get("status") == "enabled")
+        }
         for point in device["points"]:
+            if point.get("dataset") in enabled_datasets:
+                continue
             for reference in (point["reference"], point.get("qualityReference"), point.get("timeReference")):
                 if reference and reference not in seen:
                     items.append({"reference": reference, "fc": point["fc"]})
                     seen.add(reference)
-        worker.send({"cmd": "read_batch", "items": items})
         device["lastPollSent"] = time.monotonic()
+        if items:
+            worker.send({"cmd": "read_batch", "items": items})
 
     def _apply_values(self, device: dict[str, Any], values: list[dict[str, Any]], source: str) -> None:
         received_at = datetime.now().astimezone().isoformat(timespec="milliseconds")
