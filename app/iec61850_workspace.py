@@ -134,6 +134,12 @@ def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
     if point_prefix:
         _safe_id(point_prefix, "点名前缀", 4)
     station_prefix = str(raw.get("stationPrefix") or "").strip()[:60]
+    phase = _station_phase(station_prefix)
+    if phase and re.search(r"_[ABC]$", logical_device, re.IGNORECASE):
+        logical_device = f"{logical_device[:-1]}{phase}"
+    profile_name = _sync_phase_label(str(raw.get("name") or base["name"]).strip()[:80], phase)
+    description = (f"{station_prefix} Modbus V10 转 IEC61850" if station_prefix else
+                   str(raw.get("description") or base["description"]).strip()[:120])
     network = raw.get("network") if isinstance(raw.get("network"), dict) else {}
     normalized_network = {
         "ip": _ipv4(network.get("ip", base["network"]["ip"]), "IP地址"),
@@ -182,14 +188,23 @@ def normalize_profile(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("映射属性超过固件128条上限")
     return {
         "schemaVersion": SCHEMA_VERSION, "id": profile_id,
-        "name": str(raw.get("name") or base["name"]).strip()[:80],
+        "name": profile_name,
         "deviceId": str(raw.get("deviceId") or "").strip()[:80],
         "iedName": ied_name, "logicalDevice": logical_device, "pointPrefix": point_prefix,
         "stationPrefix": station_prefix,
         "manufacturer": str(raw.get("manufacturer") or "YLDQ").strip()[:40],
-        "description": str(raw.get("description") or base["description"]).strip()[:120],
+        "description": description,
         "network": normalized_network, "report": report, "points": points,
     }
+
+
+def _station_phase(station_prefix: str) -> str:
+    match = re.search(r"([ABC])相", station_prefix, re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
+def _sync_phase_label(value: str, phase: str) -> str:
+    return re.sub(r"[ABC]相", f"{phase}相", value, flags=re.IGNORECASE) if phase else value
 
 
 def generate_package(raw_profile: dict[str, Any], export_root: Path) -> dict[str, Any]:

@@ -57,6 +57,23 @@ class Iec61850WorkspaceTests(unittest.TestCase):
             do_type = root.find(".//s:DOType[@id='YLDQ_MV']/s:DA[@name='dU']", ns)
             self.assertEqual(do_type.attrib["bType"], "Unicode255")
 
+    def test_changing_phase_updates_description_name_and_logical_device(self):
+        profile = default_profile()
+        profile["name"] = "三江变电站A相吸湿器模板"
+        profile["stationPrefix"] = "三江变电站B相吸湿器"
+        profile["description"] = "三江变电站A相吸湿器 Modbus V10 转 IEC61850"
+        profile["logicalDevice"] = "LD_Device_A"
+        normalized = normalize_profile(profile)
+        self.assertEqual(normalized["name"], "三江变电站B相吸湿器模板")
+        self.assertEqual(normalized["description"], "三江变电站B相吸湿器 Modbus V10 转 IEC61850")
+        self.assertEqual(normalized["logicalDevice"], "LD_Device_B")
+        with tempfile.TemporaryDirectory() as temp:
+            result = generate_package(normalized, Path(temp))
+            cfg = Path(result["files"]["cfg"]).read_text(encoding="utf-8")
+            icd = Path(result["files"]["icd"]).read_text(encoding="utf-8")
+            self.assertNotIn("A相", cfg + icd)
+            self.assertIn("三江变电站B相吸湿器 Modbus V10 转 IEC61850", cfg + icd)
+
     def test_icd_contains_field_style_datasets_and_reports(self):
         with tempfile.TemporaryDirectory() as temp:
             result = generate_package(default_profile(), Path(temp))

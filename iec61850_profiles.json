@@ -265,16 +265,16 @@
     {
       "schemaVersion": 1,
       "id": "sanjiang_a_template",
-      "name": "三江变电站A相吸湿器模板",
+      "name": "三江变电站B相吸湿器模板",
       "deviceId": "",
-      "iedName": "SANJIANGBIAN",
-      "logicalDevice": "LD_Device_A",
+      "iedName": "NJIANGBIAN",
+      "logicalDevice": "LD_Device_B",
       "pointPrefix": "",
-      "stationPrefix": "三江变电站A相吸湿器",
+      "stationPrefix": "三江变电站B相吸湿器",
       "manufacturer": "YLDQ",
-      "description": "三江变电站A相吸湿器 Modbus V10 转 IEC61850",
+      "description": "三江变电站B相吸湿器 Modbus V10 转 IEC61850",
       "network": {
-        "ip": "192.168.0.123",
+        "ip": "192.168.0.11",
         "netmask": "255.255.255.0",
         "gateway": "192.168.0.1",
         "port": 102
@@ -290,235 +290,235 @@
           "pointId": "input_register.sensor_3.temperature",
           "enabled": true,
           "objectName": "AnIn1",
-          "stationName": "三江变电站A相吸湿器上部温度"
+          "stationName": "三江变电站B相吸湿器上部温度"
         },
         {
           "pointId": "input_register.sensor_3.humidity",
           "enabled": true,
           "objectName": "AnIn2",
-          "stationName": "三江变电站A相吸湿器上部湿度"
+          "stationName": "三江变电站B相吸湿器上部湿度"
         },
         {
           "pointId": "input_register.pressure",
           "enabled": true,
           "objectName": "AnIn3",
-          "stationName": "三江变电站A相吸湿器压力"
+          "stationName": "三江变电站B相吸湿器压力"
         },
         {
           "pointId": "input_register.flow",
           "enabled": true,
           "objectName": "AnIn4",
-          "stationName": "三江变电站A相吸湿器呼吸流量"
+          "stationName": "三江变电站B相吸湿器呼吸流量"
         },
         {
           "pointId": "input_register.output.total_heat_state",
           "enabled": true,
           "objectName": "Ind1",
-          "stationName": "三江变电站A相吸湿器总主加热状态"
+          "stationName": "三江变电站B相吸湿器总主加热状态"
         },
         {
           "pointId": "input_register.output.htc1_state",
           "enabled": true,
           "objectName": "Ind2",
-          "stationName": "三江变电站A相吸湿器主加热1状态"
+          "stationName": "三江变电站B相吸湿器主加热1状态"
         },
         {
           "pointId": "input_register.output.htc2_state",
           "enabled": true,
           "objectName": "Ind3",
-          "stationName": "三江变电站A相吸湿器主加热2状态"
+          "stationName": "三江变电站B相吸湿器主加热2状态"
         },
         {
           "pointId": "input_register.output.antifreeze_state",
           "enabled": true,
           "objectName": "Ind4",
-          "stationName": "三江变电站A相吸湿器防冻加热状态"
+          "stationName": "三江变电站B相吸湿器防冻加热状态"
         },
         {
           "pointId": "input_register.output.alarm_state",
           "enabled": true,
           "objectName": "Ind5",
-          "stationName": "三江变电站A相吸湿器报警输出状态"
+          "stationName": "三江变电站B相吸湿器报警输出状态"
         },
         {
           "pointId": "discrete_input.breath.exhale",
           "enabled": true,
           "objectName": "Ind6",
-          "stationName": "三江变电站A相吸湿器出气状态"
+          "stationName": "三江变电站B相吸湿器出气状态"
         },
         {
           "pointId": "discrete_input.breath.inhale",
           "enabled": true,
           "objectName": "Ind7",
-          "stationName": "三江变电站A相吸湿器吸气状态"
+          "stationName": "三江变电站B相吸湿器吸气状态"
         },
         {
           "pointId": "discrete_input.breath.no_breath",
           "enabled": true,
           "objectName": "Ind8",
-          "stationName": "三江变电站A相吸湿器无呼吸状态"
+          "stationName": "三江变电站B相吸湿器无呼吸状态"
         },
         {
           "pointId": "discrete_input.alarm.any",
           "enabled": true,
           "objectName": "Ind9",
-          "stationName": "三江变电站A相吸湿器总报警"
+          "stationName": "三江变电站B相吸湿器总报警"
         },
         {
           "pointId": "discrete_input.alarm.sensor_3_fault",
           "enabled": true,
           "objectName": "Ind10",
-          "stationName": "三江变电站A相吸湿器上部温湿度故障"
+          "stationName": "三江变电站B相吸湿器上部温湿度故障"
         },
         {
           "pointId": "discrete_input.alarm.pressure_fault",
           "enabled": true,
           "objectName": "Ind11",
-          "stationName": "三江变电站A相吸湿器压力传感器故障"
+          "stationName": "三江变电站B相吸湿器压力传感器故障"
         },
         {
           "pointId": "discrete_input.alarm.flow_fault",
           "enabled": true,
           "objectName": "Ind12",
-          "stationName": "三江变电站A相吸湿器流量传感器故障"
+          "stationName": "三江变电站B相吸湿器流量传感器故障"
         },
         {
           "pointId": "discrete_input.alarm.actuator_fault",
           "enabled": true,
           "objectName": "Ind13",
-          "stationName": "三江变电站A相吸湿器执行器故障汇总"
+          "stationName": "三江变电站B相吸湿器执行器故障汇总"
         },
         {
           "pointId": "discrete_input.alarm.pressure_limit",
           "enabled": true,
           "objectName": "Ind14",
-          "stationName": "三江变电站A相吸湿器压力越限报警"
+          "stationName": "三江变电站B相吸湿器压力越限报警"
         },
         {
           "pointId": "discrete_input.alarm.humidity_limit",
           "enabled": true,
           "objectName": "Ind15",
-          "stationName": "三江变电站A相吸湿器上部湿度越限报警"
+          "stationName": "三江变电站B相吸湿器上部湿度越限报警"
         },
         {
           "pointId": "discrete_input.alarm.temperature_limit",
           "enabled": true,
           "objectName": "Ind16",
-          "stationName": "三江变电站A相吸湿器上部温度越限报警"
+          "stationName": "三江变电站B相吸湿器上部温度越限报警"
         },
         {
           "pointId": "discrete_input.alarm.breath_no_change",
           "enabled": true,
           "objectName": "Ind17",
-          "stationName": "三江变电站A相吸湿器呼吸无变化报警"
+          "stationName": "三江变电站B相吸湿器呼吸无变化报警"
         },
         {
           "pointId": "input_register.sensor_3.read_ok",
           "enabled": true,
           "objectName": "Ind18",
-          "stationName": "三江变电站A相吸湿器上部温湿度有效"
+          "stationName": "三江变电站B相吸湿器上部温湿度有效"
         },
         {
           "pointId": "discrete_input.pressure.read_ok",
           "enabled": true,
           "objectName": "Ind19",
-          "stationName": "三江变电站A相吸湿器压力数据有效"
+          "stationName": "三江变电站B相吸湿器压力数据有效"
         },
         {
           "pointId": "discrete_input.flow.read_ok",
           "enabled": true,
           "objectName": "Ind20",
-          "stationName": "三江变电站A相吸湿器流量数据有效"
+          "stationName": "三江变电站B相吸湿器流量数据有效"
         },
         {
           "pointId": "discrete_input.alarm.sensor_1_fault",
           "enabled": true,
           "objectName": "Ind21",
-          "stationName": "三江变电站A相吸湿器左温湿度故障"
+          "stationName": "三江变电站B相吸湿器左温湿度故障"
         },
         {
           "pointId": "discrete_input.alarm.sensor_2_fault",
           "enabled": true,
           "objectName": "Ind22",
-          "stationName": "三江变电站A相吸湿器右温湿度故障"
+          "stationName": "三江变电站B相吸湿器右温湿度故障"
         },
         {
           "pointId": "discrete_input.alarm.htc1_fault",
           "enabled": true,
           "objectName": "Ind23",
-          "stationName": "三江变电站A相吸湿器主加热1输出故障"
+          "stationName": "三江变电站B相吸湿器主加热1输出故障"
         },
         {
           "pointId": "discrete_input.alarm.htc2_fault",
           "enabled": true,
           "objectName": "Ind24",
-          "stationName": "三江变电站A相吸湿器主加热2输出故障"
+          "stationName": "三江变电站B相吸湿器主加热2输出故障"
         },
         {
           "pointId": "discrete_input.alarm.antifreeze_fault",
           "enabled": true,
           "objectName": "Ind25",
-          "stationName": "三江变电站A相吸湿器防冻输出故障"
+          "stationName": "三江变电站B相吸湿器防冻输出故障"
         },
         {
           "pointId": "discrete_input.alarm.valve_1_fault",
           "enabled": true,
           "objectName": "Ind26",
-          "stationName": "三江变电站A相吸湿器上阀故障"
+          "stationName": "三江变电站B相吸湿器上阀故障"
         },
         {
           "pointId": "discrete_input.alarm.valve_2_fault",
           "enabled": true,
           "objectName": "Ind27",
-          "stationName": "三江变电站A相吸湿器左阀故障"
+          "stationName": "三江变电站B相吸湿器左阀故障"
         },
         {
           "pointId": "discrete_input.alarm.valve_3_fault",
           "enabled": true,
           "objectName": "Ind28",
-          "stationName": "三江变电站A相吸湿器右阀故障"
+          "stationName": "三江变电站B相吸湿器右阀故障"
         },
         {
           "pointId": "discrete_input.alarm.power_overheat",
           "enabled": true,
           "objectName": "Ind29",
-          "stationName": "三江变电站A相吸湿器电源过热故障"
+          "stationName": "三江变电站B相吸湿器电源过热故障"
         },
         {
           "pointId": "discrete_input.pressure.heat_protection",
           "enabled": true,
           "objectName": "Ind30",
-          "stationName": "三江变电站A相吸湿器压力保护停热"
+          "stationName": "三江变电站B相吸湿器压力保护停热"
         },
         {
           "pointId": "input_register.heat_session_1.session_run_seconds",
           "enabled": true,
           "objectName": "RunTm1",
-          "stationName": "三江变电站A相吸湿器主加热1本轮运行时间"
+          "stationName": "三江变电站B相吸湿器主加热1本轮运行时间"
         },
         {
           "pointId": "input_register.heat_session_2.session_run_seconds",
           "enabled": true,
           "objectName": "RunTm2",
-          "stationName": "三江变电站A相吸湿器主加热2本轮运行时间"
+          "stationName": "三江变电站B相吸湿器主加热2本轮运行时间"
         },
         {
           "pointId": "input_register.output.htc1_open_count",
           "enabled": true,
           "objectName": "OpCnt1",
-          "stationName": "三江变电站A相吸湿器主加热1累计开启次数"
+          "stationName": "三江变电站B相吸湿器主加热1累计开启次数"
         },
         {
           "pointId": "input_register.output.htc2_open_count",
           "enabled": true,
           "objectName": "OpCnt2",
-          "stationName": "三江变电站A相吸湿器主加热2累计开启次数"
+          "stationName": "三江变电站B相吸湿器主加热2累计开启次数"
         },
         {
           "pointId": "input_register.output.antifreeze_open_count",
           "enabled": true,
           "objectName": "OpCnt3",
-          "stationName": "三江变电站A相吸湿器防冻累计开启次数"
+          "stationName": "三江变电站B相吸湿器防冻累计开启次数"
         }
       ]
     }
