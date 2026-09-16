@@ -110,7 +110,6 @@
       fillFields(); renderTable();
       iecState.loaded = true;
     } catch (error) {
-      element("iecCapabilityText").textContent = error.message;
       notify(error.message, "error");
     } finally { iecState.loading = false; }
   }
