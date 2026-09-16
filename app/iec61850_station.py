@@ -420,6 +420,7 @@ class StationManager:
             if self.payload.get("selectedDeviceId") == device_id:
                 self.payload["selectedDeviceId"] = self.payload["devices"][0]["id"] if self.payload["devices"] else None
             self._save()
+            (STATION_IMPORT_DIR / f"{device_id}.icd").unlink(missing_ok=True)
             self._publish("device_deleted", device_id)
             return self.snapshot()
 

@@ -41,6 +41,7 @@ function stationRender(){
   stationEl("stationConnectBtn").disabled=!device||device.status==="online"||device.status==="connecting";
   stationEl("stationDisconnectBtn").disabled=!device||!(["online","connecting","error"].includes(device.status));
   stationEl("stationSaveDeviceBtn").disabled=!device;
+  stationEl("stationDeleteDeviceBtn").disabled=!device;
   stationRenderTree(device);stationRenderPoints(device);stationRenderReports(device);stationRenderEvents();stationRenderComparison(device);
 }
 
@@ -103,6 +104,18 @@ async function stationImportFile(file){
 }
 async function stationMutation(path,body,success){try{await stationApi(path,{method:"POST",body:JSON.stringify(body)});if(success)stationNotify(success);}catch(error){stationNotify(error.message,true);}}
 
+async function stationDeleteSelected(){
+  const device=stationSelected();
+  if(!device)return;
+  if(!window.confirm(`从61850总站删除“${device.displayName}”？\n\n不会修改板卡，也不会删除你电脑上的原始ICD文件。`))return;
+  try{
+    stationState.snapshot=await stationApi("/api/iec61850-station/device",{method:"DELETE",body:JSON.stringify({deviceId:device.id})});
+    stationState.selectedId=stationState.snapshot.selectedDeviceId||stationDevices()[0]?.id||null;
+    stationRender();
+    stationNotify(`已删除 ${device.displayName}`);
+  }catch(error){stationNotify(`删除设备失败：${error.message}`,true);}
+}
+
 function stationBind(){
   document.querySelectorAll('[data-page="iec61850station"]').forEach((node)=>node.addEventListener("click",()=>{if(!stationState.loaded)stationLoad();}));
   stationEl("stationImportBtn").addEventListener("click",()=>stationEl("stationIcdFile").click());
@@ -113,6 +126,7 @@ function stationBind(){
   stationEl("stationSaveDeviceBtn").addEventListener("click",()=>{const device=stationSelected();if(device)stationMutation("/api/iec61850-station/device/update",{deviceId:device.id,host:stationEl("stationHost").value,port:Number(stationEl("stationPort").value)},"设备地址已保存");});
   stationEl("stationConnectBtn").addEventListener("click",()=>{const device=stationSelected();if(device)stationMutation("/api/iec61850-station/device/connect",{deviceId:device.id},"正在连接设备");});
   stationEl("stationDisconnectBtn").addEventListener("click",()=>{const device=stationSelected();if(device)stationMutation("/api/iec61850-station/device/disconnect",{deviceId:device.id},"设备已断开");});
+  stationEl("stationDeleteDeviceBtn").addEventListener("click",stationDeleteSelected);
   stationEl("stationPointTableBody").addEventListener("click",(event)=>{const button=event.target.closest("[data-station-read]");const device=stationSelected();const point=device?.points.find((item)=>item.id===button?.dataset.stationRead);if(point)stationMutation("/api/iec61850-station/read",{deviceId:device.id,reference:point.reference,fc:point.fc},"已发送读取请求");});
   stationEl("stationRcbList").addEventListener("click",(event)=>{const button=event.target.closest("[data-station-report]");const device=stationSelected();if(button&&device)stationMutation("/api/iec61850-station/report/subscribe",{deviceId:device.id,reference:button.dataset.stationReport},"正在启用报告并执行GI");});
   document.querySelectorAll("[data-station-tab]").forEach((button)=>button.addEventListener("click",()=>{document.querySelectorAll("[data-station-tab]").forEach((item)=>item.classList.toggle("active",item===button));document.querySelectorAll("[data-station-tab-view]").forEach((item)=>item.classList.toggle("active",item.dataset.stationTabView===button.dataset.stationTab));}));
