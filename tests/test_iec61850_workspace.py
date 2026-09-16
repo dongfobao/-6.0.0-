@@ -87,10 +87,11 @@ class Iec61850WorkspaceTests(unittest.TestCase):
             output = Path(result["outputDirectory"])
             self.assertEqual(result["manifest"]["selectedPointCount"], 39)
             self.assertEqual(result["manifest"]["mappingCount"], 117)
-            self.assertFalse(result["manifest"]["firmwareApplySupported"])
+            self.assertTrue(all(result["manifest"]["validation"].values()))
             for path in result["files"].values():
                 self.assertTrue(Path(path).is_file())
-            self.assertNotIn("mapping", result["files"])
+            self.assertIn("mapping", result["files"])
+            self.assertIn("validation", result["files"])
             cfg = Path(result["files"]["cfg"]).read_text(encoding="utf-8")
             self.assertIn("DA(f 0 10 1 1 10000)=0;", cfg)
             self.assertIn("DA(q 0 23 1 2 10001);", cfg)
@@ -101,7 +102,7 @@ class Iec61850WorkspaceTests(unittest.TestCase):
             self.assertIn("YLDQ01LD_Device_1/GGIO1.AnIn1.mag.f", point_table)
             self.assertIn("功能约束", point_table)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(manifest["files"]), 5)
+            self.assertEqual(len(manifest["files"]), 7)
 
     def test_saved_profile_is_returned_by_workspace_bootstrap(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -111,7 +112,8 @@ class Iec61850WorkspaceTests(unittest.TestCase):
             save_profile(path, profile)
             payload = workspace_payload(path)
             self.assertEqual(payload["profiles"]["profiles"][0]["name"], "一号设备")
-            self.assertFalse(payload["capabilities"]["applyToDevice"])
+            self.assertTrue(payload["capabilities"]["generate"])
+            self.assertNotIn("applyToDevice", payload["capabilities"])
 
 
 if __name__ == "__main__":

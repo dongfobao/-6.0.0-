@@ -108,10 +108,8 @@
       iecState.profile = selectedProfile(payload);
       if (!iecState.profile) throw new Error("没有可用的IEC61850配置项目");
       fillFields(); renderTable();
-      element("iecCapabilityTitle").textContent = iecState.capabilities.applyToDevice ? "设备下发可用" : "配置包生成可用";
-      element("iecCapabilityText").textContent = iecState.capabilities.applyToDevice ? "可通过网口验证并下发" : "网口下发等待固件配置服务";
-      element("iecApplyReason").textContent = iecState.capabilities.applyBlockReason || "";
-      element("iecApplyBtn").disabled = !iecState.capabilities.applyToDevice;
+      element("iecCapabilityTitle").textContent = "配置包生成可用";
+      element("iecCapabilityText").textContent = "可生成并校验 CFG、映射、ICD、CSV";
       iecState.loaded = true;
     } catch (error) {
       element("iecCapabilityText").textContent = error.message;
@@ -133,7 +131,7 @@
       const result = await iecApi("/api/iec61850/generate", {method:"POST", body:profileBody()});
       const files = Object.entries(result.files || {}).map(([key, path]) => `<li><b>${iecEsc(key)}</b>：<code>${iecEsc(path)}</code></li>`).join("");
       element("iecOutput").className = "iec-output";
-      element("iecOutput").innerHTML = `<strong>配置包已生成</strong><br>目录：<code>${iecEsc(result.outputDirectory)}</code><ul>${files}</ul><small>共${result.manifest.selectedPointCount}个源点、${result.manifest.mappingCount}条映射属性。</small>`;
+      element("iecOutput").innerHTML = `<strong>配置包已生成并校验通过</strong><br>目录：<code>${iecEsc(result.outputDirectory)}</code><ul>${files}</ul><small>共${result.manifest.selectedPointCount}个源点、${result.manifest.mappingCount}条映射属性。</small>`;
       notify("总站配置包生成完成");
     } catch (error) { notify(error.message, "error"); }
     finally { button.disabled = false; button.textContent = "生成总站配置包"; }
@@ -145,9 +143,8 @@
     try {
       const result = await iecApi("/api/iec61850/probe", {method:"POST", body:JSON.stringify({ip:iecState.profile.network.ip, port:iecState.profile.network.port})});
       const mms = result.mms.reachable ? `MMS ${result.mms.port}端口可达` : `MMS ${result.mms.port}端口不可达：${result.mms.message}`;
-      const config = result.configuration.reachable ? `配置服务 ${result.configuration.port}端口可达` : `配置服务 ${result.configuration.port}尚未开放`;
       node.className = `iec-probe-result ${result.mms.reachable ? "ok" : "warn"}`;
-      node.textContent = `${mms}；${config}`;
+      node.textContent = mms;
     } catch (error) { node.className = "iec-probe-result warn"; node.textContent = error.message; }
   }
 

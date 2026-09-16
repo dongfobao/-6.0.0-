@@ -2,8 +2,7 @@
 
 上位机只允许选择固件当前真实提供的 V10 转发点。生成结果包含设备运行时
 使用的单一 cfg、总站核对点表和 ICD 初稿。Modbus绑定通过cfg的sAddr字段内嵌。
-网络参数和模型下发需要固件
-实现配置事务后才允许执行，避免界面显示“已下发”而设备实际未改变。
+网络参数用于生成 ICD 和现场连接校验；本工作台只生成、校验和导出配置包。
 """
 from __future__ import annotations
 
@@ -23,7 +22,6 @@ from live_register_catalog import get_register_catalog
 
 
 SCHEMA_VERSION = 1
-CONFIG_SERVICE_PORT = 15050
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 _ANALOG = {
@@ -206,20 +204,25 @@ def generate_package(raw_profile: dict[str, Any], export_root: Path) -> dict[str
         "profile": output_dir / f"{base_name}_profile.json",
         "cfg": output_dir / f"{base_name}.cfg",
         "pointTable": output_dir / f"{base_name}_point_table.csv",
+        "mapping": output_dir / f"{base_name}_mapping.txt",
         "icd": output_dir / f"{base_name}.icd",
         "manifest": output_dir / "manifest.json",
+        "validation": output_dir / "校验报告.txt",
         "readme": output_dir / "部署说明.txt",
     }
     cfg_text, rows = _generate_cfg(profile, selected)
     files["profile"].write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
     files["cfg"].write_text(cfg_text, encoding="utf-8", newline="\n")
     _write_point_table(files["pointTable"], rows)
+    _write_mapping(files["mapping"], rows)
     files["icd"].write_text(_generate_icd(profile, selected), encoding="utf-8", newline="\n")
+    validation = _validate_generated_files(files, selected, rows, cfg_text)
+    files["validation"].write_text(validation["text"], encoding="utf-8", newline="\n")
     files["readme"].write_text(_deployment_readme(profile, files), encoding="utf-8")
     manifest = {"schemaVersion": SCHEMA_VERSION, "generatedAt": datetime.now().isoformat(timespec="seconds"),
                 "iedName": profile["iedName"], "logicalDevice": profile["logicalDevice"],
                 "selectedPointCount": len(selected), "mappingCount": len(selected) * 3,
-                "firmwareApplySupported": False, "files": {}}
+                "validation": validation["checks"], "files": {}}
     for key, path in files.items():
         if key != "manifest":
             manifest["files"][key] = {"name": path.name, "sha256": _sha256(path)}
@@ -481,13 +484,45 @@ def _write_point_table(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader(); writer.writerows(rows)
 
 
+def _write_mapping(path: Path, rows: list[dict[str, Any]]) -> None:
+    lines = ["# YLDQ IEC61850映射清单（CFG的sAddr绑定）",
+             "# Modbus区域\t地址\t字数\tIEC61850引用\t源点名称\t总站名称"]
+    for row in rows:
+        lines.append("\t".join(str(row.get(key, "")) for key in
+                                 ("Modbus区域", "Modbus地址", "字数", "IEC61850引用", "源点名称", "总站名称")))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def _validate_generated_files(files: dict[str, Path], selected: list[tuple[dict[str, Any], dict[str, Any]]],
+                              rows: list[dict[str, Any]], cfg_text: str) -> dict[str, Any]:
+    checks = {
+        "cfg": bool(cfg_text.strip()) and cfg_text.count("DA(") >= len(selected) * 3,
+        "mapping": len(rows) == len(selected), "icd": False, "csv": False,
+    }
+    try:
+        root = ET.parse(files["icd"]).getroot()
+        checks["icd"] = root.tag.endswith("SCL") and root.find(".//{*}IED") is not None
+    except (ET.ParseError, OSError):
+        pass
+    try:
+        with files["pointTable"].open(newline="", encoding="utf-8-sig") as stream:
+            checks["csv"] = sum(1 for _ in csv.DictReader(stream)) == len(rows)
+    except (OSError, csv.Error):
+        pass
+    if not all(checks.values()):
+        raise ValueError("生成文件校验失败，请检查CFG、映射、ICD和CSV")
+    text = "IEC61850配置包校验报告\n" + "\n".join(f"通过：{name.upper()}" for name in checks)
+    text += "\n结论：通过\n"
+    return {"passed": True, "checks": checks, "text": text}
+
+
 def _deployment_readme(profile: dict[str, Any], files: dict[str, Path]) -> str:
     return (f"IED名称：{profile['iedName']}\n逻辑设备：{profile['logicalDevice']}\n"
             f"计划网络：{profile['network']['ip']} / {profile['network']['netmask']}，网关 {profile['network']['gateway']}\n\n"
             "当前版本说明：\n"
             "1. 板卡运行只使用一个cfg文件；Modbus绑定已写入cfg的sAddr字段。\n"
             "2. point_table.csv 用于总站逐点核对，ICD为总站导入初稿，正式工程需由总站工具校验。\n"
-            "3. 上位机尚不能把网络和模型直接写入设备；需要固件增加IEC61850配置事务后才可取消SD文件。\n"
+            "3. mapping.txt和point_table.csv用于现场逐点核对，ICD用于总站导入。\n"
             f"4. 现有SD部署时，只将 {files['cfg'].name} 放在SD根目录，并确保根目录没有其他cfg。\n")
 
 
@@ -532,9 +567,7 @@ def _sha256(path: Path) -> str:
 
 def workspace_payload(profile_path: Path) -> dict[str, Any]:
     return {"catalog": forwarding_catalog(), "profiles": load_profiles(profile_path),
-            "capabilities": {"generate": True, "saveProfile": True, "applyToDevice": False,
-                             "probeMms": True, "configServicePort": CONFIG_SERVICE_PORT,
-                             "applyBlockReason": "固件V10尚未提供网口IEC61850配置服务"}}
+            "capabilities": {"generate": True, "saveProfile": True, "probeMms": True}}
 
 
 def probe_network(raw: dict[str, Any]) -> dict[str, Any]:
@@ -543,8 +576,6 @@ def probe_network(raw: dict[str, Any]) -> dict[str, Any]:
     timeout = max(0.2, min(float(raw.get("timeoutSeconds", 1.2)), 5.0))
     return {
         "ip": ip, "mms": _probe_tcp(ip, mms_port, timeout),
-        "configuration": _probe_tcp(ip, CONFIG_SERVICE_PORT, timeout),
-        "configurationNote": "15050端口将在固件配置服务实现后用于发现、上传和原子切换配置",
     }
 
 

@@ -196,14 +196,14 @@
 
       <section class="page iec-page" data-page-view="iec61850">
         <div class="iec-heading">
-          <div><span>MODBUS V10 → IEC 61850</span><h2>转发配置工作台</h2><p>通过RS485确认源点，通过网口配置板卡、验证MMS并生成总站交付文件。</p></div>
+          <div><span>MODBUS V10 → IEC 61850</span><h2>转发配置工作台</h2><p>选择固件真实支持的源点，统一IEC命名，生成并校验总站交付配置包。</p></div>
           <div class="iec-state"><i></i><div><strong id="iecCapabilityTitle">配置设计模式</strong><small id="iecCapabilityText">正在读取能力</small></div></div>
         </div>
         <div class="iec-flow" aria-label="配置流程">
           <div class="done"><b>1</b><span>选择Modbus源点<small>仅显示固件真实支持点</small></span></div>
           <div class="active"><b>2</b><span>统一IEC命名<small>IED、LD和点名前缀</small></span></div>
           <div><b>3</b><span>生成并校验<small>CFG、映射、ICD、CSV</small></span></div>
-          <div><b>4</b><span>网口下发<small>固件配置服务实现后开放</small></span></div>
+          <div><b>4</b><span>配置包可用<small>CFG、映射、ICD、CSV已校验</small></span></div>
         </div>
 
         <div class="iec-layout">
@@ -237,8 +237,6 @@
               <dl><div><dt>启用源点</dt><dd id="iecSelectedSummary">--</dd></div><div><dt>映射属性</dt><dd id="iecMappingSummary">--</dd></div><div><dt>设备地址</dt><dd id="iecNetworkSummary">--</dd></div><div><dt>总站根引用</dt><dd id="iecRootSummary">--</dd></div></dl>
               <button id="iecSaveBtn" class="button secondary full">保存配置项目</button>
               <button id="iecGenerateBtn" class="button primary full">生成总站配置包</button>
-              <button id="iecApplyBtn" class="button secondary full" disabled>通过网口下发到板卡</button>
-              <p id="iecApplyReason" class="iec-apply-reason"></p>
             </section>
             <section class="panel iec-card">
               <h3>生成结果</h3><div id="iecOutput" class="iec-output muted">尚未生成配置包</div>
