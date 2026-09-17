@@ -566,13 +566,14 @@ class StationManager:
 
     def _send_read_batch(self, device: dict[str, Any], worker: DeviceWorker) -> None:
         report_active = any(
-            state.get("status") == "enabled"
+            state.get("status") in {"enabling", "enabled"}
             for state in device.get("reportStates", {}).values()
         )
         if report_active:
             # libiec61850 的同步读取与异步报告共用同一条 MMS 关联。板卡发送
             # urcbDin 时若总站同时逐点读取，客户端协议栈会关闭关联。连接建立后
-            # 已完成一次全点读取；启用报告后暂停周期轮询，由报告继续刷新数据。
+            # 已完成一次全点读取；从订阅命令发出起就暂停周期轮询，
+            # 防止 enabling 窗口内又排入一批读命令，后续由报告刷新数据。
             device["lastPollSent"] = time.monotonic()
             return
 

@@ -77,7 +77,7 @@ class Iec61850StationParserTests(unittest.TestCase):
         self.assertFalse(current["stale"])
         self.assertNotIn("error", current)
 
-    def test_poll_pauses_when_any_report_is_enabled(self) -> None:
+    def test_poll_pauses_while_report_is_enabling_or_enabled(self) -> None:
         class FakeWorker:
             def __init__(self) -> None:
                 self.commands = []
@@ -87,23 +87,26 @@ class Iec61850StationParserTests(unittest.TestCase):
 
         manager = StationManager.__new__(StationManager)
         worker = FakeWorker()
-        device = {
-            "lastPollSent": 0,
-            "points": [
-                {"reference": "IEDLD/GGIO1.AnIn1.mag.f", "qualityReference": "", "timeReference": "", "fc": "MX", "dataset": "dsAin"},
-                {"reference": "IEDLD/GGIO1.Ind1.stVal", "qualityReference": "", "timeReference": "", "fc": "ST", "dataset": "dsDin"},
-            ],
-            "rcbs": [
-                {"reference": "IEDLD/LLN0.RP.urcbAin", "dataset": "dsAin"},
-                {"reference": "IEDLD/LLN0.RP.urcbDin", "dataset": "dsDin"},
-            ],
-            "reportStates": {"IEDLD/LLN0.RP.urcbAin": {"status": "enabled"}},
-        }
+        for status in ("enabling", "enabled"):
+            with self.subTest(status=status):
+                worker.commands.clear()
+                device = {
+                    "lastPollSent": 0,
+                    "points": [
+                        {"reference": "IEDLD/GGIO1.AnIn1.mag.f", "qualityReference": "", "timeReference": "", "fc": "MX", "dataset": "dsAin"},
+                        {"reference": "IEDLD/GGIO1.Ind1.stVal", "qualityReference": "", "timeReference": "", "fc": "ST", "dataset": "dsDin"},
+                    ],
+                    "rcbs": [
+                        {"reference": "IEDLD/LLN0.RP.urcbAin", "dataset": "dsAin"},
+                        {"reference": "IEDLD/LLN0.RP.urcbDin", "dataset": "dsDin"},
+                    ],
+                    "reportStates": {"IEDLD/LLN0.RP.urcbAin": {"status": status}},
+                }
 
-        manager._send_read_batch(device, worker)
+                manager._send_read_batch(device, worker)
 
-        self.assertEqual(worker.commands, [])
-        self.assertGreater(device["lastPollSent"], 0)
+                self.assertEqual(worker.commands, [])
+                self.assertGreater(device["lastPollSent"], 0)
 
     def test_poll_sends_nothing_when_all_datasets_have_enabled_reports(self) -> None:
         class FakeWorker:
