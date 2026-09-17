@@ -565,16 +565,20 @@ class StationManager:
             self._publish(str(event or "update"), device_id)
 
     def _send_read_batch(self, device: dict[str, Any], worker: DeviceWorker) -> None:
+        report_active = any(
+            state.get("status") == "enabled"
+            for state in device.get("reportStates", {}).values()
+        )
+        if report_active:
+            # libiec61850 的同步读取与异步报告共用同一条 MMS 关联。板卡发送
+            # urcbDin 时若总站同时逐点读取，客户端协议栈会关闭关联。连接建立后
+            # 已完成一次全点读取；启用报告后暂停周期轮询，由报告继续刷新数据。
+            device["lastPollSent"] = time.monotonic()
+            return
+
         items: list[dict[str, str]] = []
         seen: set[str] = set()
-        enabled_datasets = {
-            str(rcb.get("dataset") or "")
-            for rcb in device.get("rcbs", [])
-            if (device.get("reportStates", {}).get(rcb.get("reference"), {}).get("status") == "enabled")
-        }
         for point in device["points"]:
-            if point.get("dataset") in enabled_datasets:
-                continue
             for reference in (point["reference"], point.get("qualityReference"), point.get("timeReference")):
                 if reference and reference not in seen:
                     items.append({"reference": reference, "fc": point["fc"]})

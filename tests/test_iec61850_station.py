@@ -77,7 +77,7 @@ class Iec61850StationParserTests(unittest.TestCase):
         self.assertFalse(current["stale"])
         self.assertNotIn("error", current)
 
-    def test_poll_skips_dataset_covered_by_enabled_report(self) -> None:
+    def test_poll_pauses_when_any_report_is_enabled(self) -> None:
         class FakeWorker:
             def __init__(self) -> None:
                 self.commands = []
@@ -102,8 +102,8 @@ class Iec61850StationParserTests(unittest.TestCase):
 
         manager._send_read_batch(device, worker)
 
-        self.assertEqual(len(worker.commands), 1)
-        self.assertEqual(worker.commands[0]["items"], [{"reference": "IEDLD/GGIO1.Ind1.stVal", "fc": "ST"}])
+        self.assertEqual(worker.commands, [])
+        self.assertGreater(device["lastPollSent"], 0)
 
     def test_poll_sends_nothing_when_all_datasets_have_enabled_reports(self) -> None:
         class FakeWorker:
