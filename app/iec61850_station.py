@@ -450,6 +450,7 @@ class StationManager:
             device["statusText"] = "已断开"
             device["lastError"] = ""
             device["reportStates"] = {}
+            self._mark_values_stale(device, "已断开")
             self._event(device_id, "disconnected", "MMS连接已断开")
             snapshot = deepcopy(device)
         if worker:
@@ -525,7 +526,11 @@ class StationManager:
                 elif payload.get("ok") and command == "subscribe":
                     result = payload.get("result", {})
                     reference = str(result.get("reference") or "")
-                    device["reportStates"][reference] = {"status": "enabled", "text": "已启用", **result}
+                    now = time.monotonic()
+                    device["reportStates"][reference] = {
+                        "status": "enabled", "text": "已启用", **result,
+                        "enabledMonotonic": now, "lastReceivedMonotonic": now,
+                    }
                     # 下一轮读取只轮询尚未被报告覆盖的数据集。
                     device["lastPollSent"] = 0
                     self._event(device_id, "report_enabled", f"报告已启用: {reference}")
@@ -539,6 +544,9 @@ class StationManager:
             elif event == "report":
                 device["lastSeen"] = payload.get("at")
                 rcb = next((item for item in device["rcbs"] if item["reference"] == payload.get("rcbReference")), None)
+                report_state = device.get("reportStates", {}).get(str(payload.get("rcbReference") or ""))
+                if report_state is not None:
+                    report_state["lastReceivedMonotonic"] = time.monotonic()
                 dataset_name = rcb.get("dataset") if rcb else ""
                 dataset_points = [point for point in device["points"] if point["dataset"] == dataset_name]
                 for entry in payload.get("entries", []):
@@ -555,12 +563,15 @@ class StationManager:
                         current.pop("error", None)
                 self._event(device_id, "report", f"收到报告 {payload.get('rptId') or payload.get('rcbReference')}", payload)
             elif event in {"fatal", "worker_exit", "worker_stderr", "error"}:
-                if device.get("status") == "offline" and device_id not in self.workers:
+                if (device.get("status") in {"offline", "error"}
+                        and device_id not in self.workers):
                     return
                 error = str(payload.get("error") or f"工作进程退出: {payload.get('exitCode')}")
                 device["status"] = "error"
                 device["statusText"] = "IEC61850工作进程异常"
                 device["lastError"] = error
+                device["reportStates"] = {}
+                self._mark_values_stale(device, "通信中断")
                 self._event(device_id, "error", error)
             self._publish(str(event or "update"), device_id)
 
@@ -620,6 +631,48 @@ class StationManager:
                 current.update({"sourceTimeText": value.get("text"), "receivedAt": received_at})
         device["lastSeen"] = received_at
 
+    @staticmethod
+    def _mark_values_stale(device: dict[str, Any], quality_text: str) -> None:
+        """连接失效后保留最后接收时间，但禁止旧值继续显示为实时 good。"""
+        for point in device.get("points", []):
+            reference = str(point.get("reference") or "")
+            if not reference:
+                continue
+            current = device.setdefault("values", {}).setdefault(reference, {})
+            current.update({
+                "ok": False,
+                "stale": True,
+                "qualityText": quality_text,
+                "source": "offline",
+            })
+
+    @staticmethod
+    def _report_watchdog_expired(device: dict[str, Any], now: float) -> bool:
+        enabled_states = [
+            (reference, state)
+            for reference, state in device.get("reportStates", {}).items()
+            if state.get("status") == "enabled"
+        ]
+        if not enabled_states:
+            return False
+
+        rcb_by_reference = {
+            str(item.get("reference") or ""): item
+            for item in device.get("rcbs", [])
+        }
+        for reference, state in enabled_states:
+            rcb = rcb_by_reference.get(reference, {})
+            integrity_seconds = max(1.0, float(rcb.get("integrityMs") or 10000) / 1000.0)
+            timeout_seconds = max(15.0, integrity_seconds * 2.5)
+            last_received = float(
+                state.get("lastReceivedMonotonic")
+                or state.get("enabledMonotonic")
+                or now
+            )
+            if now - last_received > timeout_seconds:
+                return True
+        return False
+
     def _compare_model(self, device: dict[str, Any]) -> dict[str, Any]:
         expected_lds = {item["name"] for item in device["logicalDevices"]}
         online = device.get("onlineModel") or {}
@@ -643,6 +696,7 @@ class StationManager:
     def _poll_loop(self) -> None:
         while self.running:
             time.sleep(2)
+            workers_to_stop: list[DeviceWorker] = []
             with self.lock:
                 for device in self.payload["devices"]:
                     if device.get("status") != "online":
@@ -652,8 +706,23 @@ class StationManager:
                     worker = self.workers.get(device["id"])
                     if not worker or not worker.process or worker.process.poll() is not None:
                         continue
+                    now = time.monotonic()
+                    if self._report_watchdog_expired(device, now):
+                        device["status"] = "error"
+                        device["statusText"] = "通信中断"
+                        device["lastError"] = "报告心跳超时，设备可能已断电或网络中断"
+                        device["reportStates"] = {}
+                        self._mark_values_stale(device, "通信中断")
+                        stopped_worker = self.workers.pop(device["id"], None)
+                        if stopped_worker is not None:
+                            workers_to_stop.append(stopped_worker)
+                        self._event(device["id"], "connection_lost", device["lastError"])
+                        self._publish("connection_lost", device["id"])
+                        continue
                     if time.monotonic() - float(device.get("lastPollSent") or 0) >= 5:
                         self._send_read_batch(device, worker)
+            for worker in workers_to_stop:
+                worker.stop()
 
     def _device(self, device_id: str) -> dict[str, Any]:
         device = next((item for item in self.payload["devices"] if item["id"] == device_id), None)

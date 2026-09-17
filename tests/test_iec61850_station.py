@@ -77,6 +77,46 @@ class Iec61850StationParserTests(unittest.TestCase):
         self.assertFalse(current["stale"])
         self.assertNotIn("error", current)
 
+    def test_disconnect_marks_all_cached_values_stale(self) -> None:
+        manager = StationManager.__new__(StationManager)
+        device = {
+            "points": [
+                {"reference": "IEDLD/GGIO1.AnIn1.mag.f"},
+                {"reference": "IEDLD/GGIO1.Ind1.stVal"},
+            ],
+            "values": {
+                "IEDLD/GGIO1.AnIn1.mag.f": {
+                    "ok": True, "stale": False, "value": 26.9,
+                    "qualityText": "good", "source": "report",
+                }
+            },
+        }
+
+        manager._mark_values_stale(device, "通信中断")
+
+        for point in device["points"]:
+            current = device["values"][point["reference"]]
+            self.assertFalse(current["ok"])
+            self.assertTrue(current["stale"])
+            self.assertEqual(current["qualityText"], "通信中断")
+            self.assertEqual(current["source"], "offline")
+
+    def test_report_watchdog_uses_integrity_period(self) -> None:
+        manager = StationManager.__new__(StationManager)
+        device = {
+            "rcbs": [{"reference": "IEDLD/LLN0.RP.urcbAin", "integrityMs": 10000}],
+            "reportStates": {
+                "IEDLD/LLN0.RP.urcbAin": {
+                    "status": "enabled",
+                    "enabledMonotonic": 100.0,
+                    "lastReceivedMonotonic": 110.0,
+                }
+            },
+        }
+
+        self.assertFalse(manager._report_watchdog_expired(device, 134.9))
+        self.assertTrue(manager._report_watchdog_expired(device, 135.1))
+
     def test_poll_pauses_while_report_is_enabling_or_enabled(self) -> None:
         class FakeWorker:
             def __init__(self) -> None:

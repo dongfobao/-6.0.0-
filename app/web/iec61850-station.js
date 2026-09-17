@@ -85,7 +85,7 @@ function stationRenderPoints(device){
     const value=current?.ok?stationValue(current.value):"--";
     const unit=point.unit?` ${stationEscape(point.unit)}`:"";
     const quality=modelMismatch?"在线模型不匹配":current?.qualityText||current?.quality||((current?.ok)?"good":"未读取");
-    const source=current?.source==="report"?"报告":current?.source==="manual"?"手动读取":current?.source==="poll"?"轮询":"--";
+    const source=current?.source==="report"?"报告":current?.source==="manual"?"手动读取":current?.source==="poll"?"轮询":current?.source==="offline"?"离线":"--";
     return `<tr><td class="point-name">${stationEscape(point.displayName)}</td><td><code>${stationEscape(point.reference)}</code><small>${stationEscape(point.dataset)}</small></td><td><span class="station-value${current&&!current.ok?" error":""}">${stationEscape(value)}${unit}</span></td><td>${stationEscape(point.fc)}<br><small>${stationEscape(point.bType)}</small></td><td class="${ok?"station-fresh":"station-stale"}">${stationEscape(quality)}${!modelMismatch&&current?.error&&!current?.ok?`<br><small>错误${stationEscape(current.error)}</small>`:""}</td><td>${stationEscape(stationTime(current?.receivedAt))}</td><td>${stationEscape(source)}</td><td><button class="button small secondary" data-station-read="${stationEscape(point.id)}" ${modelMismatch?"disabled":""}>读取</button></td></tr>`;
   }).join("")||'<tr><td colspan="8" class="station-empty">没有匹配的测点</td></tr>';
 }
