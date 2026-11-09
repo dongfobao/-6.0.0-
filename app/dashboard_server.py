@@ -79,7 +79,7 @@ def build_bootstrap_payload() -> dict[str, Any]:
         "app": {
             "name": "YLDQ 6.0 远程监控系统",
             "version": "6.0.0",
-            "protocol": "Modbus V10.0",
+            "protocol": "Modbus V10.1",
             "protocolWord": f"0x{PROTOCOL_VERSION_WORD:04X}",
         },
         "devices": devices,
@@ -137,7 +137,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         }:
             device_id = load_live_devices(LIVE_DEVICES_PATH).get("selectedDeviceId")
         if path == "/api/health":
-            return self._json({"ok": True, "service": "YLDQ 6.0 monitor", "protocol": "10.0"})
+            return self._json({"ok": True, "service": "YLDQ 6.0 monitor", "protocol": "10.1"})
         if path == "/api/bootstrap":
             return self._json(build_bootstrap_payload())
         if path == "/api/devices":
@@ -222,7 +222,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     updated = update_live_device(LIVE_DEVICES_PATH, suffix, body)
                     status = service.get_device_status().get(suffix) or {}
                     if status.get("running"):
-                        service.start_all([updated], session_root=SESSIONS_DIR, config_snapshot={"protocol": "10.0"})
+                        service.start_all([updated], session_root=SESSIONS_DIR, config_snapshot={"protocol": "10.1"})
                     return self._json(updated)
                 if method == "DELETE":
                     service.stop_devices({suffix})
@@ -245,7 +245,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 disabled = [str(item.get("id")) for item in devices if not item.get("enabled", True)]
                 if disabled:
                     raise ValueError(f"禁用设备不能启动: {', '.join(disabled)}")
-                return self._json(service.start_all(devices, session_root=SESSIONS_DIR, config_snapshot={"protocol": "10.0"}))
+                return self._json(service.start_all(devices, session_root=SESSIONS_DIR, config_snapshot={"protocol": "10.1"}))
             if method == "POST" and path == "/api/acquisition/stop":
                 raw_ids = body.get("deviceIds", [])
                 if not isinstance(raw_ids, list):

@@ -42,7 +42,7 @@ def wait_ready(client: LiveModbusClient) -> None:
 def main() -> int:
     client = new_client()
     try:
-        if client.read_input_registers(100, 1)[0] != 0x0A00:
+        if client.read_input_registers(100, 1)[0] != 0x0A01:
             raise RuntimeError("协议字不匹配")
 
         logging_enabled = client.read_coils(80, 1)[0]
@@ -83,7 +83,7 @@ def main() -> int:
             time.sleep(1)
             try:
                 client = new_client()
-                if client.read_input_registers(100, 1)[0] == 0x0A00:
+                if client.read_input_registers(100, 1)[0] == 0x0A01:
                     recovered = True
                     break
             except Exception:

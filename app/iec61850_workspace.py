@@ -26,7 +26,7 @@ _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 _ANALOG = {
     "input_register.sensor_3.temperature": ("v10_ir0_temp", "AnIn1", "℃"),
-    "input_register.sensor_3.humidity": ("v10_ir2_hum", "AnIn2", "%RH"),
+    "input_register.sensor_3.humidity": ("v10_ir2_hum", "AnIn2", "g/m³"),
     "input_register.pressure": ("v10_ir4_pres", "AnIn3", "kPa"),
     "input_register.flow": ("v10_ir6_flow", "AnIn4", "L/min"),
 }

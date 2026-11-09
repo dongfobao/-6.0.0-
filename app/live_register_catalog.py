@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-PROTOCOL_VERSION_WORD = 0x0A00
+PROTOCOL_VERSION_WORD = 0x0A01
+ABSOLUTE_HUMIDITY_MAX_G_M3 = 1300
 _MAP = json.loads(Path(__file__).with_name("modbus_v10_point_map.json").read_text(encoding="utf-8"))
 _FIELDS = {(str(f["area"]), int(f["address"])): dict(f) for f in _MAP["fields"]}
 _TYPE = {"BOOL": "bool", "U16": "uint16", "U32": "uint32", "U64": "uint64", "F32": "float32"}
@@ -175,7 +176,13 @@ _HR_IDS = {
     246: "holding.flow.no_change_alarm_seconds", 260: "holding.dehumidification.cycle_interval_seconds",
     262: "holding.dehumidification.post_heating_cooling_seconds", 264: "holding.dehumidification.force_close_seconds",
     266: "holding.dehumidification.idle_position_upper", 267: "holding.dehumidification.idle_position_left",
-    268: "holding.dehumidification.idle_position_right", 280: "holding.antifreeze.source_sensor_id",
+    268: "holding.dehumidification.idle_position_right",
+    269: "holding.dehumidification.humidity_start_threshold",
+    271: "holding.dehumidification.humidity_falling_stop_threshold",
+    273: "holding.dehumidification.humidity_peak_drop_threshold",
+    275: "holding.dehumidification.threshold_confirm_interval_seconds",
+    277: "holding.dehumidification.threshold_confirm_count",
+    280: "holding.antifreeze.source_sensor_id",
     282: "holding.antifreeze.open_temperature", 284: "holding.antifreeze.close_temperature",
     286: "holding.antifreeze.close_delay_seconds", 300: "holding.sensor_fault.humidity_temperature_action",
     301: "holding.sensor_fault.pressure_action", 302: "holding.sensor_fault.flow_action",
@@ -184,13 +191,15 @@ for _address, _id in _HR_IDS.items(): _add("HR", _address, _id, "time_sync" if _
 _SENSOR_OFFSETS = ((0, "temperature_offset"), (2, "humidity_offset"), (4, "temperature_alarm_high"), (6, "temperature_alarm_low"), (8, "humidity_start_threshold"), (10, "humidity_falling_stop_threshold"), (12, "humidity_peak_drop_threshold"), (14, "humidity_alarm_high"), (16, "humidity_alarm_low"), (18, "threshold_confirm_interval_seconds"), (20, "threshold_confirm_count"), (21, "bus"), (22, "modbus_address"))
 for _channel, _base in enumerate((100, 132, 164), start=1):
     for _offset, _suffix in _SENSOR_OFFSETS:
+        if _channel < 3 and _offset in {8, 10, 12, 18, 20}: continue
+        if _channel == 3 and _offset in {8, 10, 12}: continue
         if "alarm" in _suffix and _channel != 3: continue
         _add("HR", _base + _offset, f"holding.sensor_{_channel}.{_suffix}", "config")
 for _task in range(1, 13):
     _base = 512 + (_task - 1) * 32
     for _offset, _suffix in ((0, "start_month"), (1, "start_day"), (2, "start_hour"), (3, "start_minute"), (4, "duration_seconds")):
         _add("HR", _base + _offset, f"holding.schedule.slot_{_task}.{_suffix}", "schedule")
-    for _channel in range(1, 4):
+    for _channel in range(1, 3):
         _add("HR", _base + 4 + _channel * 2, f"holding.schedule.slot_{_task}.humidity_start_threshold_{_channel}", "schedule")
         _add("HR", _base + 10 + _channel * 2, f"holding.schedule.slot_{_task}.humidity_falling_stop_threshold_{_channel}", "schedule")
         _add("HR", _base + 16 + _channel * 2, f"holding.schedule.slot_{_task}.humidity_peak_drop_threshold_{_channel}", "schedule")
@@ -231,7 +240,9 @@ for _item in REGISTER_CATALOG:
                      displayMinimum=_minimum, displayMaximum=_maximum,
                      displayStep=0.01)
     if ".modbus_address" in _id: _item["minimum"], _item["maximum"] = 0, 247
-    if any(_token in _id for _token in ("humidity_start_threshold", "humidity_falling_stop_threshold", "humidity_peak_drop_threshold", "humidity_alarm_")): _item["minimum"], _item["maximum"] = 0, 100
+    if _id.endswith(".humidity_offset"):
+        _item["minimum"], _item["maximum"] = -ABSOLUTE_HUMIDITY_MAX_G_M3, ABSOLUTE_HUMIDITY_MAX_G_M3
+    if any(_token in _id for _token in ("humidity_start_threshold", "humidity_falling_stop_threshold", "humidity_peak_drop_threshold", "humidity_alarm_")): _item["minimum"], _item["maximum"] = 0, ABSOLUTE_HUMIDITY_MAX_G_M3
     if ".threshold_confirm_interval_seconds" in _id: _item["minimum"], _item["maximum"] = 1, 86400
     if ".threshold_confirm_count" in _id: _item["minimum"], _item["maximum"] = 1, 10
     if _id.endswith(("idle_position_upper", "idle_position_left", "idle_position_right")): _item["allowedValues"] = [0, 1]
@@ -269,7 +280,7 @@ def get_register_item(point_id: str) -> dict[str, Any]:
 
 
 def get_register_catalog_summary() -> dict[str, Any]:
-    return {"protocolVersion": "10.0", "protocolWord": PROTOCOL_VERSION_WORD,
+    return {"protocolVersion": "10.1", "protocolWord": PROTOCOL_VERSION_WORD,
             "total": len(REGISTER_CATALOG), "readable": len(REGISTER_CATALOG),
             "writable": sum(1 for item in REGISTER_CATALOG if item["writable"]),
             "groups": dict(Counter(item["group"] for item in REGISTER_CATALOG)),

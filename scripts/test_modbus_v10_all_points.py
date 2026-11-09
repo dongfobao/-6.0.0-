@@ -68,7 +68,7 @@ def main() -> int:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
         protocol = request("协议字", lambda: client.read_input_registers(100, 1))[0]
-        if protocol != 0x0A00:
+        if protocol != 0x0A01:
             raise RuntimeError(f"协议字错误 0x{protocol:04X}")
 
         print(f"开始逐点读取，共{len(fields)}个物理点定义", flush=True)
@@ -229,7 +229,7 @@ def main() -> int:
             while time.monotonic() < deadline:
                 try:
                     time.sleep(1)
-                    if request("复位后协议字", lambda: client.read_input_registers(100, 1))[0] == 0x0A00:
+                    if request("复位后协议字", lambda: client.read_input_registers(100, 1))[0] == 0x0A01:
                         recovered = True
                         break
                 except Exception:

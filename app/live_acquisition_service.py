@@ -16,8 +16,12 @@ from typing import Any, Iterable
 
 from live_modbus_client import LiveModbusClient, ModbusError, append_crc
 from live_polling_commands import build_default_polling_commands, normalize_polling_commands
-from live_register_catalog import PROTOCOL_VERSION_WORD, get_register_catalog, get_register_item
-from live_session_recorder import LiveSessionRecorder
+from live_register_catalog import (
+    ABSOLUTE_HUMIDITY_MAX_G_M3,
+    PROTOCOL_VERSION_WORD, get_register_catalog, get_register_item,
+)
+from live_session_recorder import ENVIRONMENT_COLUMNS, LiveSessionRecorder
+from monitoring_projection import valve_display_state
 from modbus_v10_codec import decode_words, encode_words
 from modbus_v10_config import V10ConfigTransaction, canonicalize_config_float
 
@@ -37,6 +41,13 @@ HISTORY_RAW_MAX_POINTS = 28800
 HISTORY_ARCHIVE_MAX_POINTS = 7 * 24 * 60
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
 SCHEDULE_MAX_TASKS = 12
+
+
+def _legacy_absolute_humidity(temperature: float, relative_humidity: float) -> float:
+    if not -40 <= temperature <= 125 or not 0 <= relative_humidity <= 100:
+        return math.nan
+    saturation = 0.61121 * math.exp((18.678 - temperature / 234.5) * temperature / (257.14 + temperature))
+    return 2166.79 * saturation * relative_humidity / (100 * (temperature + 273.15))
 
 
 def _now() -> datetime:
@@ -904,23 +915,21 @@ class LiveAcquisitionService:
                             epoch = parsed.timestamp()
                             if epoch < cutoff or epoch > now.timestamp() + 60:
                                 continue
-                            columns = {
-                                "pressure": "pressure",
-                                "flow": "flow_rate",
-                                "sensor_1.temperature": "t1_temperature",
-                                "sensor_1.humidity": "t1_humidity",
-                                "sensor_2.temperature": "t2_temperature",
-                                "sensor_2.humidity": "t2_humidity",
-                                "sensor_3.temperature": "t3_temperature",
-                                "sensor_3.humidity": "t3_humidity",
-                            }
-                            for metric_key, column in columns.items():
+                            for metric_key in pending:
+                                column = ENVIRONMENT_COLUMNS[metric_key]
                                 raw_value = record.get(column)
-                                if raw_value in (None, ""):
-                                    continue
+                                legacy_channel = re.fullmatch(r"sensor_(\d)\.humidity", metric_key)
                                 try:
-                                    value = float(raw_value)
-                                except (TypeError, ValueError):
+                                    if legacy_channel and column not in record:
+                                        channel = legacy_channel.group(1)
+                                        temp = float(record[f"t{channel}_temperature"])
+                                        rh = float(record[f"t{channel}_humidity"])
+                                        value = _legacy_absolute_humidity(temp, rh)
+                                    elif raw_value in (None, ""):
+                                        continue
+                                    else:
+                                        value = float(raw_value)
+                                except (KeyError, TypeError, ValueError):
                                     continue
                                 if not math.isfinite(value):
                                     continue
@@ -1276,11 +1285,15 @@ class LiveAcquisitionService:
             float(value) for value in payload.get("humidityPeakDropThreshold", [])
         ]
         if (
-            len(start_thresholds) != 3
-            or len(falling_stop_thresholds) != 3
-            or len(peak_drop_thresholds) != 3
+            len(start_thresholds) != 2
+            or len(falling_stop_thresholds) != 2
+            or len(peak_drop_thresholds) != 2
         ):
-            raise ValueError("必须提供三路启动湿度、回落停热湿度和峰值回落幅度")
+            raise ValueError("必须提供左右两路启动湿度、回落停热湿度和峰值回落幅度")
+        if (start_thresholds[0] != start_thresholds[1] or
+            falling_stop_thresholds[0] != falling_stop_thresholds[1] or
+            peak_drop_thresholds[0] != peak_drop_thresholds[1]):
+            raise ValueError("左右湿度覆盖参数必须相同")
         for index, (start, falling_stop, peak_drop) in enumerate(
             zip(
                 start_thresholds,
@@ -1289,10 +1302,10 @@ class LiveAcquisitionService:
             ),
             start=1,
         ):
-            if not 0 <= start <= 100 or not 0 <= falling_stop <= 100:
-                raise ValueError(f"温湿度 {index} 的湿度阈值必须在 0–100 %RH")
-            if not 0 < peak_drop <= 100:
-                raise ValueError(f"温湿度 {index} 的峰值回落幅度必须在 0–100 %RH")
+            if not 0 <= start <= ABSOLUTE_HUMIDITY_MAX_G_M3 or not 0 <= falling_stop <= ABSOLUTE_HUMIDITY_MAX_G_M3:
+                raise ValueError(f"温湿度 {index} 的湿度阈值必须在 0–1300 g/m³")
+            if not 0 < peak_drop <= ABSOLUTE_HUMIDITY_MAX_G_M3:
+                raise ValueError(f"温湿度 {index} 的峰值回落幅度必须在 0–1300 g/m³")
 
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
@@ -1422,14 +1435,27 @@ class LiveAcquisitionService:
         device = deepcopy(slot["config"])
         port_key = _device_port_key(device)
         item = self._catalog_by_id["holding.system.rtc_sync_epoch"]
+        protocol_item = self._catalog_by_id["input_register.system.protocol_version"]
+        clock_item = self._catalog_by_id["input_register.system.rtc_seconds"]
+        V10ConfigTransaction._validate_value_range(item, epoch)
+        words = encode_words(epoch, str(item["dataType"]))
         client = None
         try:
             with self._port_io_lock(port_key):
                 self._close_runner_client_for_port(port_key)
                 client = self._open_manual_client(device, device_id)
-                transaction = V10ConfigTransaction(client)
-                words = transaction.stage_value(item, epoch)
-                status = transaction.commit()
+                # HR16 是即时校时命令，固件仅接受一次 FC16 写入两个字，
+                # 不会触发配置保存代次。用 IR112 的设备当前时间确认结果。
+                protocol = client.read_input_registers(int(protocol_item["address"]), int(protocol_item["wordLength"]))[0]
+                if protocol != PROTOCOL_VERSION_WORD:
+                    raise ModbusError(f"协议版本不匹配: 期望0x{PROTOCOL_VERSION_WORD:04X}，实际0x{protocol:04X}")
+                client.write_multiple_registers(int(item["address"]), words)
+                device_epoch = decode_words(
+                    client.read_input_registers(int(clock_item["address"]), int(clock_item["wordLength"])),
+                    str(clock_item["dataType"]),
+                )
+                if abs(device_epoch - epoch) > 5:
+                    raise ModbusError(f"RTC校时回读不一致: 写入 {epoch}，设备时间 {device_epoch}")
         finally:
             if client is not None:
                 client.close()
@@ -1441,7 +1467,7 @@ class LiveAcquisitionService:
             "epoch": epoch,
             "timezoneOffsetMinutes": offset,
             "words": words,
-            "transaction": {"status": asdict(status), "action": "commit"},
+            "deviceEpoch": device_epoch,
         }
 
     @_serialized_lifecycle
@@ -2248,7 +2274,7 @@ class LiveAcquisitionService:
             if status is not None and (int(status) != 0 or not bool(read_ok)):
                 invalid_measurements.update({f"{prefix}.temperature", f"{prefix}.humidity"})
         with self._lock:
-            for item_id, decoded in updates:
+            for item_id, decoded in update_values.items():
                 if item_id in invalid_measurements:
                     continue
                 slot["values"][item_id] = {"value": decoded, "ts": timestamp}
@@ -2268,11 +2294,11 @@ class LiveAcquisitionService:
         watched = {
             "input_register.output.htc1_state", "input_register.output.htc2_state",
             "input_register.output.antifreeze_state",
-            "input_register.heat_session_1.session_flags",
-            "input_register.heat_session_2.session_flags",
-            "input_register.valve_1.display_state",
-            "input_register.valve_2.display_state",
-            "input_register.valve_3.display_state",
+            "discrete_input.heat_session_1.active",
+            "discrete_input.heat_session_2.active",
+            *(f"discrete_input.valve_{channel}.{suffix}"
+              for channel in range(1, 4)
+              for suffix in ("home_not_reached", "work_not_reached", "moving", "fault", "unknown", "disabled")),
         }
         if not watched.intersection(update_values):
             return
@@ -2314,42 +2340,48 @@ class LiveAcquisitionService:
                 _emit(channel, "加热关闭", f"状态 {int(old_value)}→{int(new_value)}")
 
         for side in (1, 2):
-            flags_id = f"input_register.heat_session_{side}.session_flags"
-            if flags_id not in update_values:
+            active_id = f"discrete_input.heat_session_{side}.active"
+            if active_id not in update_values:
                 continue
-            new_flags = update_values.get(flags_id)
-            old_flags = edges.get(flags_id)
-            edges[flags_id] = new_flags
-            if old_flags is None or new_flags is None:
+            new_active = update_values.get(active_id)
+            old_active = edges.get(active_id)
+            edges[active_id] = new_active
+            if old_active is None or new_active is None:
                 continue
-            was_active = bool(int(old_flags) & 0x1)
-            is_active = bool(int(new_flags) & 0x1)
+            was_active = bool(old_active)
+            is_active = bool(new_active)
             if is_active and not was_active:
                 start = (slot["values"].get(f"input_register.heat_session_{side}.start_humidity") or {}).get("value")
-                detail = f"起始湿度 {start:.1f}%RH" if isinstance(start, (int, float)) else ""
+                detail = f"起始湿度 {start:.1f} g/m³" if isinstance(start, (int, float)) else ""
                 _emit(f"HTC{side}", "湿度会话开始", detail)
             elif was_active and not is_active:
                 peak = (slot["values"].get(f"input_register.heat_session_{side}.predicted_peak_humidity") or {}).get("value")
                 target = (slot["values"].get(f"input_register.heat_session_{side}.stop_target_humidity") or {}).get("value")
                 parts = []
                 if isinstance(peak, (int, float)):
-                    parts.append(f"预判峰值 {peak:.1f}%RH")
+                    parts.append(f"预判峰值 {peak:.1f} g/m³")
                 if isinstance(target, (int, float)):
-                    parts.append(f"关闭阈值 {target:.1f}%RH")
+                    parts.append(f"关闭阈值 {target:.1f} g/m³")
                 _emit(f"HTC{side}", "湿度会话结束", " ".join(parts))
 
         valve_state_text = {0: "禁用", 1: "原位", 2: "工作位", 3: "运动中", 4: "故障", 5: "未知"}
         for channel, valve_name in enumerate(("上阀", "左阀", "右阀"), start=1):
-            item_id = f"input_register.valve_{channel}.display_state"
-            if item_id not in update_values:
+            prefix = f"discrete_input.valve_{channel}."
+            point_ids = [prefix + suffix for suffix in
+                         ("home_not_reached", "work_not_reached", "moving", "fault", "unknown", "disabled")]
+            if not any(item_id in update_values for item_id in point_ids):
                 continue
-            new_value = update_values.get(item_id)
-            old_value = edges.get(item_id)
-            edges[item_id] = new_value
-            if old_value is None or new_value is None or int(old_value) == int(new_value):
+            values = [(slot["values"].get(item_id) or {}).get("value") for item_id in point_ids]
+            if any(value is None for value in values):
                 continue
-            old_text = valve_state_text.get(int(old_value), str(old_value))
-            new_text = valve_state_text.get(int(new_value), str(new_value))
+            new_value = valve_display_state(*(bool(value) for value in values))
+            edge_id = f"valve_{channel}.display_state"
+            old_value = edges.get(edge_id)
+            edges[edge_id] = new_value
+            if old_value is None or old_value == new_value:
+                continue
+            old_text = valve_state_text.get(old_value, str(old_value))
+            new_text = valve_state_text.get(new_value, str(new_value))
             _emit(valve_name, "阀门状态变化", f"{old_text}→{new_text}")
 
     def _save_to_recorder(self, slot: dict[str, Any], device_id: str, timestamp: str) -> None:
@@ -2361,24 +2393,14 @@ class LiveAcquisitionService:
             return
 
         analog: dict[str, float | None] = {}
-        source_keys = {
-            "pressure": "pressure",
-            "flow": "flow",
-            "sensor_1.temperature": "sensor_1.temperature",
-            "sensor_2.temperature": "sensor_2.temperature",
-            "sensor_3.temperature": "sensor_3.temperature",
-            "sensor_1.humidity": "sensor_1.humidity",
-            "sensor_2.humidity": "sensor_2.humidity",
-            "sensor_3.humidity": "sensor_3.humidity",
-        }
         with self._lock:
-            for key, source_key in source_keys.items():
-                cached = slot["values"].get(f"input_register.{source_key}") or {}
+            for key in ENVIRONMENT_COLUMNS:
+                cached = slot["values"].get(f"input_register.{key}") or {}
                 raw_value = cached.get("value")
                 cached_at = _parse_iso(cached.get("ts"))
                 if cached_at is None or abs((snapshot_ts - cached_at).total_seconds()) > 2.5:
                     raw_value = None
-                sensor_match = re.fullmatch(r"sensor_(\d)\.(temperature|humidity)", source_key)
+                sensor_match = re.fullmatch(r"sensor_(\d)\.(temperature|humidity)", key)
                 if sensor_match:
                     read_ok = slot["values"].get(f"input_register.sensor_{sensor_match.group(1)}.read_ok") or {}
                     read_ok_at = _parse_iso(read_ok.get("ts"))

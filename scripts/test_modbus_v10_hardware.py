@@ -41,8 +41,8 @@ def main() -> int:
     try:
         client.open()
         protocol = client.read_input_registers(100, 1)[0]
-        assert protocol == 0x0A00, f"协议字错误: 0x{protocol:04X}"
-        passed.append("协议字 IR100=0x0A00")
+        assert protocol == 0x0A01, f"协议字错误: 0x{protocol:04X}"
+        passed.append("协议字 IR100=0x0A01")
 
         mandatory_di = client.read_discrete_inputs(0, 20)
         mandatory_ir = client.read_input_registers(0, 8)

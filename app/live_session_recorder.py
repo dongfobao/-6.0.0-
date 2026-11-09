@@ -10,6 +10,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+ENVIRONMENT_COLUMNS = {
+    "pressure": "pressure",
+    "flow": "flow_rate",
+    **{
+        f"sensor_{channel}.{metric}": f"t{channel}_absolute_humidity_g_m3" if metric == "humidity" else f"t{channel}_temperature"
+        for channel in range(1, 4)
+        for metric in ("temperature", "humidity")
+    },
+}
+ENVIRONMENT_HEADER = ",".join(("timestamp", *ENVIRONMENT_COLUMNS.values()))
+
 
 def _slug(text: str) -> str:
     cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(text or "").strip())
@@ -166,7 +177,7 @@ class LiveSessionRecorder:
                 "raw": str(self._raw_path.relative_to(self.session_dir)),
             },
             "format": {
-                "environment": "下位机传感器 CSV：timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity",
+                "environment": ENVIRONMENT_HEADER,
                 "breath": "uses firmware breath_state and persists per second",
                 "run": "compatible with RUN_ROW_RE",
                 "traffic": "one JSON object per line, abnormal command/response records only",
@@ -189,13 +200,12 @@ class LiveSessionRecorder:
                 tmp.unlink()
 
     def _ensure_environment_file(self) -> None:
-        """创建与下位机一致的传感器 CSV，并且只写入一次表头。"""
+        """创建会话传感器 CSV，并且只写入一次表头。"""
         if self._env_path.exists() and self._env_path.stat().st_size > 0:
             return
         self._env_path.parent.mkdir(parents=True, exist_ok=True)
         self._env_path.write_text(
-            "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,"
-            "t2_temperature,t2_humidity,t3_temperature,t3_humidity\n",
+            ENVIRONMENT_HEADER + "\n",
             encoding="utf-8",
         )
 
@@ -229,17 +239,10 @@ class LiveSessionRecorder:
         if timestamp is None or snapshot is None:
             return
         self._roll_interval(timestamp)
-        values = (
-            snapshot.get("pressure"),
-            snapshot.get("flow"),
-            snapshot.get("sensor_1.temperature", snapshot.get("temperature")),
-            snapshot.get("sensor_1.humidity", snapshot.get("humidity")),
-            snapshot.get("sensor_2.temperature"),
-            snapshot.get("sensor_2.humidity"),
-            snapshot.get("sensor_3.temperature"),
-            snapshot.get("sensor_3.humidity"),
-        )
-        line = _fmt_ts(timestamp) + "," + ",".join(self._csv_number(value) for value in values) + "\n"
+        values = {f"sensor_1.{key}": snapshot.get(key) for key in ("temperature", "humidity")}
+        values.update(snapshot)
+        fields = [self._csv_number(values.get(key)) for key in ENVIRONMENT_COLUMNS]
+        line = ",".join((_fmt_ts(timestamp), *fields)) + "\n"
         self._append_line(self._env_path, line)
         if snapshot.get("flow") is not None:
             self._record_breath(

@@ -1848,7 +1848,7 @@ function update(snapshot) {
   const alarm = Boolean(snapshot?.alarms?.active);
   const sensorAlarms = sensorAlarmStates(snapshot);
   const compact = (point, suffix="") => { const n = value(point); return n === null ? "--" : `${n.toFixed(1)}${suffix}`; };
-  [["left", 0, "t1"], ["right", 1, "t2"], ["upper", 2, "t3"]].forEach(([role, index, key]) => { const channel = environmentByRole(snapshot, role, index); if (!channel) return; const node = twinDataNodes[key]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, "%RH")}`; const info = twinDataInfoNodes[key]; if (info) info.textContent = `${channel.channel || index + 1}号传感器 · ${value(channel.readOk) === 1 ? "通信正常" : "无有效数据"} · ${channel.status?.displayValue || "状态--"}`; });
+  [["left", 0, "t1"], ["right", 1, "t2"], ["upper", 2, "t3"]].forEach(([role, index, key]) => { const channel = environmentByRole(snapshot, role, index); if (!channel) return; const node = twinDataNodes[key]; if (node) node.textContent = `${compact(channel.temperature, "°C")} · ${compact(channel.humidity, " g/m³")}`; const info = twinDataInfoNodes[key]; if (info) info.textContent = `${channel.channel || index + 1}号传感器 · ${value(channel.readOk) === 1 ? "通信正常" : "无有效数据"} · ${channel.status?.displayValue || "状态--"}`; });
   if (twinDataNodes.pressure) twinDataNodes.pressure.textContent = compact(snapshot?.process?.pressure, " kPa");
   if (twinDataInfoNodes.pressure) twinDataInfoNodes.pressure.textContent = `压力状态：${snapshot?.process?.pressureStatus?.displayValue || "--"}`;
   if (twinDataNodes.flow) twinDataNodes.flow.textContent = compact(snapshot?.process?.flow, " L/min");

@@ -1,8 +1,7 @@
 ﻿"use strict";
 (() => {
   // ============================ 数据格式（与 live_session_recorder 落盘格式一致） ============================
-  // 统一传感器 CSV：timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity。
-  // 同时兼容已保存的旧版上位机 ENV 行，确保历史会话仍可分析。
+  // 按列名读取传感器 CSV，同时兼容已保存的旧版 ENV 行。
   const ENV_ROW_RE = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*,?\/\*\s*(.*?)\s*\*\/(?:\s*\|\s*(\{.*\}))?\s*$/;
   const RUN_ROW_RE = /^([AIDEWVU])\/([^\s\[]+)\s+\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(?:\([^)]*\)\s*)?(.*)$/;
 
@@ -12,9 +11,9 @@
     { key: "sensor_1.temperature", name: "温度 1", unit: "°C", color: "#fb923c" },
     { key: "sensor_2.temperature", name: "温度 2", unit: "°C", color: "#facc15" },
     { key: "sensor_3.temperature", name: "温度 3", unit: "°C", color: "#f87171" },
-    { key: "sensor_1.humidity", name: "湿度 1", unit: "%RH", color: "#38bdf8" },
-    { key: "sensor_2.humidity", name: "湿度 2", unit: "%RH", color: "#818cf8" },
-    { key: "sensor_3.humidity", name: "湿度 3", unit: "%RH", color: "#a78bfa" },
+    { key: "sensor_1.humidity", name: "绝对湿度 1", unit: "g/m³", color: "#38bdf8" },
+    { key: "sensor_2.humidity", name: "绝对湿度 2", unit: "g/m³", color: "#818cf8" },
+    { key: "sensor_3.humidity", name: "绝对湿度 3", unit: "g/m³", color: "#a78bfa" },
   ];
 
   const EVENT_TYPES = {
@@ -108,38 +107,65 @@
     if (/(^|\/)run\//i.test(path)) return "run";
     if (/^log_\d+\.csv$/i.test(name)) return "firmware";
     if (/^sensor_\d{4}_\d{2}_\d{2}\.csv$/i.test(name)) return "env";
-    if (/^log_.*\.csv$/i.test(name) || /(^|\/)data_\d+\//i.test(path)) return "env";
+    if (/^log_.*\.csv$/i.test(name) || /(^|\/)(?:data|absolute_humidity)_\d+\//i.test(path)) return "env";
     if (/^breath_.*\.csv$/i.test(name) || /(^|\/)breath_data\//i.test(path)) return "breath";
     if (/^serial_output\.log(?:\.\d+)?$/i.test(name) || /(^|\/)logs?\//i.test(path) || /\.log(?:\.\d+)?$/i.test(name)) return "firmware";
     if (/\.csv$/i.test(name)) return "run";
     return "other";
   }
 
+  function legacyAbsoluteHumidity(temperature, relativeHumidity) {
+    if (!(temperature >= -40 && temperature <= 125 && relativeHumidity >= 0 && relativeHumidity <= 100)) {
+      return undefined;
+    }
+    const saturation = 0.61121 * Math.exp((18.678 - temperature / 234.5) * temperature / (257.14 + temperature));
+    return 2166.79 * saturation * relativeHumidity / (100 * (temperature + 273.15));
+  }
+
   function parseEnvText(text) {
     const rows = [];
     const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
-    const header = lines[0].trim().toLowerCase();
-    const isUnifiedCsv = header === "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity";
-    for (const line of isUnifiedCsv ? lines.slice(1) : lines) {
-      if (isUnifiedCsv) {
+    const header = lines[0].trim().toLowerCase().split(",").map(value => value.trim());
+    const columns = {
+      pressure: "pressure", pressure_kpa: "pressure",
+      flow_rate: "flow", flow_rate_l_min: "flow",
+    };
+    for (const channel of [1, 2, 3]) {
+      columns[`t${channel}_temperature`] = columns[`t${channel}_temperature_c`] = `sensor_${channel}.temperature`;
+      columns[`t${channel}_humidity`] = `sensor_${channel}.legacy_relative_humidity`;
+      columns[`t${channel}_absolute_humidity_g_m3`] = `sensor_${channel}.humidity`;
+    }
+    const keys = header.map(column => columns[column]);
+    const isSensorCsv = header[0] === "timestamp" && keys.slice(1).some(Boolean);
+    for (const line of isSensorCsv ? lines.slice(1) : lines) {
+      if (isSensorCsv) {
         const values = line.trim().split(",");
-        if (values.length !== 9) continue;
+        if (values.length !== header.length) continue;
         const ts = parseTs(values[0]);
-        const numbers = values.slice(1).map(Number);
-        if (!Number.isFinite(ts) || numbers.some((value) => !Number.isFinite(value))) continue;
-        rows.push({
-          ts, pressure: numbers[0], flow: numbers[1],
-          "sensor_1.temperature": numbers[2], "sensor_1.humidity": numbers[3],
-          "sensor_2.temperature": numbers[4], "sensor_2.humidity": numbers[5],
-          "sensor_3.temperature": numbers[6], "sensor_3.humidity": numbers[7],
+        if (!Number.isFinite(ts)) continue;
+        const row = { ts };
+        keys.forEach((key, index) => {
+          if (!key || !values[index].trim()) return;
+          const value = Number(values[index]);
+          if (Number.isFinite(value)) row[key] = value;
         });
+        for (const channel of [1, 2, 3]) {
+          const prefix = `sensor_${channel}`;
+          if (!header.includes(`t${channel}_absolute_humidity_g_m3`)) {
+            row[`${prefix}.humidity`] = legacyAbsoluteHumidity(
+              row[`${prefix}.temperature`], row[`${prefix}.legacy_relative_humidity`]
+            );
+          }
+          delete row[`${prefix}.legacy_relative_humidity`];
+        }
+        rows.push(row);
         continue;
       }
       const m = ENV_ROW_RE.exec(line.trim());
       if (!m) continue;
       const ts = parseTs(m[1]);
       if (!Number.isFinite(ts)) continue;
-      const values = m[2].split(",").map((value) => Number(value.trim()));
+      const values = m[2].split(",").map((value) => value.trim() ? Number(value) : NaN);
       if (values.length < 4 || values.slice(0, 4).some((value) => !Number.isFinite(value))) continue;
       const row = {
         ts,
@@ -158,6 +184,12 @@
       });
       if (m[3]) {
         try { Object.assign(row, JSON.parse(m[3])); } catch (_) { /* 损坏的扩展字段不影响基础曲线 */ }
+      }
+      for (const channel of [1, 2, 3]) {
+        const prefix = `sensor_${channel}`;
+        row[`${prefix}.humidity`] = legacyAbsoluteHumidity(
+          row[`${prefix}.temperature`], row[`${prefix}.humidity`]
+        );
       }
       rows.push(row);
     }
@@ -246,6 +278,7 @@
       }
     }
     source.envRows.sort((a, b) => a.ts - b.ts);
+    ui.activeMetrics = new Set([1, 2, 3].map(channel => `sensor_${channel}.humidity`));
     source.breathRows.sort((a, b) => a.ts - b.ts);
     source.runRows.sort((a, b) => a.ts - b.ts);
     source.firmwareRows.sort((a, b) => (Number.isFinite(a.ts) ? a.ts : Infinity) - (Number.isFinite(b.ts) ? b.ts : Infinity));
@@ -312,7 +345,7 @@
     return { start, end: end + 1000 };
   }
 
-  // ============================ 关键节点提取（V10.0 当前下位机日志语义） ============================
+  // ============================ 关键节点提取（下位机日志） ============================
   function eventFromRow(row, type, title) {
     return {
       type,

@@ -48,6 +48,12 @@ def _synthetic(point_id: str, name: str, value: Any, updated_at: Any = None,
                           "enumValues": enum_values or {}})
 
 
+def valve_display_state(home_missing: bool, work_missing: bool, moving: bool,
+                        fault: bool, unknown: bool, disabled: bool) -> int:
+    """按监控页面的优先级合成三阀显示状态。"""
+    return 0 if disabled else 4 if fault else 3 if moving else 1 if not home_missing else 2 if not work_missing else 5
+
+
 def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] | None = None) -> dict[str, Any]:
     items = [item for item in snapshot.get("metrics", []) if isinstance(item, dict)]
     by_id = {str(item.get("id")): item for item in items if item.get("id")}
@@ -80,7 +86,7 @@ def build_monitoring_snapshot(snapshot: dict[str, Any], device: dict[str, Any] |
         fault = bool((_take(by_id, f"{di_prefix}.fault").get("value")))
         unknown = bool((_take(by_id, f"{di_prefix}.unknown").get("value")))
         disabled = bool((_take(by_id, f"{di_prefix}.disabled").get("value")))
-        display_state = 0 if disabled else 4 if fault else 3 if moving else 1 if not home_missing else 2 if not work_missing else 5
+        display_state = valve_display_state(home_missing, work_missing, moving, fault, unknown, disabled)
         actuator_state = 3 if disabled else 2 if fault else 1 if moving else 0
         position = 0 if not home_missing else 1 if not work_missing else 2
         updated_at = _take(by_id, f"{di_prefix}.home_not_reached").get("updatedAt")

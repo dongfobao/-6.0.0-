@@ -15,9 +15,20 @@ class LiveRegisterCatalogTests(unittest.TestCase):
 
     def test_v10_catalog_is_unique_and_complete(self) -> None:
         summary = get_register_catalog_summary()
-        self.assertEqual(PROTOCOL_VERSION_WORD, 0x0A00)
-        self.assertEqual(summary["protocolVersion"], "10.0")
-        self.assertEqual(summary["areas"], {"discrete_input": 68, "input_register": 72, "coil": 71, "holding_register": 225})
+        self.assertEqual(PROTOCOL_VERSION_WORD, 0x0A01)
+        self.assertEqual(summary["protocolVersion"], "10.1")
+        self.assertEqual(summary["areas"], {"discrete_input": 68, "input_register": 72, "coil": 71, "holding_register": 181})
+        for address, suffix in ((269, "humidity_start_threshold"),
+                                (271, "humidity_falling_stop_threshold"),
+                                (273, "humidity_peak_drop_threshold"),
+                                (275, "threshold_confirm_interval_seconds"),
+                                (277, "threshold_confirm_count")):
+            self.assertEqual(self.by_id[f"holding.dehumidification.{suffix}"]["address"], address)
+        self.assertNotIn("holding.sensor_1.humidity_start_threshold", self.by_id)
+        self.assertNotIn("holding.sensor_2.threshold_confirm_count", self.by_id)
+        for suffix in ("humidity_start_threshold", "humidity_falling_stop_threshold",
+                       "humidity_peak_drop_threshold"):
+            self.assertNotIn(f"holding.sensor_3.{suffix}", self.by_id)
         self.assertEqual(len(self.catalog), len(self.by_id))
         self.assertTrue(all(item["sourceOfTruth"] == "station-modbus-v10" for item in self.catalog))
 
@@ -49,7 +60,10 @@ class LiveRegisterCatalogTests(unittest.TestCase):
             base = 512 + (task - 1) * 32
             self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.enabled"]["address"], 96 + (task - 1) * 2)
             self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.start_month"]["address"], base)
-            self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.humidity_peak_drop_threshold_3"]["addressEnd"], base + 23)
+            self.assertEqual(self.by_id[f"holding.schedule.slot_{task}.humidity_peak_drop_threshold_2"]["addressEnd"], base + 21)
+            for suffix in ("humidity_start_threshold", "humidity_falling_stop_threshold",
+                           "humidity_peak_drop_threshold"):
+                self.assertNotIn(f"holding.schedule.slot_{task}.{suffix}_3", self.by_id)
 
     def test_business_duration_units_keep_seconds_on_wire(self) -> None:
         expected = {

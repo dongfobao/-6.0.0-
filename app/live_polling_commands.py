@@ -30,7 +30,7 @@ _DEFAULT_BLOCKS = (
     ("slow", 3, "holding.sensor_3.temperature_offset", 23, False, 500, "T3参数"),
     ("slow", 3, "holding.pressure.offset", 6, False, 500, "压力参数"),
     ("slow", 3, "holding.flow.offset", 8, False, 500, "流量参数"),
-    ("slow", 3, "holding.dehumidification.cycle_interval_seconds", 9, False, 500, "除湿参数"),
+    ("slow", 3, "holding.dehumidification.cycle_interval_seconds", 18, False, 500, "除湿参数"),
     ("slow", 3, "holding.antifreeze.source_sensor_id", 8, False, 500, "防冻参数"),
     ("slow", 3, "holding.sensor_fault.humidity_temperature_action", 3, False, 500, "故障策略"),
     *(("slow", 3, f"holding.schedule.slot_{task}.start_month", 24, False, 500, f"任务{task}数值参数") for task in range(1, 13)),

@@ -12,7 +12,7 @@ from modbus_v10_config import ConfigTransactionError, V10ConfigTransaction
 
 class FakeClient:
     def __init__(self) -> None:
-        self.protocol = 0x0A00
+        self.protocol = 0x0A01
         self.generation = 7
         self.error = 0
         self.busy = False

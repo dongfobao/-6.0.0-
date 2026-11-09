@@ -9,10 +9,55 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from live_session_recorder import LiveSessionRecorder
+from live_acquisition_service import LiveAcquisitionService
 from session_archive import _summarize_events, list_sessions
 
 
 class LiveSessionRecorderTests(unittest.TestCase):
+    def test_valve_and_humidity_events_follow_polled_discrete_inputs(self) -> None:
+        class EventRecorder:
+            def __init__(self) -> None:
+                self.events = []
+
+            def record_heat_event(self, timestamp, channel, event, detail) -> None:
+                self.events.append((channel, event, detail))
+
+        service = LiveAcquisitionService()
+        recorder = EventRecorder()
+        slot = service._empty_device_slot({"id": "dev-1", "name": "设备A"})
+        slot["recorder"] = recorder
+        timestamp = "2026-10-14 02:30:00"
+
+        def poll(updates) -> None:
+            slot["values"].update({key: {"value": value, "ts": timestamp} for key, value in updates.items()})
+            service._record_heat_events(slot, timestamp, updates)
+
+        prefix = "discrete_input.valve_1."
+        initial = {
+            prefix + "home_not_reached": False,
+            prefix + "work_not_reached": True,
+            prefix + "moving": False,
+            prefix + "fault": False,
+            prefix + "unknown": False,
+            prefix + "disabled": False,
+            "discrete_input.heat_session_1.active": False,
+        }
+        poll(initial)
+        self.assertEqual(recorder.events, [])
+        poll({prefix + "moving": True})
+        poll({prefix + "moving": True})
+        poll({prefix + "moving": False, prefix + "home_not_reached": True,
+              prefix + "work_not_reached": False,
+              "discrete_input.heat_session_1.active": True})
+        poll({"discrete_input.heat_session_1.active": False})
+
+        self.assertEqual(recorder.events, [
+            ("上阀", "阀门状态变化", "原位→运动中"),
+            ("HTC1", "湿度会话开始", ""),
+            ("上阀", "阀门状态变化", "运动中→工作位"),
+            ("HTC1", "湿度会话结束", ""),
+        ])
+
     def test_same_second_snapshots_are_coalesced_and_keep_latest_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             recorder = LiveSessionRecorder(Path(tmp_dir), {"id": "dev-1", "name": "A"})
@@ -33,7 +78,7 @@ class LiveSessionRecorderTests(unittest.TestCase):
             )
             recorder.record_environment_snapshot(
                 datetime(2026, 5, 22, 12, 0, 0),
-                {"pressure": 1.2, "temperature": 25.0, "flow": -1.5, "humidity": 44.0},
+                {"pressure": 1.2, "temperature": 25.0, "flow": -1.5, "humidity": 8.66},
             )
             recorder.record_log("I", datetime(2026, 5, 22, 12, 0, 1), "session started")
             recorder.finalize()
@@ -45,8 +90,8 @@ class LiveSessionRecorderTests(unittest.TestCase):
             self.assertFalse(recorder.raw_path.exists())
             self.assertEqual(recorder.env_path.name, "sensor_2026_05_22.csv")
             self.assertIn(
-                "timestamp,pressure,flow_rate,t1_temperature,t1_humidity,t2_temperature,t2_humidity,t3_temperature,t3_humidity\n"
-                "2026-05-22 12:00:00,1.20,-1.50,25.00,44.00,,,,\n",
+                "timestamp,pressure,flow_rate,t1_temperature,t1_absolute_humidity_g_m3,t2_temperature,t2_absolute_humidity_g_m3,t3_temperature,t3_absolute_humidity_g_m3\n"
+                "2026-05-22 12:00:00,1.20,-1.50,25.00,8.66,,,,\n",
                 recorder.env_path.read_text(encoding="utf-8"),
             )
             self.assertIn("2026-05-22 12:00:00,0,-1.50,0.0,1", recorder.breath_path.read_text(encoding="utf-8"))

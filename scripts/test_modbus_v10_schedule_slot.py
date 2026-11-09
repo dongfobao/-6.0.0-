@@ -20,7 +20,7 @@ def main() -> int:
     try:
         protocol = client.read_input_registers(100, 1)[0]
         print(f"协议字=0x{protocol:04X}")
-        if protocol != 0x0A00:
+        if protocol != 0x0A01:
             raise RuntimeError("协议字不匹配")
 
         base = 864
